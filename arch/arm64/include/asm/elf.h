@@ -175,10 +175,16 @@ extern int arch_setup_additional_pages(struct linux_binprm *bprm,
 
 #define COMPAT_ELF_ET_DYN_BASE		(2 * TASK_SIZE_32 / 3)
 
+#ifndef USE_AARCH64_GREG
 /* AArch32 registers. */
 #define COMPAT_ELF_NGREG		18
 typedef unsigned int			compat_elf_greg_t;
 typedef compat_elf_greg_t		compat_elf_gregset_t[COMPAT_ELF_NGREG];
+#else /* AArch64 registers for AARCH64/ILP32 */
+#define COMPAT_ELF_NGREG	ELF_NGREG
+#define compat_elf_greg_t	elf_greg_t
+#define compat_elf_gregset_t	elf_gregset_t
+#endif
 
 /* AArch32 EABI. */
 #define EF_ARM_EABI_MASK		0xff000000
