@@ -134,15 +134,17 @@ static int c_show(struct seq_file *m, void *v)
 		 */
 		seq_puts(m, "Features\t:");
 		if (compat) {
-#ifdef CONFIG_COMPAT
-			for (j = 0; compat_hwcap_str[j]; j++)
-				if (compat_elf_hwcap & (1 << j))
-					seq_printf(m, " %s", compat_hwcap_str[j]);
+#ifdef CONFIG_AARCH32_EL0
+			if (personality(current->personality) == PER_LINUX32) {
+				for (j = 0; compat_hwcap_str[j]; j++)
+					if (compat_elf_hwcap & (1 << j))
+						seq_printf(m, " %s", compat_hwcap_str[j]);
 
-			for (j = 0; compat_hwcap2_str[j]; j++)
-				if (compat_elf_hwcap2 & (1 << j))
-					seq_printf(m, " %s", compat_hwcap2_str[j]);
-#endif /* CONFIG_COMPAT */
+				for (j = 0; compat_hwcap2_str[j]; j++)
+					if (compat_elf_hwcap2 & (1 << j))
+						seq_printf(m, " %s", compat_hwcap2_str[j]);
+			}
+#endif /* CONFIG_AARCH32_EL0 */
 		} else {
 			for (j = 0; hwcap_str[j]; j++)
 				if (elf_hwcap & (1 << j))
