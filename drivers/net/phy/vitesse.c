@@ -22,6 +22,7 @@
 #define MII_VSC82X4_EXT_PAGE_16E	0x10
 #define MII_VSC82X4_EXT_PAGE_17E	0x11
 #define MII_VSC82X4_EXT_PAGE_18E	0x12
+#define MII_VSC82X4_EXT_PAGE_19E	0x13
 
 /* Vitesse Extended Control Register 1 */
 #define MII_VSC8244_EXT_CON1           0x17
@@ -58,6 +59,15 @@
 
 #define MII_VSC8221_AUXCONSTAT_INIT	0x0004 /* need to set this bit? */
 #define MII_VSC8221_AUXCONSTAT_RESERVED	0x0004
+
+/* Vitesse VSC8574 control register */
+#define MII_VSC8574_MAC_SERDES_CON     0x10
+#define MII_VSC8574_MAC_SERDES_ANEG    0x80
+
+/* Vitesse VSC8574 gerenal purpose register 18 */
+#define MII_VSC8574_18G_SGMII          0x80f0
+#define MII_VSC8574_18G_QSGMII         0x80e0
+#define MII_VSC8574_18G_CMDSTAT        0x8000
 
 /* Vitesse Extended Page Access Register */
 #define MII_VSC82X4_EXT_PAGE_ACCESS	0x1f
@@ -257,6 +267,71 @@ static int vsc82x4_config_aneg(struct phy_device *phydev)
 	return genphy_config_aneg(phydev);
 }
 
+static int vsc8574_config_init(struct phy_device *phydev)
+{
+	int ret;
+	u32 val;
+
+	/* configure register 19G for MAC */
+	ret = phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, 0x10);
+	if (ret < 0)
+		return ret;
+
+	val = phy_read(phydev, MII_VSC82X4_EXT_PAGE_19E);
+	if (val < 0)
+		return val;
+	if (phydev->interface == PHY_INTERFACE_MODE_QSGMII) {
+		/* set bit 15:14 to '01' for QSGMII mode */
+		val = (val & 0x3fff) | (1 << 14);
+		ret = phy_write(phydev, MII_VSC82X4_EXT_PAGE_19E, val);
+		if (ret < 0)
+			return ret;
+		/* Enable 4 ports MAC QSGMII */
+		ret = phy_write(phydev, MII_VSC82X4_EXT_PAGE_18E,
+				MII_VSC8574_18G_QSGMII);
+		if (ret < 0)
+			return ret;
+	} else {
+		/* set bit 15:14 to '00' for SGMII mode */
+		val = val & 0x3fff;
+		ret = phy_write(phydev, MII_VSC82X4_EXT_PAGE_19E, val);
+		if (ret < 0)
+			return ret;
+		/* Enable 4 ports MAC SGMII */
+		ret = phy_write(phydev, MII_VSC82X4_EXT_PAGE_18E,
+				MII_VSC8574_18G_SGMII);
+		if (ret < 0)
+			return ret;
+	}
+	val = phy_read(phydev, MII_VSC82X4_EXT_PAGE_18E);
+	if (val < 0)
+		return val;
+	/* When bit 15 is cleared the command has completed */
+	while (val & MII_VSC8574_18G_CMDSTAT) {
+		val = phy_read(phydev, MII_VSC82X4_EXT_PAGE_18E);
+		if (val < 0)
+			return val;
+	}
+
+	/* Enable Serdes Auto-negotiation */
+	ret = phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, 0x03);
+	if (ret < 0)
+		return ret;
+	val = phy_read(phydev, MII_VSC8574_MAC_SERDES_CON);
+	if (val < 0)
+		return val;
+	val = val | MII_VSC8574_MAC_SERDES_ANEG;
+	ret = phy_write(phydev, MII_VSC8574_MAC_SERDES_CON, val);
+	if (ret < 0)
+		return ret;
+
+	ret = phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, 0);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
 /* Vitesse 82xx */
 static struct phy_driver vsc82xx_driver[] = {
 {
@@ -265,7 +340,7 @@ static struct phy_driver vsc82xx_driver[] = {
 	.phy_id_mask    = 0x000ffff0,
 	.features       = PHY_GBIT_FEATURES,
 	.flags          = PHY_HAS_INTERRUPT,
-	.config_init    = &vsc824x_config_init,
+	.config_init    = &vsc8574_config_init,
 	.config_aneg    = &vsc82x4_config_aneg,
 	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
