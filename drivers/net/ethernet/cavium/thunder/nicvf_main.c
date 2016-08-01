@@ -219,7 +219,7 @@ static void  nicvf_handle_mbx_intr(struct nicvf *nic)
 	case NIC_MBOX_MSG_NACK:
 		nic->pf_nacked = true;
 		break;
-	case NIC_MBOX_MSG_RSS_SIZE:
+	case NIC_MBOX_MSG_RSS_SIZE | NIC_MBOX_MSG_RES_BIT:
 		nic->rss_info.rss_size = mbx.rss_size.ind_tbl_size;
 		nic->pf_acked = true;
 		break;
@@ -246,7 +246,7 @@ static void  nicvf_handle_mbx_intr(struct nicvf *nic)
 			netif_tx_stop_all_queues(nic->netdev);
 		}
 		break;
-	case NIC_MBOX_MSG_ALLOC_SQS:
+	case NIC_MBOX_MSG_ALLOC_SQS | NIC_MBOX_MSG_RES_BIT:
 		nic->sqs_count = mbx.sqs_alloc.qs_count;
 		nic->pf_acked = true;
 		break;
