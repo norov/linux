@@ -24,6 +24,7 @@ TARGETS += sigaltstack
 TARGETS += size
 TARGETS += static_keys
 TARGETS += sysctl
+TARGETS += task_isolation
 ifneq (1, $(quicktest))
 TARGETS += timers
 endif
