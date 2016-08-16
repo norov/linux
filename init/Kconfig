@@ -823,6 +823,16 @@ config TASK_ISOLATION
 	 You should say "N" unless you are intending to run a
 	 high-performance userspace driver or similar task.
 
+config TASK_ISOLATION_ALL
+	bool "Provide task isolation on all CPUs by default (except CPU 0)"
+	depends on TASK_ISOLATION
+	help
+	 If the user doesn't pass the task_isolation boot option to
+	 define the range of task isolation CPUs, consider that all
+	 CPUs in the system are task isolation by default.
+	 Note the boot CPU will still be kept outside the range to
+	 handle timekeeping duty, etc.
+
 config BUILD_BIN2C
 	bool
 	default n

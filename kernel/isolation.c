@@ -43,8 +43,14 @@ int __init task_isolation_init(void)
 {
 	/* For offstack cpumask, ensure we allocate an empty cpumask early. */
 	if (!saw_boot_arg) {
+#ifdef CONFIG_TASK_ISOLATION_ALL
+		alloc_cpumask_var(&task_isolation_map, GFP_KERNEL);
+		cpumask_copy(task_isolation_map, cpu_possible_mask);
+		cpumask_clear_cpu(smp_processor_id(), task_isolation_map);
+#else
 		zalloc_cpumask_var(&task_isolation_map, GFP_KERNEL);
 		return 0;
+#endif
 	}
 
 	/*
