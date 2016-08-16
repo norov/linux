@@ -21,6 +21,7 @@
 #include <linux/context_tracking.h>
 #include <linux/user-return-notifier.h>
 #include <linux/uprobes.h>
+#include <linux/isolation.h>
 
 #include <asm/desc.h>
 #include <asm/traps.h>
@@ -84,6 +85,16 @@ static long syscall_trace_enter(struct pt_regs *regs)
 	if (emulated)
 		return -1L;
 
+	/*
+	 * In task isolation mode, we may prevent the syscall from
+	 * running, and if so we also deliver a signal to the process.
+	 */
+	if (work & _TIF_TASK_ISOLATION) {
+		if (task_isolation_syscall(regs->orig_ax) == -1)
+			return -1L;
+		work &= ~_TIF_TASK_ISOLATION;
+	}
+
 #ifdef CONFIG_SECCOMP
 	/*
 	 * Do seccomp after ptrace, to catch any tracer changes.
@@ -129,7 +140,7 @@ static long syscall_trace_enter(struct pt_regs *regs)
 
 #define EXIT_TO_USERMODE_LOOP_FLAGS				\
 	(_TIF_SIGPENDING | _TIF_NOTIFY_RESUME | _TIF_UPROBE |	\
-	 _TIF_NEED_RESCHED | _TIF_USER_RETURN_NOTIFY)
+	 _TIF_NEED_RESCHED | _TIF_USER_RETURN_NOTIFY | _TIF_TASK_ISOLATION)
 
 static void exit_to_usermode_loop(struct pt_regs *regs, u32 cached_flags)
 {
@@ -163,10 +174,18 @@ static void exit_to_usermode_loop(struct pt_regs *regs, u32 cached_flags)
 		if (cached_flags & _TIF_USER_RETURN_NOTIFY)
 			fire_user_return_notifiers();
 
+		if (cached_flags & _TIF_TASK_ISOLATION)
+			task_isolation_enter();
+
 		/* Disable IRQs and retry */
 		local_irq_disable();
 
 		cached_flags = READ_ONCE(current_thread_info()->flags);
+
+		/* Clear task isolation from cached_flags manually. */
+		if ((cached_flags & _TIF_TASK_ISOLATION) &&
+		    task_isolation_ready())
+			cached_flags &= ~_TIF_TASK_ISOLATION;
 
 		if (!(cached_flags & EXIT_TO_USERMODE_LOOP_FLAGS))
 			break;

@@ -36,6 +36,7 @@
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/io.h>
+#include <linux/isolation.h>
 
 #ifdef CONFIG_EISA
 #include <linux/ioport.h>
@@ -444,6 +445,8 @@ dotraplinkage void do_bounds(struct pt_regs *regs, long error_code)
 	case 2:	/* Bound directory has invalid entry. */
 		if (mpx_handle_bd_fault())
 			goto exit_trap;
+		/* No signal was generated, but notify task-isolation tasks. */
+		task_isolation_quiet_exception("bounds check");
 		break; /* Success, it was handled */
 	case 1: /* Bound violation. */
 		info = mpx_generate_siginfo(regs);
