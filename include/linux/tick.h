@@ -235,6 +235,8 @@ static inline void tick_dep_clear_signal(struct signal_struct *signal,
 
 extern void tick_nohz_full_kick_cpu(int cpu);
 extern void __tick_nohz_task_switch(void);
+extern void tick_nohz_full_add_cpus(const struct cpumask *mask);
+extern bool can_stop_my_full_tick(void);
 #else
 static inline int housekeeping_any_cpu(void)
 {

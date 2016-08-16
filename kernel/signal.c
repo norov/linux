@@ -34,6 +34,7 @@
 #include <linux/compat.h>
 #include <linux/cn_proc.h>
 #include <linux/compiler.h>
+#include <linux/isolation.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -2212,6 +2213,13 @@ relock:
 
 		/* Trace actually delivered signals. */
 		trace_signal_deliver(signr, &ksig->info, ka);
+
+		/*
+		 * Disable task isolation when delivering a signal.
+		 * The isolation model requires users to reset task
+		 * isolation from the signal handler if desired.
+		 */
+		task_isolation_set_flags(current, 0);
 
 		if (ka->sa.sa_handler == SIG_IGN) /* Do nothing.  */
 			continue;

@@ -1,0 +1,60 @@
+/*
+ * Task isolation related global functions
+ */
+#ifndef _LINUX_ISOLATION_H
+#define _LINUX_ISOLATION_H
+
+#include <linux/tick.h>
+#include <linux/prctl.h>
+
+#ifdef CONFIG_TASK_ISOLATION
+
+/* cpus that are configured to support task isolation */
+extern cpumask_var_t task_isolation_map;
+
+extern int task_isolation_init(void);
+
+static inline bool task_isolation_possible(int cpu)
+{
+	return task_isolation_map != NULL &&
+		cpumask_test_cpu(cpu, task_isolation_map);
+}
+
+extern int task_isolation_set(unsigned int flags);
+
+extern bool task_isolation_ready(void);
+extern void task_isolation_enter(void);
+
+static inline void task_isolation_set_flags(struct task_struct *p,
+					    unsigned int flags)
+{
+	p->task_isolation_flags = flags;
+
+	if (flags & PR_TASK_ISOLATION_ENABLE)
+		set_tsk_thread_flag(p, TIF_TASK_ISOLATION);
+	else
+		clear_tsk_thread_flag(p, TIF_TASK_ISOLATION);
+}
+
+extern int task_isolation_syscall(int nr);
+
+/* Report on exceptions that don't cause a signal for the user process. */
+extern void _task_isolation_quiet_exception(const char *fmt, ...);
+#define task_isolation_quiet_exception(fmt, ...)			\
+	do {								\
+		if (current_thread_info()->flags & _TIF_TASK_ISOLATION) \
+			_task_isolation_quiet_exception(fmt, ## __VA_ARGS__); \
+	} while (0)
+
+#else
+static inline void task_isolation_init(void) { }
+static inline bool task_isolation_possible(int cpu) { return false; }
+static inline bool task_isolation_ready(void) { return true; }
+static inline void task_isolation_enter(void) { }
+extern inline void task_isolation_set_flags(struct task_struct *p,
+					    unsigned int flags) { }
+static inline int task_isolation_syscall(int nr) { return 0; }
+static inline void task_isolation_quiet_exception(const char *fmt, ...) { }
+#endif
+
+#endif

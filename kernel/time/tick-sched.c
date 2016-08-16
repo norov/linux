@@ -23,6 +23,7 @@
 #include <linux/irq_work.h>
 #include <linux/posix-timers.h>
 #include <linux/context_tracking.h>
+#include <linux/isolation.h>
 
 #include <asm/irq_regs.h>
 
@@ -206,6 +207,12 @@ static bool can_stop_full_tick(int cpu, struct tick_sched *ts)
 		return false;
 
 	return true;
+}
+
+bool can_stop_my_full_tick(void)
+{
+	return can_stop_full_tick(smp_processor_id(),
+				  this_cpu_ptr(&tick_cpu_sched));
 }
 
 static void nohz_full_kick_func(struct irq_work *work)
@@ -410,30 +417,34 @@ static int tick_nohz_cpu_down_callback(struct notifier_block *nfb,
 	return NOTIFY_OK;
 }
 
-static int tick_nohz_init_all(void)
+void tick_nohz_full_add_cpus(const struct cpumask *mask)
 {
-	int err = -1;
+	if (!cpumask_weight(mask))
+		return;
 
-#ifdef CONFIG_NO_HZ_FULL_ALL
-	if (!alloc_cpumask_var(&tick_nohz_full_mask, GFP_KERNEL)) {
+	if (tick_nohz_full_mask == NULL &&
+	    !zalloc_cpumask_var(&tick_nohz_full_mask, GFP_KERNEL)) {
 		WARN(1, "NO_HZ: Can't allocate full dynticks cpumask\n");
-		return err;
+		return;
 	}
-	err = 0;
-	cpumask_setall(tick_nohz_full_mask);
+
+	cpumask_or(tick_nohz_full_mask, tick_nohz_full_mask, mask);
 	tick_nohz_full_running = true;
-#endif
-	return err;
 }
 
 void __init tick_nohz_init(void)
 {
 	int cpu;
 
-	if (!tick_nohz_full_running) {
-		if (tick_nohz_init_all() < 0)
-			return;
-	}
+	task_isolation_init();
+
+#ifdef CONFIG_NO_HZ_FULL_ALL
+	if (!tick_nohz_full_running)
+		tick_nohz_full_add_cpus(cpu_possible_mask);
+#endif
+
+	if (!tick_nohz_full_running)
+		return;
 
 	if (!alloc_cpumask_var(&housekeeping_mask, GFP_KERNEL)) {
 		WARN(1, "NO_HZ: Can't allocate not-full dynticks cpumask\n");
