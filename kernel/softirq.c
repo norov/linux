@@ -26,6 +26,7 @@
 #include <linux/smpboot.h>
 #include <linux/tick.h>
 #include <linux/irq.h>
+#include <linux/isolation.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/irq.h>
@@ -330,6 +331,37 @@ asmlinkage __visible void do_softirq(void)
 	local_irq_restore(flags);
 }
 
+/* Determine whether this IRQ is something task isolation cares about. */
+static void task_isolation_irq(void)
+{
+#ifdef CONFIG_TASK_ISOLATION
+	struct pt_regs *regs;
+
+	if (!context_tracking_cpu_is_enabled())
+		return;
+
+	/*
+	 * We have not yet called __irq_enter() and so we haven't
+	 * adjusted the hardirq count.  This test will allow us to
+	 * avoid false positives for nested IRQs.
+	 */
+	if (in_interrupt())
+		return;
+
+	/*
+	 * If we were already in the kernel, not from an irq but from
+	 * a syscall or synchronous exception/fault, this test should
+	 * avoid a false positive as well.  Note that this requires
+	 * architecture support for calling set_irq_regs() prior to
+	 * calling irq_enter(), and if it's not done consistently, we
+	 * will not consistently avoid false positives here.
+	 */
+	regs = get_irq_regs();
+	if (regs && user_mode(regs))
+		task_isolation_debug(smp_processor_id(), "irq");
+#endif
+}
+
 /*
  * Enter an interrupt context.
  */
@@ -346,6 +378,7 @@ void irq_enter(void)
 		_local_bh_enable();
 	}
 
+	task_isolation_irq();
 	__irq_enter();
 }
 

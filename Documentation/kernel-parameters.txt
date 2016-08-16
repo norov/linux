@@ -4028,6 +4028,14 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			also sets up nohz_full and isolcpus mode for the
 			listed set of cpus.
 
+	task_isolation_debug	[KNL]
+			In kernels built with CONFIG_TASK_ISOLATION
+			and booted in task_isolation= mode, this
+			setting will generate console backtraces when
+			the kernel is about to interrupt a task that
+			has requested PR_TASK_ISOLATION_ENABLE and is
+			running on a task_isolation core.
+
 	tcpmhash_entries= [KNL,NET]
 			Set the number of tcp_metrics_hash slots.
 			Default value is 8192 or 16384 depending on total
