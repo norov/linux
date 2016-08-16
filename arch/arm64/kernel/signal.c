@@ -25,6 +25,7 @@
 #include <linux/uaccess.h>
 #include <linux/tracehook.h>
 #include <linux/ratelimit.h>
+#include <linux/isolation.h>
 
 #include <asm/debug-monitors.h>
 #include <asm/elf.h>
@@ -454,9 +455,18 @@ asmlinkage void do_notify_resume(struct pt_regs *regs,
 
 			if (thread_flags & _TIF_FOREIGN_FPSTATE)
 				fpsimd_restore_current_state();
+
+			if (thread_flags & _TIF_TASK_ISOLATION)
+				task_isolation_enter();
 		}
 
 		local_irq_disable();
 		thread_flags = READ_ONCE(current_thread_info()->flags);
+
+		/* Clear task isolation from cached_flags manually. */
+		if ((thread_flags & _TIF_TASK_ISOLATION) &&
+		    task_isolation_ready())
+			thread_flags &= ~_TIF_TASK_ISOLATION;
+
 	} while (thread_flags & _TIF_WORK_MASK);
 }

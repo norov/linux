@@ -29,6 +29,7 @@
 #include <linux/sched.h>
 #include <linux/highmem.h>
 #include <linux/perf_event.h>
+#include <linux/isolation.h>
 #include <linux/preempt.h>
 
 #include <asm/bug.h>
@@ -393,8 +394,13 @@ retry:
 	 * Handle the "normal" case first - VM_FAULT_MAJOR
 	 */
 	if (likely(!(fault & (VM_FAULT_ERROR | VM_FAULT_BADMAP |
-			      VM_FAULT_BADACCESS))))
+			      VM_FAULT_BADACCESS)))) {
+		/* No signal was generated, but notify task-isolation tasks. */
+		if (user_mode(regs))
+			task_isolation_quiet_exception("page fault at %#lx",
+						       addr);
 		return 0;
+	}
 
 	/*
 	 * If we are in kernel mode at this point, we have no context to
