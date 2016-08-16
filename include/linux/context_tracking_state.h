@@ -39,8 +39,14 @@ static inline bool context_tracking_in_user(void)
 {
 	return __this_cpu_read(context_tracking.state) == CONTEXT_USER;
 }
+
+static inline bool context_tracking_cpu_in_user(int cpu)
+{
+	return per_cpu(context_tracking.state, cpu) == CONTEXT_USER;
+}
 #else
 static inline bool context_tracking_in_user(void) { return false; }
+static inline bool context_tracking_cpu_in_user(int cpu) { return false; }
 static inline bool context_tracking_active(void) { return false; }
 static inline bool context_tracking_is_enabled(void) { return false; }
 static inline bool context_tracking_cpu_is_enabled(void) { return false; }

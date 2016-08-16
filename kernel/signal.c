@@ -639,6 +639,13 @@ int dequeue_signal(struct task_struct *tsk, sigset_t *mask, siginfo_t *info)
  */
 void signal_wake_up_state(struct task_struct *t, unsigned int state)
 {
+	/*
+	 * We're delivering a signal anyway, so no need for more
+	 * warnings.  This also avoids self-deadlock since an IPI to
+	 * kick the task would otherwise generate another signal.
+	 */
+	task_isolation_set_flags(t, 0);
+
 	set_tsk_thread_flag(t, TIF_SIGPENDING);
 	/*
 	 * TASK_WAKEKILL also means wake it up in the stopped/traced/killable
