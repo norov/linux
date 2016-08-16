@@ -201,5 +201,10 @@ struct prctl_mm_map {
 #define PR_SET_TASK_ISOLATION		48
 #define PR_GET_TASK_ISOLATION		49
 # define PR_TASK_ISOLATION_ENABLE	(1 << 0)
+# define PR_TASK_ISOLATION_USERSIG	(1 << 1)
+# define PR_TASK_ISOLATION_SET_SIG(sig)	(((sig) & 0x7f) << 8)
+# define PR_TASK_ISOLATION_GET_SIG(bits) (((bits) >> 8) & 0x7f)
+# define PR_TASK_ISOLATION_NOSIG \
+	(PR_TASK_ISOLATION_USERSIG | PR_TASK_ISOLATION_SET_SIG(0))
 
 #endif /* _LINUX_PRCTL_H */
