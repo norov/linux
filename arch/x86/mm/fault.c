@@ -14,6 +14,7 @@
 #include <linux/prefetch.h>		/* prefetchw			*/
 #include <linux/context_tracking.h>	/* exception_enter(), ...	*/
 #include <linux/uaccess.h>		/* faulthandler_disabled()	*/
+#include <linux/isolation.h>		/* task_isolation_quiet_exception */
 
 #include <asm/cpufeature.h>		/* boot_cpu_has, ...		*/
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -1437,6 +1438,10 @@ good_area:
 		tsk->min_flt++;
 		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, regs, address);
 	}
+
+	/* No signal was generated, but notify task-isolation tasks. */
+	if (flags & PF_USER)
+		task_isolation_quiet_exception("page fault at %#lx", address);
 
 	check_v8086_mode(regs, address, tsk);
 }

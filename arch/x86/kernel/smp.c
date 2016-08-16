@@ -23,6 +23,7 @@
 #include <linux/interrupt.h>
 #include <linux/cpu.h>
 #include <linux/gfp.h>
+#include <linux/isolation.h>
 
 #include <asm/mtrr.h>
 #include <asm/tlbflush.h>
@@ -127,6 +128,7 @@ static void native_smp_send_reschedule(int cpu)
 		WARN_ON(1);
 		return;
 	}
+	task_isolation_debug(cpu, "reschedule IPI");
 	apic->send_IPI(cpu, RESCHEDULE_VECTOR);
 }
 
