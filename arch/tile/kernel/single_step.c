@@ -23,6 +23,7 @@
 #include <linux/types.h>
 #include <linux/err.h>
 #include <linux/prctl.h>
+#include <linux/isolation.h>
 #include <asm/cacheflush.h>
 #include <asm/traps.h>
 #include <asm/uaccess.h>
@@ -319,6 +320,9 @@ void single_step_once(struct pt_regs *regs)
 	enum mem_op mem_op = MEMOP_NONE;
 	int size = 0, sign_ext = 0;  /* happy compiler */
 	int align_ctl;
+
+	/* No signal was generated, but notify task-isolation tasks. */
+	task_isolation_quiet_exception("single step at %#lx", regs->pc);
 
 	align_ctl = unaligned_fixup;
 	switch (task_thread_info(current)->align_ctl) {
@@ -766,6 +770,9 @@ void single_step_once(struct pt_regs *regs)
 {
 	unsigned long *ss_pc = this_cpu_ptr(&ss_saved_pc);
 	unsigned long control = __insn_mfspr(SPR_SINGLE_STEP_CONTROL_K);
+
+	/* No signal was generated, but notify task-isolation tasks. */
+	task_isolation_quiet_exception("single step at %#lx", regs->pc);
 
 	*ss_pc = regs->pc;
 	control |= SPR_SINGLE_STEP_CONTROL_1__CANCELED_MASK;

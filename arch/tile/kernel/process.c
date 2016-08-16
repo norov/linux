@@ -29,6 +29,7 @@
 #include <linux/signal.h>
 #include <linux/delay.h>
 #include <linux/context_tracking.h>
+#include <linux/isolation.h>
 #include <asm/stack.h>
 #include <asm/switch_to.h>
 #include <asm/homecache.h>
@@ -496,8 +497,16 @@ void prepare_exit_to_usermode(struct pt_regs *regs, u32 thread_info_flags)
 			tracehook_notify_resume(regs);
 		}
 
+		if (thread_info_flags & _TIF_TASK_ISOLATION)
+			task_isolation_enter();
+
 		local_irq_disable();
 		thread_info_flags = READ_ONCE(current_thread_info()->flags);
+
+		/* Clear task isolation from cached_flags manually. */
+		if ((thread_info_flags & _TIF_TASK_ISOLATION) &&
+		    task_isolation_ready())
+			thread_info_flags &= ~_TIF_TASK_ISOLATION;
 
 	} while (thread_info_flags & _TIF_WORK_MASK);
 

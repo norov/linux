@@ -35,6 +35,7 @@
 #include <linux/syscalls.h>
 #include <linux/uaccess.h>
 #include <linux/kdebug.h>
+#include <linux/isolation.h>
 
 #include <asm/pgalloc.h>
 #include <asm/sections.h>
@@ -308,8 +309,14 @@ static int handle_page_fault(struct pt_regs *regs,
 	 */
 	pgd = get_current_pgd();
 	if (handle_migrating_pte(pgd, fault_num, address, regs->pc,
-				 is_kernel_mode, write))
+				 is_kernel_mode, write)) {
+		/* No signal was generated, but notify task-isolation tasks. */
+		if (!is_kernel_mode)
+			task_isolation_quiet_exception(
+						      "migration fault at %#lx",
+						       address);
 		return 1;
+	}
 
 	si_code = SEGV_MAPERR;
 
@@ -479,6 +486,11 @@ good_area:
 #endif
 
 	up_read(&mm->mmap_sem);
+
+	/* No signal was generated, but notify task-isolation tasks. */
+	if (flags & FAULT_FLAG_USER)
+		task_isolation_quiet_exception("page fault at %#lx", address);
+
 	return 1;
 
 /*
