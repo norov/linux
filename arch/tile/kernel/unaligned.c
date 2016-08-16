@@ -25,6 +25,7 @@
 #include <linux/module.h>
 #include <linux/compat.h>
 #include <linux/prctl.h>
+#include <linux/isolation.h>
 #include <asm/cacheflush.h>
 #include <asm/traps.h>
 #include <asm/uaccess.h>
@@ -1544,6 +1545,9 @@ void do_unaligned(struct pt_regs *regs, int vecnum)
 		force_sig_info(info.si_signo, &info, current);
 		return;
 	}
+
+	/* No signal was generated, but notify task-isolation tasks. */
+	task_isolation_quiet_exception("unaligned JIT at %#lx", regs->pc);
 
 	if (!info->unalign_jit_base) {
 		void __user *user_page;

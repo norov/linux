@@ -31,6 +31,7 @@
 #include <linux/smp.h>
 #include <linux/module.h>
 #include <linux/hugetlb.h>
+#include <linux/isolation.h>
 
 #include <asm/page.h>
 #include <asm/sections.h>
@@ -83,6 +84,7 @@ static void hv_flush_update(const struct cpumask *cache_cpumask,
 	 * Don't bother to update atomically; losing a count
 	 * here is not that critical.
 	 */
+	task_isolation_debug_cpumask(&mask, "remote cache/TLB flush");
 	for_each_cpu(cpu, &mask)
 		++per_cpu(irq_stat, cpu).irq_hv_flush_count;
 }

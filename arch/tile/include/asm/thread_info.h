@@ -126,6 +126,7 @@ extern void _cpu_idle(void);
 #define TIF_SYSCALL_TRACEPOINT	9	/* syscall tracepoint instrumentation */
 #define TIF_POLLING_NRFLAG	10	/* idle is polling for TIF_NEED_RESCHED */
 #define TIF_NOHZ		11	/* in adaptive nohz mode */
+#define TIF_TASK_ISOLATION	12	/* in task isolation mode */
 
 #define _TIF_SIGPENDING		(1<<TIF_SIGPENDING)
 #define _TIF_NEED_RESCHED	(1<<TIF_NEED_RESCHED)
@@ -139,11 +140,12 @@ extern void _cpu_idle(void);
 #define _TIF_SYSCALL_TRACEPOINT	(1<<TIF_SYSCALL_TRACEPOINT)
 #define _TIF_POLLING_NRFLAG	(1<<TIF_POLLING_NRFLAG)
 #define _TIF_NOHZ		(1<<TIF_NOHZ)
+#define _TIF_TASK_ISOLATION	(1<<TIF_TASK_ISOLATION)
 
 /* Work to do as we loop to exit to user space. */
 #define _TIF_WORK_MASK \
 	(_TIF_SIGPENDING | _TIF_NEED_RESCHED | \
-	 _TIF_ASYNC_TLB | _TIF_NOTIFY_RESUME)
+	 _TIF_ASYNC_TLB | _TIF_NOTIFY_RESUME | _TIF_TASK_ISOLATION)
 
 /* Work to do on any return to user space. */
 #define _TIF_ALLWORK_MASK \
