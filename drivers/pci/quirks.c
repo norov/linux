@@ -848,6 +848,43 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_CAVIUM, 0xa018, quirk_cavium_sriov_rnm_lin
 #endif
 
 /*
+ * Cavium OcteonTx needs Multibyte atomic I/O (LDST) for some devices.
+ * LDST needs LMTLINE and LMTCANCEL to be mapped along with devices,
+ * to be usable by software.
+ * Unfortunately devices like PKO and SSO don't adevertize it in their BAR's
+ * This quirks adds LMT region in to PKO and SSOW at VBAR 2.
+ */
+#define LMTLINE_SIZE	0x10000
+static void quirk_octeontx_lmtline(struct pci_dev *dev)
+{
+	struct resource *res = dev->resource + PCI_IOV_RESOURCES + 2;
+	struct pci_bus_region bus_region;
+	u16 devid;
+
+	pci_read_config_word(dev, PCI_DEVICE_ID, &devid);
+	res->name = pci_name(dev);
+	res->flags = IORESOURCE_MEM | IORESOURCE_PCI_FIXED |
+		IORESOURCE_PCI_EA_BEI;
+
+	/*
+	 * Because 83XX doesn't have a Multi node config not
+	 * included node into address.
+	 * If this changes add NODE id of the device into address.
+	 */
+	if (devid == 0xA048)
+		bus_region.start = 0x87F191000000;
+	else
+		bus_region.start = 0x87F101000000;
+
+	bus_region.end = bus_region.start + LMTLINE_SIZE - 1;
+	pcibios_bus_to_resource(dev->bus, res, &bus_region);
+
+	dev_info(&dev->dev, "quirk(LMTLINE): added at VBAR 2\n");
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0XA048, quirk_octeontx_lmtline);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0XA04C, quirk_octeontx_lmtline);
+
+/*
  * Some settings of MMRBC can lead to data corruption so block changes.
  * See AMD 8131 HyperTransport PCI-X Tunnel Revision Guide
  */
