@@ -913,6 +913,9 @@ static void nicvf_set_irq_affinity(struct nicvf *nic)
 				nic->affinity_mask[vec]);
 		irqnum = nic->msix_entries[vec].vector;
 		irq_set_affinity_hint(irqnum, nic->affinity_mask[vec]);
+		if (irq_can_set_affinity(irqnum))
+			__irq_set_affinity(irqnum,
+					   nic->affinity_mask[vec], false);
 	}
 }
 
