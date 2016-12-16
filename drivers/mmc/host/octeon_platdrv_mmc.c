@@ -20,6 +20,9 @@
 
 #define CVMX_MIO_BOOT_CTL CVMX_ADD_IO_SEG(0x00011800000000D0ull)
 
+extern void l2c_lock_mem_region(u64 start, u64 len);
+extern void l2c_unlock_mem_region(u64 start, u64 len);
+
 static void octeon_mmc_acquire_bus(struct cvm_mmc_host *host)
 {
 	/* Switch the MMC controller onto the bus. */
@@ -36,6 +39,28 @@ static void octeon_mmc_int_enable(struct cvm_mmc_host *host, u64 val)
 {
 	writeq(val, host->base + MIO_EMM_INT);
 	writeq(val, host->base + MIO_EMM_INT_EN);
+}
+
+static void octeon_mmc_dmar_fixup(struct cvm_mmc_host *host,
+				  struct mmc_command *cmd,
+				  struct mmc_data *data,
+				  u64 addr)
+{
+	if (cmd->opcode != MMC_WRITE_MULTIPLE_BLOCK)
+		return;
+	if (data->blksz * data->blocks <= 1024)
+		return;
+
+	host->n_minus_one = addr + (data->blksz * data->blocks) - 1024;
+	l2c_lock_mem_region(host->n_minus_one, 512);
+}
+
+static void octeon_mmc_dmar_fixup_done(struct cvm_mmc_host *host)
+{
+	if (!host->n_minus_one)
+		return;
+	l2c_unlock_mem_region(host->n_minus_one, 512);
+	host->n_minus_one = 0;
 }
 
 static int octeon_mmc_probe(struct platform_device *pdev)
@@ -56,6 +81,11 @@ static int octeon_mmc_probe(struct platform_device *pdev)
 	host->acquire_bus = octeon_mmc_acquire_bus;
 	host->release_bus = octeon_mmc_release_bus;
 	host->int_enable = octeon_mmc_int_enable;
+	if (OCTEON_IS_MODEL(OCTEON_CN6XXX) ||
+	    OCTEON_IS_MODEL(OCTEON_CNF7XXX)) {
+		host->dmar_fixup = octeon_mmc_dmar_fixup;
+		host->dmar_fixup_done = octeon_mmc_dmar_fixup_done;
+	}
 
 	host->sys_freq = octeon_get_io_clock_rate();
 

@@ -712,6 +712,9 @@ static void cvm_mmc_dma_request(struct mmc_host *mmc,
 	if (host->dmar_fixup)
 		host->dmar_fixup(host, mrq->cmd, data, addr);
 
+	if (host->dmar_fixup)
+		host->dmar_fixup(host, mrq->cmd, data, addr);
+
 	/*
 	 * If we have a valid SD card in the slot, we set the response
 	 * bit mask to check for CRC errors and timeouts only.
