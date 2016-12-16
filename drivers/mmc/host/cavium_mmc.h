@@ -16,6 +16,25 @@
 
 #define CAVIUM_MAX_MMC		4
 
+#define MIO_EMM_DMA_CFG		0x00
+#define MIO_EMM_DMA_ADR		0x08
+
+#define MIO_EMM_CFG		0x00
+#define MIO_EMM_SWITCH		0x48
+#define MIO_EMM_DMA		0x50
+#define MIO_EMM_CMD		0x58
+#define MIO_EMM_RSP_STS		0x60
+#define MIO_EMM_RSP_LO		0x68
+#define MIO_EMM_RSP_HI		0x70
+#define MIO_EMM_INT		0x78
+#define MIO_EMM_INT_EN		0x80
+#define MIO_EMM_WDOG		0x88
+#define MIO_EMM_SAMPLE		0x90
+#define MIO_EMM_STS_MASK	0x98
+#define MIO_EMM_RCA		0xa0
+#define MIO_EMM_BUF_IDX		0xe0
+#define MIO_EMM_BUF_DAT		0xe8
+
 struct cvm_mmc_host {
 	struct device *dev;
 	void __iomem *base;
