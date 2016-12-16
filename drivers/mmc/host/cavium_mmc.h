@@ -40,6 +40,7 @@ struct cvm_mmc_host {
 	void __iomem *base;
 	void __iomem *dma_base;
 	u64 emm_cfg;
+	u64 n_minus_one;	/* OCTEON II workaround location */
 	int last_slot;
 	struct clk *clk;
 	int sys_freq;
@@ -55,6 +56,10 @@ struct cvm_mmc_host {
 	void (*acquire_bus)(struct cvm_mmc_host *);
 	void (*release_bus)(struct cvm_mmc_host *);
 	void (*int_enable)(struct cvm_mmc_host *, u64);
+	/* required on some MIPS models */
+	void (*dmar_fixup)(struct cvm_mmc_host *, struct mmc_command *,
+			   struct mmc_data *, u64);
+	void (*dmar_fixup_done)(struct cvm_mmc_host *);
 };
 
 struct cvm_mmc_slot {
