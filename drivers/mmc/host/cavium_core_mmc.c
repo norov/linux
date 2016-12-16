@@ -438,6 +438,8 @@ irqreturn_t cvm_mmc_interrupt(int irq, void *dev_id)
 	req->done(req);
 
 no_req_done:
+	if (host->dmar_fixup_done)
+		host->dmar_fixup_done(host);
 	if (host_done)
 		host->release_bus(host);
 out:
@@ -557,6 +559,9 @@ static void cvm_mmc_dma_request(struct mmc_host *mmc,
 
 	host->dma_active = true;
 	host->int_enable(host, emm_int.val);
+
+	if (host->dmar_fixup)
+		host->dmar_fixup(host, mrq->cmd, data, addr);
 
 	/*
 	 * If we have a valid SD card in the slot, we set the response
