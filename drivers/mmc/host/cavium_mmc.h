@@ -11,10 +11,13 @@
 #include <linux/io.h>
 #include <linux/mmc/host.h>
 #include <linux/of.h>
+#include <linux/pci.h>
 #include <linux/scatterlist.h>
 #include <linux/semaphore.h>
 
 #define CAVIUM_MAX_MMC		4
+
+#if IS_ENABLED(CONFIG_OCTEON_MMC)
 
 #define MIO_EMM_DMA_CFG		0x00
 #define MIO_EMM_DMA_ADR		0x08
@@ -34,6 +37,36 @@
 #define MIO_EMM_RCA		0xa0
 #define MIO_EMM_BUF_IDX		0xe0
 #define MIO_EMM_BUF_DAT		0xe8
+
+#else /* CONFIG_THUNDERX_MMC */
+
+#define MIO_EMM_DMA_CFG		0x180
+#define MIO_EMM_DMA_ADR		0x188
+#define MIO_EMM_DMA_INT		0x190
+#define MIO_EMM_DMA_INT_W1S	0x198
+#define MIO_EMM_DMA_INT_ENA_W1S	0x1a0
+#define MIO_EMM_DMA_INT_ENA_W1C	0x1a8
+
+#define MIO_EMM_CFG		0x2000
+#define MIO_EMM_SWITCH		0x2048
+#define MIO_EMM_DMA		0x2050
+#define MIO_EMM_CMD		0x2058
+#define MIO_EMM_RSP_STS		0x2060
+#define MIO_EMM_RSP_LO		0x2068
+#define MIO_EMM_RSP_HI		0x2070
+#define MIO_EMM_INT		0x2078
+#define MIO_EMM_INT_EN		0x2080
+#define MIO_EMM_WDOG		0x2088
+#define MIO_EMM_SAMPLE		0x2090
+#define MIO_EMM_STS_MASK	0x2098
+#define MIO_EMM_RCA		0x20a0
+#define MIO_EMM_BUF_IDX		0x20e0
+#define MIO_EMM_BUF_DAT		0x20e8
+
+#define MIO_EMM_INT_EN_SET	0x20b0
+#define MIO_EMM_INT_EN_CLR	0x20b8
+
+#endif
 
 struct cvm_mmc_host {
 	struct device *dev;
@@ -66,6 +99,11 @@ struct cvm_mmc_host {
 	void (*dmar_fixup)(struct cvm_mmc_host *, struct mmc_command *,
 			   struct mmc_data *, u64);
 	void (*dmar_fixup_done)(struct cvm_mmc_host *);
+
+#if IS_ENABLED(CONFIG_MMC_THUNDERX)
+	struct msix_entry	*mmc_msix;
+	unsigned int		msix_count;
+#endif
 };
 
 struct cvm_mmc_slot {
