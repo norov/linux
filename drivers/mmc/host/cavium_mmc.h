@@ -40,6 +40,9 @@
 
 #else /* CONFIG_THUNDERX_MMC */
 
+#define MIO_EMM_DMA_FIFO_CFG	0x160
+#define MIO_EMM_DMA_FIFO_ADR	0x170
+#define MIO_EMM_DMA_FIFO_CMD	0x178
 #define MIO_EMM_DMA_CFG		0x180
 #define MIO_EMM_DMA_ADR		0x188
 #define MIO_EMM_DMA_INT		0x190
@@ -81,6 +84,7 @@ struct cvm_mmc_host {
 	struct mmc_request *current_req;
 	struct sg_mapping_iter smi;
 	bool dma_active;
+	bool use_sg;
 
 	bool has_ciu3;
 	bool big_dma_addr;
@@ -134,6 +138,56 @@ struct cvm_mmc_cr_mods {
 };
 
 /* Bitfield definitions */
+
+union mio_emm_dma_fifo_cfg {
+	u64 val;
+	struct mio_emm_dma_fifo_cfg_s {
+#ifdef __BIG_ENDIAN_BITFIELD
+		u64 :48;
+		u64 clr:1;
+		u64 :3;
+		u64 int_lvl:4;
+		u64 :3;
+		u64 count:5;
+#else
+		u64 count:5;
+		u64 :3;
+		u64 int_lvl:4;
+		u64 :3;
+		u64 clr:1;
+		u64 :48;
+#endif
+	} s;
+};
+
+union mio_emm_dma_fifo_cmd {
+	u64 val;
+	struct mio_emm_dma_fifo_cmd_s {
+#ifdef __BIG_ENDIAN_BITFIELD
+		u64 :1;
+		u64 rw:1;
+		u64 :1;
+		u64 intdis:1;
+		u64 swap32:1;
+		u64 swap16:1;
+		u64 swap8:1;
+		u64 endian:1;
+		u64 size:20;
+		u64 :36;
+#else
+		u64 :36;
+		u64 size:20;
+		u64 endian:1;
+		u64 swap8:1;
+		u64 swap16:1;
+		u64 swap32:1;
+		u64 intdis:1;
+		u64 :1;
+		u64 rw:1;
+		u64 :1;
+#endif
+	} s;
+};
 
 union mio_emm_cmd {
 	u64 val;

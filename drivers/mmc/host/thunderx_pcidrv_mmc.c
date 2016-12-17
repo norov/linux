@@ -109,6 +109,7 @@ static int thunder_mmc_probe(struct pci_dev *pdev,
 	host->release_bus = thunder_mmc_release_bus;
 	host->int_enable = thunder_mmc_int_enable;
 
+	host->use_sg = true;
 	host->big_dma_addr = true;
 	host->need_irq_handler_lock = true;
 	host->last_slot = -1;
@@ -123,6 +124,8 @@ static int thunder_mmc_probe(struct pci_dev *pdev,
 	 */
 	writeq(127, host->base + MIO_EMM_INT_EN);
 	writeq(3, host->base + MIO_EMM_DMA_INT_ENA_W1C);
+	/* Clear DMA FIFO */
+	writeq(BIT_ULL(16), host->base + MIO_EMM_DMA_FIFO_CFG);
 
 	ret = thunder_mmc_register_interrupts(host, pdev);
 	if (ret)
