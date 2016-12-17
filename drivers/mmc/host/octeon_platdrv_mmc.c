@@ -25,20 +25,28 @@ extern void l2c_unlock_mem_region(u64 start, u64 len);
 
 static void octeon_mmc_acquire_bus(struct cvm_mmc_host *host)
 {
-	/* Switch the MMC controller onto the bus. */
-	down(&octeon_bootbus_sem);
-	writeq(0, (void __iomem *)CVMX_MIO_BOOT_CTL);
+	if (!host->has_ciu3) {
+		/* Switch the MMC controller onto the bus. */
+		down(&octeon_bootbus_sem);
+		writeq(0, (void __iomem *)CVMX_MIO_BOOT_CTL);
+	} else {
+		down(&host->mmc_serializer);
+	}
 }
 
 static void octeon_mmc_release_bus(struct cvm_mmc_host *host)
 {
-	up(&octeon_bootbus_sem);
+	if (!host->has_ciu3)
+		up(&octeon_bootbus_sem);
+	else
+		up(&host->mmc_serializer);
 }
 
 static void octeon_mmc_int_enable(struct cvm_mmc_host *host, u64 val)
 {
 	writeq(val, host->base + MIO_EMM_INT);
-	writeq(val, host->base + MIO_EMM_INT_EN);
+	if (!host->dma_active || (host->dma_active && !host->has_ciu3))
+		writeq(val, host->base + MIO_EMM_INT_EN);
 }
 
 static void octeon_mmc_dmar_fixup(struct cvm_mmc_host *host,
@@ -77,6 +85,9 @@ static int octeon_mmc_probe(struct platform_device *pdev)
 	if (!host)
 		return -ENOMEM;
 
+	spin_lock_init(&host->irq_handler_lock);
+	sema_init(&host->mmc_serializer, 1);
+
 	host->dev = &pdev->dev;
 	host->acquire_bus = octeon_mmc_acquire_bus;
 	host->release_bus = octeon_mmc_release_bus;
@@ -89,12 +100,34 @@ static int octeon_mmc_probe(struct platform_device *pdev)
 
 	host->sys_freq = octeon_get_io_clock_rate();
 
-	/* First one is EMM second DMA */
-	for (i = 0; i < 2; i++) {
-		mmc_irq[i] = platform_get_irq(pdev, i);
-		if (mmc_irq[i] < 0)
-			return mmc_irq[i];
+	if (of_device_is_compatible(node, "cavium,octeon-7890-mmc")) {
+		host->big_dma_addr = true;
+		host->need_irq_handler_lock = true;
+		host->has_ciu3 = true;
+		/*
+		 * First seven are the EMM_INT bits 0..6, then two for
+		 * the EMM_DMA_INT bits
+		 */
+		for (i = 0; i < 9; i++) {
+			mmc_irq[i] = platform_get_irq(pdev, i);
+			if (mmc_irq[i] < 0)
+				return mmc_irq[i];
+
+			/* work around legacy u-boot device trees */
+			irq_set_irq_type(mmc_irq[i], IRQ_TYPE_EDGE_RISING);
+		}
+	} else {
+		host->big_dma_addr = false;
+		host->need_irq_handler_lock = false;
+		host->has_ciu3 = false;
+		/* First one is EMM second DMA */
+		for (i = 0; i < 2; i++) {
+			mmc_irq[i] = platform_get_irq(pdev, i);
+			if (mmc_irq[i] < 0)
+				return mmc_irq[i];
+		}
 	}
+
 	host->last_slot = -1;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -124,12 +157,26 @@ static int octeon_mmc_probe(struct platform_device *pdev)
 	val = readq(host->base + MIO_EMM_INT);
 	writeq(val, host->base + MIO_EMM_INT);
 
-	ret = devm_request_irq(&pdev->dev, mmc_irq[0],
-			       cvm_mmc_interrupt, 0, DRV_NAME, host);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Error: devm_request_irq %d\n",
-			mmc_irq[0]);
-		return ret;
+	if (host->has_ciu3) {
+		/* Only CMD_DONE, DMA_DONE, CMD_ERR, DMA_ERR */
+		for (i = 1; i <= 4; i++) {
+			ret = devm_request_irq(&pdev->dev, mmc_irq[i],
+					       cvm_mmc_interrupt,
+					       0, DRV_NAME, host);
+			if (ret < 0) {
+				dev_err(&pdev->dev, "Error: devm_request_irq %d\n",
+					mmc_irq[i]);
+				return ret;
+			}
+		}
+	} else {
+		ret = devm_request_irq(&pdev->dev, mmc_irq[0],
+				       cvm_mmc_interrupt, 0, DRV_NAME, host);
+		if (ret < 0) {
+			dev_err(&pdev->dev, "Error: devm_request_irq %d\n",
+				mmc_irq[0]);
+			return ret;
+		}
 	}
 
 	host->global_pwr_gpiod = devm_gpiod_get_optional(&pdev->dev, "power",

@@ -49,6 +49,12 @@ struct cvm_mmc_host {
 	struct sg_mapping_iter smi;
 	bool dma_active;
 
+	bool has_ciu3;
+	bool big_dma_addr;
+	bool need_irq_handler_lock;
+	spinlock_t irq_handler_lock;
+	struct semaphore mmc_serializer;
+
 	struct gpio_desc *global_pwr_gpiod;
 
 	struct cvm_mmc_slot *slot[CAVIUM_MAX_MMC];

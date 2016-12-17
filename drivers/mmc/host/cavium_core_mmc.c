@@ -384,7 +384,13 @@ irqreturn_t cvm_mmc_interrupt(int irq, void *dev_id)
 	union mio_emm_rsp_sts rsp_sts;
 	union mio_emm_int emm_int;
 	struct mmc_request *req;
+	unsigned long flags = 0;
 	bool host_done;
+
+	if (host->need_irq_handler_lock)
+		spin_lock_irqsave(&host->irq_handler_lock, flags);
+	else
+		__acquire(&host->irq_handler_lock);
 
 	/* Clear interrupt bits (write 1 clears ). */
 	emm_int.val = readq(host->base + MIO_EMM_INT);
@@ -443,6 +449,10 @@ no_req_done:
 	if (host_done)
 		host->release_bus(host);
 out:
+	if (host->need_irq_handler_lock)
+		spin_unlock_irqrestore(&host->irq_handler_lock, flags);
+	else
+		__release(&host->irq_handler_lock);
 	return IRQ_RETVAL(emm_int.val != 0);
 }
 
@@ -470,11 +480,15 @@ static u64 prepare_dma_single(struct cvm_mmc_host *host, struct mmc_data *data)
 	dma_cfg.s.size = (sg_dma_len(&data->sg[0]) / 8) - 1;
 
 	addr = sg_dma_address(&data->sg[0]);
-	dma_cfg.s.adr = addr;
+	if (!host->big_dma_addr)
+		dma_cfg.s.adr = addr;
 	writeq(dma_cfg.val, host->dma_base + MIO_EMM_DMA_CFG);
 
 	pr_debug("[%s] sg_dma_len: %u  total sg_elem: %d\n",
 		 (dma_cfg.s.rw) ? "W" : "R", sg_dma_len(&data->sg[0]), count);
+
+	if (host->big_dma_addr)
+		writeq(addr, host->dma_base + MIO_EMM_DMA_ADR);
 	return addr;
 }
 
