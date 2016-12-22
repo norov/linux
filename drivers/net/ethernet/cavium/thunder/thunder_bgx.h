@@ -31,8 +31,6 @@
 
 #define	   BGX_ID_MASK				0x3
 
-#define	   BGX_ID_MASK				0x3
-
 #define    MAX_DMAC_PER_LMAC_TNS_BYPASS_MODE	2
 
 /* Registers */
