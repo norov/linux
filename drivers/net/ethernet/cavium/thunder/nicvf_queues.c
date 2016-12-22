@@ -53,17 +53,22 @@ static int nicvf_poll_reg(struct nicvf *nic, int qidx,
 static int nicvf_alloc_q_desc_mem(struct nicvf *nic, struct q_desc_mem *dmem,
 				  int q_len, int desc_size, int align_bytes)
 {
+	u64 phys_addr;
 	dmem->q_len = q_len;
 	dmem->size = (desc_size * q_len) + align_bytes;
+
 	/* Save address, need it while freeing */
-	dmem->unalign_base = dma_zalloc_coherent(&nic->pdev->dev, dmem->size,
-						&dmem->dma, GFP_KERNEL);
+	dmem->unalign_base = (void *)__get_free_pages(GFP_KERNEL,
+						      get_order(dmem->size));
+
 	if (!dmem->unalign_base)
 		return -ENOMEM;
+	phys_addr = virt_to_phys(dmem->unalign_base);
+	memset(dmem->unalign_base, 0, dmem->size);
 
 	/* Align memory address for 'align_bytes' */
-	dmem->phys_base = NICVF_ALIGNED_ADDR((u64)dmem->dma, align_bytes);
-	dmem->base = dmem->unalign_base + (dmem->phys_base - dmem->dma);
+	dmem->phys_base = NICVF_ALIGNED_ADDR(phys_addr, align_bytes);
+	dmem->base = dmem->unalign_base + (dmem->phys_base - phys_addr);
 	return 0;
 }
 
@@ -73,8 +78,8 @@ static void nicvf_free_q_desc_mem(struct nicvf *nic, struct q_desc_mem *dmem)
 	if (!dmem)
 		return;
 
-	dma_free_coherent(&nic->pdev->dev, dmem->size,
-			  dmem->unalign_base, dmem->dma);
+	free_pages((u64)dmem->unalign_base, get_order(dmem->size));
+
 	dmem->unalign_base = NULL;
 	dmem->base = NULL;
 }
@@ -336,6 +341,7 @@ static int nicvf_init_snd_queue(struct nicvf *nic,
 				struct snd_queue *sq, int q_len)
 {
 	int err;
+	int order = get_order(q_len * TSO_HEADER_SIZE);
 
 	err = nicvf_alloc_q_desc_mem(nic, &sq->dmem, q_len, SND_QUEUE_DESC_SIZE,
 				     NICVF_SQ_BASE_ALIGN_BYTES);
@@ -352,11 +358,11 @@ static int nicvf_init_snd_queue(struct nicvf *nic,
 	sq->thresh = SND_QUEUE_THRESH;
 
 	/* Preallocate memory for TSO segment's header */
-	sq->tso_hdrs = dma_alloc_coherent(&nic->pdev->dev,
-					  q_len * TSO_HEADER_SIZE,
-					  &sq->tso_hdrs_phys, GFP_KERNEL);
+	sq->tso_hdrs = (void *)__get_free_pages(GFP_KERNEL, order);
+
 	if (!sq->tso_hdrs)
 		return -ENOMEM;
+	sq->tso_hdrs_phys = virt_to_phys(sq->tso_hdrs);
 
 	return 0;
 }
@@ -364,6 +370,7 @@ static int nicvf_init_snd_queue(struct nicvf *nic,
 static void nicvf_free_snd_queue(struct nicvf *nic, struct snd_queue *sq)
 {
 	struct sk_buff *skb;
+	int order = get_order(sq->dmem.q_len * TSO_HEADER_SIZE);
 
 	if (!sq)
 		return;
@@ -371,9 +378,7 @@ static void nicvf_free_snd_queue(struct nicvf *nic, struct snd_queue *sq)
 		return;
 
 	if (sq->tso_hdrs)
-		dma_free_coherent(&nic->pdev->dev,
-				  sq->dmem.q_len * TSO_HEADER_SIZE,
-				  sq->tso_hdrs, sq->tso_hdrs_phys);
+		free_pages((u64)sq->tso_hdrs, order);
 
 	/* Free pending skbs in the queue */
 	smp_rmb();
