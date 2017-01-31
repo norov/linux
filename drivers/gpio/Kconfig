@@ -421,14 +421,6 @@ config GPIO_TS4800
 	help
 	  This driver support TS-4800 FPGA GPIO controllers.
 
-config GPIO_THUNDERX
-	tristate "Cavium THUNDERX GPIO"
-	depends on GPIOLIB && ARCH_THUNDER
-	default y
-	help
-	  Say yes here to support the on-chip GPIO lines on the THUNDERX
-	  family of SoCs.
-
 config GPIO_TZ1090
 	bool "Toumaz Xenif TZ1090 GPIO support"
 	depends on SOC_TZ1090
