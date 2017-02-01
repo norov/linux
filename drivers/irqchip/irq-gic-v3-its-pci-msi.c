@@ -77,6 +77,8 @@ static int its_pci_msi_prepare(struct irq_domain *domain, struct device *dev,
 		return -EINVAL;
 
 	msi_info = msi_get_domain_info(domain->parent);
+	if (!msi_info)
+		return -ENODEV;
 
 	pdev = to_pci_dev(dev);
 	dev_alias.pdev = pdev;
@@ -113,7 +115,7 @@ static int __init its_pci_msi_init_one(struct fwnode_handle *handle,
 	struct irq_domain *parent;
 
 	parent = irq_find_matching_fwnode(handle, DOMAIN_BUS_NEXUS);
-	if (!parent || !msi_get_domain_info(parent)) {
+	if (!parent) {
 		pr_err("%s: Unable to locate ITS domain\n", name);
 		return -ENXIO;
 	}

@@ -32,6 +32,8 @@ static int its_pmsi_prepare(struct irq_domain *domain, struct device *dev,
 	int ret, index = 0;
 
 	msi_info = msi_get_domain_info(domain->parent);
+	if (!msi_info)
+		return -ENODEV;
 
 	/* Suck the DeviceID out of the msi-parent property */
 	do {
@@ -84,7 +86,7 @@ static int __init its_pmsi_init(void)
 			continue;
 
 		parent = irq_find_matching_host(np, DOMAIN_BUS_NEXUS);
-		if (!parent || !msi_get_domain_info(parent)) {
+		if (!parent) {
 			pr_err("%s: unable to locate ITS domain\n",
 			       np->full_name);
 			continue;
