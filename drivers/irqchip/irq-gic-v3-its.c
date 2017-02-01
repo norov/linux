@@ -3042,7 +3042,7 @@ static int __init its_probe_one(struct resource *res,
 		goto out_free_tables;
 
 	spin_lock(&its_lock);
-	list_add(&its->entry, &its_nodes);
+	list_add_tail(&its->entry, &its_nodes);
 	spin_unlock(&its_lock);
 
 	return 0;
