@@ -21,6 +21,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/dma-iommu.h>
+#include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <linux/irqdomain.h>
 #include <linux/acpi_iort.h>
@@ -861,6 +862,7 @@ static int its_setup_baser(struct its_node *its, struct its_baser *baser,
 	u64 type = GITS_BASER_TYPE(val);
 	u32 alloc_pages;
 	void *base;
+	dma_addr_t dma_handle;
 	u64 tmp;
 
 retry_alloc_baser:
@@ -873,13 +875,26 @@ retry_alloc_baser:
 		order = get_order(GITS_BASER_PAGES_MAX * psz);
 	}
 
-	base = (void *)devm_get_free_pages(&its->dev, GFP_KERNEL | __GFP_ZERO,
-					   order);
-	if (!base)
+	base = dmam_alloc_coherent(&its->dev,
+				PAGE_ORDER_TO_SIZE(order),
+				&dma_handle,
+				GFP_KERNEL | __GFP_ZERO);
+
+	if (!base && order >= MAX_ORDER) {
+		order = MAX_ORDER - 1;
+		dev_warn(&its->dev, "Device Table too large, reduce ids %u->%u, no CMA memory available\n",
+			its->device_ids,
+			ilog2(PAGE_ORDER_TO_SIZE(order) / (int)esz));
+		goto retry_alloc_baser;
+	}
+
+	if (!base) {
+		dev_err(&its->dev, "Failed to allocate device table\n");
 		return -ENOMEM;
+	}
 
 retry_baser:
-	val = (virt_to_phys(base)				 |
+	val = (dma_handle					 |
 		(type << GITS_BASER_TYPE_SHIFT)			 |
 		((esz - 1) << GITS_BASER_ENTRY_SIZE_SHIFT)	 |
 		((alloc_pages - 1) << GITS_BASER_PAGES_SHIFT)	 |
@@ -920,29 +935,28 @@ retry_baser:
 		goto retry_baser;
 	}
 
-	if ((val ^ tmp) & GITS_BASER_PAGE_SIZE_MASK) {
-		/*
-		 * Page size didn't stick. Let's try a smaller
-		 * size and retry. If we reach 4K, then
-		 * something is horribly wrong...
-		 */
-		devm_free_pages(&its->dev, (unsigned long)base);
-		baser->base = NULL;
-
-		switch (psz) {
-		case SZ_16K:
-			psz = SZ_4K;
-			goto retry_alloc_baser;
-		case SZ_64K:
-			psz = SZ_16K;
-			goto retry_alloc_baser;
-		}
-	}
-
 	if (val != tmp) {
+		dmam_free_coherent(&its->dev, PAGE_ORDER_TO_SIZE(order),
+				base, dma_handle);
+
+		if (GITS_BASER_PAGE_SIZE_MASK) {
+			/*
+			 * Page size didn't stick. Let's try a smaller
+			 * size and retry. If we reach 4K, then
+			 * something is horribly wrong...
+			 */
+			switch (psz) {
+			case SZ_16K:
+				psz = SZ_4K;
+				goto retry_alloc_baser;
+			case SZ_64K:
+				psz = SZ_16K;
+				goto retry_alloc_baser;
+			}
+		}
+
 		dev_err(&its->dev, "%s doesn't stick: %llx %llx\n",
 		       its_base_type_string[type], val, tmp);
-		devm_free_pages(&its->dev, (unsigned long)base);
 		return -ENXIO;
 	}
 
@@ -1000,12 +1014,6 @@ static bool its_parse_baser_device(struct its_node *its, struct its_baser *baser
 	 * feature is not supported by hardware.
 	 */
 	new_order = max_t(u32, get_order(esz << ids), new_order);
-	if (new_order >= MAX_ORDER) {
-		new_order = MAX_ORDER - 1;
-		ids = ilog2(PAGE_ORDER_TO_SIZE(new_order) / (int)esz);
-		dev_warn(&its->dev, "Device Table too large, reduce ids %u->%u\n",
-			its->device_ids, ids);
-	}
 
 	*order = new_order;
 
@@ -1692,6 +1700,9 @@ static int __init its_init_one(struct its_node *its)
 		pr_warn("ITS@%pa: Unable to register device\n", &its->phys_base);
 		return err;
 	}
+
+	/* Setup dma_ops for dmam_alloc_coherent() */
+	arch_setup_dma_ops(&its->dev, 0, 0, NULL, true);
 
 	its_base = devm_ioremap(&its->dev, its->phys_base, its->phys_size);
 	if (!its_base) {
