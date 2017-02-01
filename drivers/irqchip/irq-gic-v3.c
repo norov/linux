@@ -537,10 +537,6 @@ static void gic_cpu_init(void)
 
 	gic_cpu_config(rbase, gic_redist_wait_for_rwp);
 
-	/* Give LPIs a spin */
-	if (IS_ENABLED(CONFIG_ARM_GIC_V3_ITS) && gic_dist_supports_lpis())
-		its_cpu_init();
-
 	/* initialise system registers */
 	gic_cpu_sys_reg_init();
 }
@@ -673,7 +669,7 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 #else
 #define gic_set_affinity	NULL
 #define gic_smp_init()		do { } while(0)
-#endif
+#endif	/* CONFIG_SMP */
 
 #ifdef CONFIG_CPU_PM
 /* Check whether it's single security state view */
@@ -1179,6 +1175,9 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 
 	gic_populate_ppi_partitions(node);
 	gic_of_setup_kvm_info(node);
+
+	its_init();
+
 	return 0;
 
 out_unmap_rdist:
@@ -1467,6 +1466,8 @@ gic_acpi_init(struct acpi_subtable_header *header, const unsigned long end)
 
 	acpi_set_irq_model(ACPI_IRQ_MODEL_GIC, domain_handle);
 	gic_acpi_setup_kvm_info();
+
+	its_init();
 
 	return 0;
 

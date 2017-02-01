@@ -1655,20 +1655,13 @@ static int its_init_domain(struct its_node *its)
 
 static void its_free(struct its_node *its)
 {
-	spin_lock(&its_lock);
-	list_del(&its->entry);
-	spin_unlock(&its_lock);
-
 	kfree(its);
 }
-
-static int __init its_init_one(struct its_node *its);
 
 static int __init its_probe_one(struct resource *res,
 				struct fwnode_handle *handle, int numa_node)
 {
 	struct its_node *its;
-	int err;
 
 	its = kzalloc(sizeof(*its), GFP_KERNEL);
 	if (!its)
@@ -1688,11 +1681,7 @@ static int __init its_probe_one(struct resource *res,
 
 	pr_info("ITS %pR\n", res);
 
-	err = its_init_one(its);
-	if (err)
-		its_free(its);
-
-	return err;
+	return 0;
 }
 
 static int __init its_init_one(struct its_node *its)
@@ -1795,7 +1784,7 @@ static bool gic_rdists_supports_plpis(void)
 	return !!(gic_read_typer(gic_data_rdist_rd_base() + GICR_TYPER) & GICR_TYPER_PLPIS);
 }
 
-int its_cpu_init(void)
+static int its_cpu_init(unsigned int cpu)
 {
 	if (!list_empty(&its_nodes)) {
 		if (!gic_rdists_supports_plpis()) {
@@ -1888,8 +1877,6 @@ static void __init its_acpi_probe(void)
 static void __init its_acpi_probe(void) { }
 #endif
 
-struct int __init its_init(void);
-
 int __init its_probe(struct fwnode_handle *handle, struct rdists *rdists,
 		     struct irq_domain *parent_domain)
 {
@@ -1909,13 +1896,47 @@ int __init its_probe(struct fwnode_handle *handle, struct rdists *rdists,
 
 	gic_rdists = rdists;
 
-	return its_init();
+	return 0;
 }
 
-struct int __init its_init(void)
+int __init its_init(void)
 {
+	struct its_node *its, *tmp;
+	int err = 0, err2;
+
+	if (list_empty(&its_nodes))
+		return 0;
+
+	spin_lock(&its_lock);
+
+	list_for_each_entry(its, &its_nodes, entry) {
+		err2 = its_init_one(its);
+		if (!err && err2)
+			err = err2;
+	}
+
+	if (!err)
+		goto unlock;
+
+	list_for_each_entry_safe(its, tmp, &its_nodes, entry) {
+		list_del(&its->entry);
+		its_free(its);
+	}
+unlock:
+	spin_unlock(&its_lock);
+
+	if (err) {
+		pr_warn("ITS: Failed to initialize (%d), not enabling LPIs\n",
+			err);
+		return err;
+	}
+
 	its_alloc_lpi_tables();
 	its_lpi_init(gic_rdists->id_bits);
+
+	cpuhp_setup_state(CPUHP_AP_IRQ_GIC_ITS_STARTING,
+			"irqchip/arm/gicv3-its:starting",
+			its_cpu_init, NULL);
 
 	return 0;
 }
