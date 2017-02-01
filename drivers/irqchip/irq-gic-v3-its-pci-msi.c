@@ -194,4 +194,4 @@ static int __init its_pci_msi_init(void)
 
 	return 0;
 }
-early_initcall(its_pci_msi_init);
+subsys_initcall(its_pci_msi_init);
