@@ -1175,9 +1175,6 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 
 	gic_populate_ppi_partitions(node);
 	gic_of_setup_kvm_info(node);
-
-	its_init();
-
 	return 0;
 
 out_unmap_rdist:
@@ -1466,8 +1463,6 @@ gic_acpi_init(struct acpi_subtable_header *header, const unsigned long end)
 
 	acpi_set_irq_model(ACPI_IRQ_MODEL_GIC, domain_handle);
 	gic_acpi_setup_kvm_info();
-
-	its_init();
 
 	return 0;
 

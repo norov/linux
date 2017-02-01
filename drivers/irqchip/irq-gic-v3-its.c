@@ -1899,7 +1899,7 @@ int __init its_probe(struct fwnode_handle *handle, struct rdists *rdists,
 	return 0;
 }
 
-int __init its_init(void)
+static int __init its_init(void)
 {
 	struct its_node *its, *tmp;
 	int err = 0, err2;
@@ -1940,3 +1940,4 @@ unlock:
 
 	return 0;
 }
+subsys_initcall(its_init);
