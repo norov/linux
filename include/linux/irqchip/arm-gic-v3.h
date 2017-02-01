@@ -432,8 +432,8 @@ struct rdists {
 struct irq_domain;
 struct fwnode_handle;
 int its_cpu_init(void);
-int its_init(struct fwnode_handle *handle, struct rdists *rdists,
-	     struct irq_domain *domain);
+int its_probe(struct fwnode_handle *handle, struct rdists *rdists,
+	      struct irq_domain *domain);
 
 static inline bool gic_enable_sre(void)
 {
