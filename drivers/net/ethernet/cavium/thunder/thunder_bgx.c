@@ -169,6 +169,20 @@ unsigned bgx_get_map(int node)
 }
 EXPORT_SYMBOL(bgx_get_map);
 
+/* Return the BGX CSR block base address and size.*/
+u64 bgx_get_reg_base(int node, int bgx_idx, u64 *iosize)
+{
+	struct bgx *bgx;
+
+	bgx = get_bgx(node, bgx_idx);
+	if (bgx) {
+		*iosize = pci_resource_len(bgx->pdev, 0);
+		return pci_resource_start(bgx->pdev, 0);
+	}
+	return 0;
+}
+EXPORT_SYMBOL(bgx_get_reg_base);
+
 /* Return number of LMAC configured for this BGX */
 int bgx_get_lmac_count(int node, int bgx_idx)
 {
@@ -467,6 +481,28 @@ u64 bgx_get_tx_stats(int node, int bgx_idx, int lmac, int idx)
 	return bgx_reg_read(bgx, lmac, BGX_CMRX_TX_STAT0 + (idx * 8));
 }
 EXPORT_SYMBOL(bgx_get_tx_stats);
+
+static void bgx_enable_rx_tx(int node, int bgx_idx, int lmacid)
+{
+	bgx_lmac_rx_tx_enable(node, bgx_idx, lmacid, 1);
+}
+
+static void bgx_disable_rx_tx(int node, int bgx_idx, int lmacid)
+{
+	bgx_lmac_rx_tx_enable(node, bgx_idx, lmacid, 0);
+}
+
+struct thunder_bgx_com_s thunder_bgx_com = {
+	.get_bgx_count = bgx_get_map,
+	.get_reg_base = bgx_get_reg_base,
+	.get_lmac_count = bgx_get_lmac_count,
+	.get_link_status = bgx_get_lmac_link_state,
+	.get_mac_addr = bgx_get_lmac_mac,
+	.set_mac_addr = bgx_set_lmac_mac,
+	.enable = bgx_enable_rx_tx,
+	.disable = bgx_disable_rx_tx,
+};
+EXPORT_SYMBOL(thunder_bgx_com);
 
 static void bgx_flush_dmac_addrs(struct bgx *bgx, int lmac)
 {
