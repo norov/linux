@@ -885,6 +885,49 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0XA048, quirk_octeontx_lmtline);
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0XA04C, quirk_octeontx_lmtline);
 
 /*
+ * OcteonTx 83XX has SRIOV for PKO, SSO, FPA etc etc
+ * most of them dont have a Mailbox to communicate.
+ * The proposed Resource manager desgin depends on SSO mailbox
+ * for this.
+ *
+ * Problem with these devices is PF is fully loaded,
+ * VF needs to do lot of communication with PF for things like
+ * setup, getting stats, getting link state etc.
+ * The mailbox provided by SSO is 64 bits in each direction, which  is not
+ * sufficient for this. the latencies to do a trivial task is very high.
+ * Solution is to hava a RAM based mailbox, this quirk adds a VF BAR
+ * to SSOW with 64K RAM so that VF and PF can use this to send messages.
+ * the desgin still uses SSO Mailbox for identity and sending
+ * interrupts/notifications when message is pending.
+ *
+ * Ideally the BAR should go to SSO Vf,
+ * because its already full creaing a BAR in SSOW.
+ *
+ * This patch Assumes the Firmware did appropriate changes to
+ * create a hole in RAM at address 0x1400000 with sufficient space.
+ */
+#define SSO_MBOX_BASE	0x1400000
+#define SSO_MBOX_SIZE	0x10000
+static void quirk_octeontx_ssombox(struct pci_dev *dev)
+{
+	struct resource *res = dev->resource + PCI_IOV_RESOURCES + 4;
+	struct pci_bus_region bus_region;
+	u16 devid;
+
+	pci_read_config_word(dev, PCI_DEVICE_ID, &devid);
+	res->name = pci_name(dev);
+	res->flags = IORESOURCE_MEM | IORESOURCE_PCI_FIXED |
+		IORESOURCE_PCI_EA_BEI;
+
+	bus_region.start = SSO_MBOX_BASE;
+	bus_region.end = bus_region.start + SSO_MBOX_SIZE - 1;
+	pcibios_bus_to_resource(dev->bus, res, &bus_region);
+
+	dev_info(&dev->dev, "quirk(SSO MBOX): added at BAR 4\n");
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0XA04C, quirk_octeontx_ssombox);
+
+/*
  * Some settings of MMRBC can lead to data corruption so block changes.
  * See AMD 8131 HyperTransport PCI-X Tunnel Revision Guide
  */
