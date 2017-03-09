@@ -61,7 +61,15 @@ enum domain_type {
 };
 
 /* Domain network (BGX) port */
-#define OCTEONTX_MAX_BGX_PORTS 16 /* Maximum BGX ports per System */
+#define OCTTX_MAX_BGX_PORTS 16 /* Maximum BGX ports per System */
+
+/* Same as in BGX_CMR_CONFIG[lmac_type] */
+#define OCTTX_BGX_LMAC_TYPE_SGMII  0
+#define OCTTX_BGX_LMAC_TYPE_XAUI   1
+#define OCTTX_BGX_LMAC_TYPE_RXAUI  2
+#define OCTTX_BGX_LMAC_TYPE_10GR   3
+#define OCTTX_BGX_LMAC_TYPE_40GR   4
+#define OCTTX_BGX_LMAC_TYPE_QSGMII 6
 
 struct octtx_bgx_port {
 	struct list_head list;
@@ -71,6 +79,7 @@ struct octtx_bgx_port {
 	int	node; /* CPU node */
 	int	bgx; /* Node-local BGX device index */
 	int	lmac; /* BGX-local port/LMAC number/index */
+	int	lmac_type; /* OCTTX_BGX_LMAC_TYPE_nnn */
 	int	base_chan; /* Node-local base channel (PKI_CHAN_E) */
 	int	num_chans;
 	int	pkind; /* PKI port number */
@@ -78,7 +87,7 @@ struct octtx_bgx_port {
 };
 
 /* Domain internal (LBK) port */
-#define OCTEONTX_MAX_LBK_PORTS 2 /* Maximum LBK ports per System */
+#define OCTTX_MAX_LBK_PORTS 2 /* Maximum LBK ports per System */
 
 struct octtx_lbk_port {
 	struct list_head list;
