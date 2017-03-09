@@ -141,5 +141,11 @@ config OCTEONTX_SSOW_PF
 	  Select this option to enable SSOW Physical function.
           SSOW is a way to get work for cores.
 
+config OCTEONTX
+	tristate "OcteonTX coprocessor maintanier"
+	depends on THUNDER_NIC_BGX && OCTEONTX_FPA_PF && OCTEONTX_SSO_PF
+	default y
+	help
+	  Select this option to enable Octeon coprocessor management.
 
 endif # NET_VENDOR_CAVIUM
