@@ -100,4 +100,22 @@ config LIQUIDIO_VF
 	  will be called liquidio_vf. MSI-X interrupt support is required
 	  for this driver to work correctly
 
+config OCTEONTX_FPA_PF
+	tristate "OcteonTX free pool allocator physical function driver(FPA_PF)"
+	depends on 64BIT
+	default y
+	help
+	  Select this option to enable FPA Physical function.
+          FPA provides hardware assisted memory management for
+	  OcteonTX coprocessors.
+
+config OCTEONTX_FPA_VF
+	tristate "OcteonTX free pool allocator virtual function driver(FPA_VF)"
+	depends on 64BIT
+	default y
+	help
+	  Select this option to enable FPA Virtual function.
+          FPA provides hardware assisted memory management for
+	  OcteonTX coprocessors. Each VF owns single FPA pool.
+
 endif # NET_VENDOR_CAVIUM
