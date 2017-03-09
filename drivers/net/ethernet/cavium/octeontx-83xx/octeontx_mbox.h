@@ -48,6 +48,11 @@ enum coproc_t {
 #define MBOX_RET_INVALID	0x2
 #define MBOX_RET_INTERNAL_ERR	0x3
 
+/* magic values used for normal and oob data notification */
+#define MBOX_TRIGGER_NORMAL	0x00 /* normal msg transport */
+#define MBOX_TRIGGER_OOB_RESET	0x01 /* OOB reset request */
+#define MBOX_TRIGGER_OOB_RES	0x80 /* OOB response mask */
+
 #define MBOX_MAX_MSG_SIZE	1024
 
 /* Structure used for mbox synchronization
