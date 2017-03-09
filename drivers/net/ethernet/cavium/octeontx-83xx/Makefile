@@ -4,6 +4,8 @@
 
 obj-$(CONFIG_OCTEONTX_FPA_PF) += fpapf.o
 obj-$(CONFIG_OCTEONTX_FPA_VF) += fpavf.o
+obj-$(CONFIG_OCTEONTX_RST) += rst.o
 
 fpapf-objs := fpapf_main.o
 fpavf-objs := fpavf_main.o
+rst-objs := rst_main.o
