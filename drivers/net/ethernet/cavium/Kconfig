@@ -118,4 +118,10 @@ config OCTEONTX_FPA_VF
           FPA provides hardware assisted memory management for
 	  OcteonTX coprocessors. Each VF owns single FPA pool.
 
+config OCTEONTX_RST
+	tristate "OcteonTX Reset driver(RST)"
+	depends on 64BIT
+	help
+	  Select this option to enable RST.
+
 endif # NET_VENDOR_CAVIUM
