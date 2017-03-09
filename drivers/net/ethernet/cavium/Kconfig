@@ -121,7 +121,25 @@ config OCTEONTX_FPA_VF
 config OCTEONTX_RST
 	tristate "OcteonTX Reset driver(RST)"
 	depends on 64BIT
+	default y
 	help
 	  Select this option to enable RST.
+
+config OCTEONTX_SSO_PF
+	tristate "OcteonTX SSO physical function driver(SSO_PF)"
+	depends on 64BIT && OCTEONTX_FPA_PF && OCTEONTX_FPA_VF && OCTEONTX_RST
+	default y
+	help
+	  Select this option to enable SSO Physical function.
+          SSO is a way to submit work from Cores.
+
+config OCTEONTX_SSOW_PF
+	tristate "OcteonTX SSOW physical function driver(SSOW_PF)"
+	depends on 64BIT
+	default y
+	help
+	  Select this option to enable SSOW Physical function.
+          SSOW is a way to get work for cores.
+
 
 endif # NET_VENDOR_CAVIUM
