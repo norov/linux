@@ -155,6 +155,13 @@ config OCTEONTX_LBK
 	help
 	  Select this option to enable LBK.
 
+config OCTEONTX_TIM_PF
+	tristate "OcteonTX TIM physical function driver(TIM_PF)"
+	depends on 64BIT && OCTEONTX_RST
+	default y
+	help
+	  Select this option to enable TIM Physical function.
+
 config OCTEONTX
 	tristate "OcteonTX coprocessor maintanier"
 	depends on THUNDER_NIC_BGX && OCTEONTX_FPA_PF && OCTEONTX_SSO_PF
