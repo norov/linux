@@ -33,6 +33,14 @@
 #define BGX_CMR_RX_BP_STATUS		0xF0
 #define BGX_CMR_RX_DMAC_CAM(__dmac)	(0x200 + ((__dmac) * 0x8))
 
+/* LMAC types as in BGX(x)_CMR(x)_CONFIG[lmac_type] */
+#define BGX_LMAC_TYPE_SGMII	0x0
+#define BGX_LMAC_TYPE_XAUI	0x1
+#define BGX_LMAC_TYPE_RXAUI	0x2
+#define BGX_LMAC_TYPE_10GR	0x3
+#define BGX_LMAC_TYPE_40GR	0x4
+#define BGX_LMAC_TYPE_QSGMII	0x6
+
 /* BGX device Configuration and Control Block */
 struct bgxpf {
 	struct list_head list; /* List of BGX devices */
@@ -152,6 +160,7 @@ static int bgx_port_macaddr_set(struct octtx_bgx_port *port, u8 macaddr[]);
 static int bgx_port_bp_set(struct octtx_bgx_port *port, u8 on);
 static int bgx_port_bcast_set(struct octtx_bgx_port *port, u8 on);
 static int bgx_port_mcast_set(struct octtx_bgx_port *port, u8 on);
+static int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu);
 
 static int bgx_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 			       union mbox_data *req,
@@ -222,6 +231,10 @@ static int bgx_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 		break;
 	case MBOX_BGX_PORT_SET_MCAST:
 		bgx_port_mcast_set(port, *(u8 *)mdata);
+		resp->data = 0;
+		break;
+	case MBOX_BGX_PORT_SET_MTU:
+		bgx_port_mtu_set(port, *(u16 *)mdata);
 		resp->data = 0;
 		break;
 	default:
@@ -312,6 +325,21 @@ int bgx_port_config(struct octtx_bgx_port *port, mbox_bgx_port_conf_t *conf)
 
 	macaddr = thbgx->get_mac_addr(port->node, port->bgx, port->lmac);
 	memcpy(conf->macaddr, macaddr, 6);
+
+	switch (conf->mode) {
+	case BGX_LMAC_TYPE_SGMII:
+	case BGX_LMAC_TYPE_QSGMII:
+		reg = bgx_reg_read(bgx, port->lmac, BGX_GMP_GMI_RXX_JABBER);
+		conf->mtu = reg & 0xFFFF;
+		break;
+	case BGX_LMAC_TYPE_XAUI:
+	case BGX_LMAC_TYPE_RXAUI:
+	case BGX_LMAC_TYPE_10GR:
+	case BGX_LMAC_TYPE_40GR:
+		reg = bgx_reg_read(bgx, port->lmac, BGX_SMUX_RX_JABBER);
+		conf->mtu = reg & 0xFFFF;
+		break;
+	}
 	return 0;
 }
 
@@ -518,6 +546,33 @@ int bgx_port_mcast_set(struct octtx_bgx_port *port, u8 on)
 	else
 		reg &= ~(0x3ull << 1); /* MCAST_MODE = 0 */
 	bgx_reg_write(bgx, port->lmac, BGX_CMRX_RX_DMAC_CTL, reg);
+	return 0;
+}
+
+int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu)
+{
+	struct bgxpf *bgx;
+	u64 reg;
+
+	bgx = get_bgx_dev(port->node, port->bgx);
+	if (!bgx)
+		return -EINVAL;
+
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMR_CONFIG);
+	reg = (reg >> 8) & 0x7; /* LMAC_TYPE */
+
+	switch (reg) {
+	case BGX_LMAC_TYPE_SGMII:
+	case BGX_LMAC_TYPE_QSGMII:
+		bgx_reg_write(bgx, port->lmac, BGX_GMP_GMI_RXX_JABBER, mtu);
+		break;
+	case BGX_LMAC_TYPE_XAUI:
+	case BGX_LMAC_TYPE_RXAUI:
+	case BGX_LMAC_TYPE_10GR:
+	case BGX_LMAC_TYPE_40GR:
+		bgx_reg_write(bgx, port->lmac, BGX_SMUX_RX_JABBER, mtu);
+		break;
+	}
 	return 0;
 }
 
