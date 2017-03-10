@@ -3757,7 +3757,7 @@ static int reset_cavium_octeon_vf(struct pci_dev *pdev, int probe)
 	u64 val;
 	u64 addr;
 	int vf_id;
-	int count = 20;
+	int count = 200;
 
 	dev_dbg(&pdev->dev, "reset_cavium_octeon_vf() called probe=%d\n",
 			probe);
@@ -3772,7 +3772,7 @@ static int reset_cavium_octeon_vf(struct pci_dev *pdev, int probe)
 	mb();
 
 	while (count) {
-		usleep_range(100, 2000);
+		usleep_range(1000, 2000);
 		val = atomic_read(&octtx_sso_reset[vf_id]);
 		if (!val)
 			goto exit;

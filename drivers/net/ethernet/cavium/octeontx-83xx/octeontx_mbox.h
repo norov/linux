@@ -261,6 +261,7 @@ union mbox_data {
 #define MBOX_BGX_PORT_SET_BP 11
 #define MBOX_BGX_PORT_SET_BCAST 12
 #define MBOX_BGX_PORT_SET_MCAST 13
+#define MBOX_BGX_PORT_SET_MTU 14
 
 /* BGX port configuration parameters: */
 typedef struct mbox_bgx_port_conf {
@@ -284,6 +285,8 @@ typedef struct mbox_bgx_port_conf {
 	u16 base_chan;
 	/* Number of channels */
 	u16 num_chans;
+	/* MTU size*/
+	u16 mtu;
 	/* Diagnostics support: */
 	/* BGX number */
 	u8 bgx;
