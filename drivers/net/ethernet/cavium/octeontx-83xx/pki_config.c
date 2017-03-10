@@ -172,7 +172,6 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 		cfg |= (0x1ULL << PKI_STYLE_CFG_FCS_CHK_SHIFT);
 		cfg |= (0x1ULL << PKI_STYLE_CFG_FCS_STRIP_SHIFT);
 	}
-	cfg |= (0x1ULL << PKI_STYLE_CFG_MAXERR_EN_SHIFT);
 	cfg |= (0x1ULL << PKI_STYLE_CFG_LENERR_EN_SHIFT);
 	for (i = 0; i < pki->max_cls; i++)
 		pki_reg_write(pki, PKI_CLX_STYLEX_CFG(i, port->init_style),
@@ -212,7 +211,8 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 
 	/* TO_DO add support for loopback ports later*/
 	port = &vf->bgx_port[vf_id];
-	if (port->state != PKI_PORT_OPEN || port->qpg_base != QPG_NOT_INIT)
+	if ((port->state != PKI_PORT_OPEN && port->state != PKI_PORT_STOP) ||
+	    port->qpg_base != QPG_NOT_INIT)
 		return MBOX_RET_INVALID;
 	style = port->init_style;
 	/* TO_DO add support for alloc qpg, for now use pkind*64 */
@@ -332,7 +332,7 @@ int pki_port_pktbuf_cfg(struct pkipf_vf *vf, u16 vf_id,
 
 	/* TO_DO add support for loopback ports later*/
 	port = &vf->bgx_port[vf_id];
-	if (port->state != PKI_PORT_OPEN)
+	if (port->state != PKI_PORT_OPEN && port->state != PKI_PORT_STOP)
 		return MBOX_RET_INVALID;
 
 	reg = pki_reg_read(pki, PKI_STYLEX_BUF(port->init_style));
@@ -425,7 +425,7 @@ int pki_port_errchk(struct pkipf_vf *vf, u16 vf_id,
 
 	/* TO_DO add support for loopback ports later*/
 	port = &vf->bgx_port[vf_id];
-	if (port->state != PKI_PORT_OPEN)
+	if (port->state == PKI_PORT_CLOSE)
 		return MBOX_RET_INVALID;
 
 	style = port->init_style;
@@ -511,7 +511,7 @@ int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 
 	/* TO_DO add support for loopback ports later*/
 	port = &vf->bgx_port[vf_id];
-	if (port->state != PKI_PORT_OPEN)
+	if (port->state == PKI_PORT_CLOSE)
 		return MBOX_RET_INVALID;
 
 	style = port->init_style;
