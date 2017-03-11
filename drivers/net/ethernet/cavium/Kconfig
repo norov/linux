@@ -148,6 +148,13 @@ config OCTEONTX_PKO_PF
 	help
 	  Select this option to enable PKO Physical function.
 
+config OCTEONTX_LBK
+	tristate "OcteonTX Loopback Interface driver(LBK)"
+	depends on 64BIT
+	default y
+	help
+	  Select this option to enable LBK.
+
 config OCTEONTX
 	tristate "OcteonTX coprocessor maintanier"
 	depends on THUNDER_NIC_BGX && OCTEONTX_FPA_PF && OCTEONTX_SSO_PF
