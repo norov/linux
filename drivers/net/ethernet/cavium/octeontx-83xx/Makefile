@@ -8,6 +8,7 @@ obj-$(CONFIG_OCTEONTX_RST) += rst.o
 obj-$(CONFIG_OCTEONTX_SSO_PF) += ssopf.o
 obj-$(CONFIG_OCTEONTX_SSOW_PF) += ssowpf.o
 obj-$(CONFIG_OCTEONTX_PKO_PF) += pkopf.o
+obj-$(CONFIG_OCTEONTX_LBK) += lbk.o
 obj-$(CONFIG_OCTEONTX) += octeontx.o
 
 fpapf-objs := fpapf_main.o
@@ -17,3 +18,4 @@ ssopf-objs := ssopf_main.o octeontx_mbox.o
 ssowpf-objs := ssowpf_main.o
 pkopf-objs := pkopf_main.o
 octeontx-objs := octeontx_main.o bgx.o
+lbk-objs := lbk_main.o
