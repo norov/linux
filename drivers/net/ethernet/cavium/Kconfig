@@ -162,6 +162,14 @@ config OCTEONTX_TIM_PF
 	help
 	  Select this option to enable TIM Physical function.
 
+config OCTEONTX_PKI
+	tristate "OcteonTX Input packet parser(PKI)"
+	depends on 64BIT
+	default y
+	help
+	  Select this option to enable PKI.
+          PKI parses input packets and create work.
+
 config OCTEONTX
 	tristate "OcteonTX coprocessor maintanier"
 	depends on THUNDER_NIC_BGX && OCTEONTX_FPA_PF && OCTEONTX_SSO_PF
