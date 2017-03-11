@@ -22,6 +22,10 @@
 #include "fpa.h"
 #include "sso.h"
 #include "bgx.h"
+#include "pko.h"
+#include "lbk.h"
+#include "tim.h"
+#include "pki.h"
 
 #define DRV_NAME "octeontx"
 #define DRV_VERSION "0.1"
@@ -36,13 +40,13 @@ static dev_t octtx_dev;
 static atomic_t gbl_domain_id = ATOMIC_INIT(4);
 
 static struct bgx_com_s *bgx;
-//static struct lbk_com_s *lbk;
+static struct lbk_com_s *lbk;
 static struct fpapf_com_s *fpapf;
 static struct ssopf_com_s *ssopf;
-//static struct pkopf_com_s *pkopf;
-//static struct timpf_com_s *timpf;
+static struct pkopf_com_s *pkopf;
+static struct timpf_com_s *timpf;
 static struct ssowpf_com_s *ssowpf;
-//static struct pki_com_s *pki;
+static struct pki_com_s *pki;
 
 struct delayed_work dwork;
 struct delayed_work dwork_reset;
@@ -232,27 +236,27 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 
 	switch (hdr->coproc) {
 	case PKI_COPROC:
-		//pki->receive_message(0, domain->domain_id, hdr, req,
-		//			resp, add_data);
+		pki->receive_message(0, domain->domain_id, hdr, req,
+					resp, add_data);
 		break;
 	case FPA_COPROC:
 		fpapf->receive_message(0, domain->domain_id, hdr, req, resp,
 				       add_data);
 		break;
 	case BGX_COPROC:
-	//	bgx->receive_message(0, domain->domain_id, hdr,
-	//			req, resp, add_data);
+		bgx->receive_message(0, domain->domain_id, hdr,
+				req, resp, add_data);
 		break;
 	case LBK_COPROC:
-	//	lbk->receive_message(0, domain->domain_id, hdr,
-	//			req, resp, add_data);
+		lbk->receive_message(0, domain->domain_id, hdr,
+				req, resp, add_data);
 		break;
 	case PKO_COPROC:
-	//	pkopf->receive_message(0, domain->domain_id, hdr, req, resp);
+		pkopf->receive_message(0, domain->domain_id, hdr, req, resp);
 		break;
 	case TIM_COPROC:
-	//	timpf->receive_message(0, domain->domain_id, hdr,
-	//			req, resp, add_data);
+		timpf->receive_message(0, domain->domain_id, hdr,
+				req, resp, add_data);
 		break;
 	case SSOW_COPROC:
 	case SSO_COPROC:
@@ -286,9 +290,9 @@ void octeontx_remove_domain(int node, int domain_id)
 	spin_unlock(&octeontx_domains_lock);
 
 	bgx->free_domain(node, domain_id);
-	//lbk->free_domain(node, domain_id);
-	//pkopf->free_domain(node, domain_id);
-	//pki->free_domain(node, domain_id);
+	lbk->free_domain(node, domain_id);
+	pkopf->free_domain(node, domain_id);
+	pki->free_domain(node, domain_id);
 	ssopf->free_domain(node, domain_id);
 	ssowpf->free_domain(node, domain_id);
 	fpapf->free_domain(node, domain_id);
@@ -386,6 +390,33 @@ int octeontx_create_domain(const char *name, int type,
 		goto error;
 	}
 
+	ret = pki->create_domain(node, domain_id, &octtx_master_com, domain,
+			&octtx_device->kobj, domain->name);
+	if (ret) {
+		dev_err(octtx_device, "Failed to create PKI domain\n");
+		goto error;
+	}
+
+	/* OCTEONTX allows to create two internal duplex (from the dataplane
+	 * user point of view) ports out of four available LBK devices:
+	 * virt0: transferring packets between PKO and PKI (LBK0);
+	 * virt1: transferring packets between PKO/PKI and NIC (LBK1 + LBK2).
+	 * NOTE: The domain specification validity should be done here.
+	 */
+	domain->num_lbk_ports = lbk_count;
+	for (i = 0; i < domain->num_lbk_ports; i++) {
+		domain->lbk_port[i].domain_id = domain_id;
+		domain->lbk_port[i].dom_port_idx = i;
+		domain->lbk_port[i].glb_port_idx = lbk_port[i];
+		domain->lbk_port[i].pkind = pki->add_lbk_port(node, domain_id,
+							&domain->lbk_port[i]);
+	}
+	ret = lbk->create_domain(node, domain_id, domain->lbk_port, i,
+			&octtx_master_com, domain);
+	if (ret) {
+		dev_err(octtx_device, "Failed to create LBK domain\n");
+		goto error;
+	}
 	/* There is a global list of all network (BGX-based) ports
 	 * detected by the thunder driver and provided to this driver.
 	 * This list is maintained in bgx.c (octeontx_bgx_ports).
@@ -409,6 +440,60 @@ int octeontx_create_domain(const char *name, int type,
 	if (ret) {
 		dev_err(octtx_device, "Failed to create BGX domain\n");
 		goto error;
+	}
+	/* Now that we know which exact ports we have, set pkinds for them. */
+	for (i = 0; i < domain->num_bgx_ports; i++) {
+		ret = pki->add_bgx_port(node, domain_id, &domain->bgx_port[i]);
+		if (ret < 0) {
+			dev_err(octtx_device,
+				"Failed to allocate PKIND for port l%d(g%d)\n",
+				domain->bgx_port[i].dom_port_idx,
+				domain->bgx_port[i].glb_port_idx);
+			goto error;
+		}
+		domain->bgx_port[i].pkind = ret;
+		ret = bgx->set_pkind(node, domain_id,
+				     domain->bgx_port[i].dom_port_idx,
+				     domain->bgx_port[i].pkind);
+		if (ret < 0) {
+			dev_err(octtx_device,
+				"Failed to set PKIND for port l%d(g%d)\n",
+				domain->bgx_port[i].dom_port_idx,
+				domain->bgx_port[i].glb_port_idx);
+			goto error;
+		}
+	}
+	if (ret) {
+		dev_err(octtx_device, "Failed to create BGX domain\n");
+		goto error;
+	}
+	/* remove this once PKO init extends for LBK. */
+	lbk_count = 0;
+
+	domain->pko_vf_count = bgx_count + lbk_count;
+	if (domain->pko_vf_count != pko_count) {
+		dev_err(octtx_device,
+			"requested %d pko vfs, the proper values is: %d\n",
+			pko_count, domain->pko_vf_count);
+		dev_err(octtx_device, " proceeding with proper value..\n");
+	}
+	ret = pkopf->create_domain(node, domain_id, domain->pko_vf_count,
+				domain->bgx_port,
+				&octtx_master_com, domain,
+				&octtx_device->kobj, domain->name);
+	if (ret) {
+		dev_err(octtx_device, "Failed to create PKO domain\n");
+		goto error;
+	}
+	domain->tim_vf_count = tim_count;
+	if (domain->tim_vf_count > 0) {
+		ret = timpf->create_domain(node, domain_id,
+			domain->tim_vf_count, &octtx_master_com, domain,
+			&octtx_device->kobj, domain->name);
+		if (ret) {
+			dev_err(octtx_device, "Failed to create TIM domain\n");
+			goto error;
+		}
 	}
 	domain->dom_attr.show = octtx_domain_id_show;
 	domain->dom_attr.attr.name = "domain_id";
@@ -442,6 +527,34 @@ static int octeontx_reset_domain(void *master_data)
 	if (ret) {
 		dev_err(octtx_device,
 			"Failed to reset BGX of domain %d on node %d.\n",
+		       domain->domain_id, node);
+		return ret;
+	}
+	ret = lbk->reset_domain(node, domain->domain_id);
+	if (ret) {
+		dev_err(octtx_device,
+			"Failed to reset LBK of domain %d on node %d.\n",
+		       domain->domain_id, node);
+		return ret;
+	}
+	ret = timpf->reset_domain(node, domain->domain_id);
+	if (ret) {
+		dev_err(octtx_device,
+			"Failed to reset TIM of domain %d on node %d.\n",
+		       domain->domain_id, node);
+		return ret;
+	}
+	ret = pkopf->reset_domain(node, domain->domain_id);
+	if (ret) {
+		dev_err(octtx_device,
+			"Failed to reset PKO of domain %d on node %d.\n",
+		       domain->domain_id, node);
+		return ret;
+	}
+	ret = pki->reset_domain(node, domain->domain_id);
+	if (ret) {
+		dev_err(octtx_device,
+			"Failed to reset PKI of domain %d on node %d.\n",
 		       domain->domain_id, node);
 		return ret;
 	}
@@ -570,6 +683,9 @@ static int __init octeontx_init_module(void)
 	bgx = bgx_octeontx_init();
 	if (!bgx)
 		return -ENODEV;
+	lbk = try_then_request_module(symbol_get(lbk_com), "lbk");
+	if (!lbk)
+		return -ENODEV;
 	fpapf = try_then_request_module(symbol_get(fpapf_com), "fpapf");
 	if (!fpapf) {
 		symbol_put(lbk_com);
@@ -588,13 +704,44 @@ static int __init octeontx_init_module(void)
 		symbol_put(fpapf_com);
 		return -ENODEV;
 	}
+	pki = try_then_request_module(symbol_get(pki_com), "pki");
+	if (!pki) {
+		symbol_put(lbk_com);
+		symbol_put(ssopf_com);
+		symbol_put(ssowpf_com);
+		symbol_put(fpapf_com);
+		return -ENODEV;
+	}
+	pkopf = try_then_request_module(symbol_get(pkopf_com), "pkopf");
+	if (!pkopf) {
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
+		symbol_put(ssopf_com);
+		symbol_put(ssowpf_com);
+		symbol_put(fpapf_com);
+		return -ENODEV;
+	}
+	timpf = try_then_request_module(symbol_get(timpf_com), "timpf");
+	if (!timpf) {
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
+		symbol_put(ssopf_com);
+		symbol_put(ssowpf_com);
+		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		return -ENODEV;
+	}
 	/* Register a physical link status poll fn() */
 	check_link = alloc_workqueue("octeontx_check_link_status",
 				     WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
 	if (!check_link) {
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		symbol_put(timpf_com);
 		return -ENOMEM;
 	}
 
@@ -602,6 +749,8 @@ static int __init octeontx_init_module(void)
 	reset_domain = alloc_workqueue("octeontx_reset_domain",
 				       WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
 	if (!reset_domain) {
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
@@ -615,6 +764,8 @@ static int __init octeontx_init_module(void)
 	/* create a char device */
 	ret = alloc_chrdev_region(&octtx_dev, 1, 1, DEVICE_NAME);
 	if (ret != 0) {
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
@@ -622,6 +773,8 @@ static int __init octeontx_init_module(void)
 	}
 	octtx_cdev = cdev_alloc();
 	if (!octtx_cdev) {
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
@@ -631,6 +784,8 @@ static int __init octeontx_init_module(void)
 	ret = cdev_add(octtx_cdev, octtx_dev, 1);
 	if (ret < 0) {
 		cdev_del(octtx_cdev);
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
@@ -641,6 +796,8 @@ static int __init octeontx_init_module(void)
 	octtx_class = class_create(THIS_MODULE, CLASS_NAME);
 	if (IS_ERR(octtx_class)) {
 		cdev_del(octtx_cdev);
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
@@ -653,6 +810,8 @@ static int __init octeontx_init_module(void)
 		class_unregister(octtx_class);
 		class_destroy(octtx_class);
 		cdev_del(octtx_cdev);
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
@@ -671,9 +830,13 @@ static void __exit octeontx_cleanup_module(void)
 	class_unregister(octtx_class);
 	class_destroy(octtx_class);
 	cdev_del(octtx_cdev);
+	symbol_put(pki_com);
 	symbol_put(ssopf_com);
 	symbol_put(ssowpf_com);
 	symbol_put(fpapf_com);
+	symbol_put(pkopf_com);
+	symbol_put(timpf_com);
+	symbol_put(lbk_com);
 }
 
 module_init(octeontx_init_module);
