@@ -381,6 +381,7 @@ static void fpavf_irq_free(struct fpavf *fpa)
 
 	free_irq(fpa->msix_entries[0].vector, fpa);
 	pci_disable_msix(fpa->pdev);
+	devm_kfree(&fpa->pdev->dev, fpa->msix_entries);
 }
 
 static int fpavf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -461,6 +462,11 @@ static void fpavf_remove(struct pci_dev *pdev)
 	spin_unlock(&octeontx_fpavf_devices_lock);
 
 	fpavf_irq_free(fpa);
+	pcim_iounmap(pdev, fpa->reg_base);
+	pci_disable_device(pdev);
+	pci_release_regions(pdev);
+
+	devm_kfree(&pdev->dev, fpa);
 }
 
 /* devices supported */
