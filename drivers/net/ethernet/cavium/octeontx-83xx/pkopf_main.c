@@ -24,7 +24,8 @@ static LIST_HEAD(octeontx_pko_devices);
 static struct fpapf_com_s *fpapf;
 static struct fpavf_com_s *fpavf;
 static struct fpavf *fpa;
-static int pko_niff_start(struct pkopf *pko, int vf, u32 max_frame, u32 gbps);
+static int pko_pstree_setup(struct pkopf *pko, int vf, u32 max_frame,
+			    int mac_num, int mac_mode, int channel);
 
 /* In Cavium OcteonTX SoCs, all accesses to the device registers are
  * implicitly strongly ordered.
@@ -282,7 +283,7 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 num_dqs,
 	u64 i;
 	int vf_idx = 0;
 	resource_size_t vf_start;
-	u32 gbps;
+	int mac_num, mac_mode, chan;
 	const u32 max_frame = 0xffff; // FIXME: consider new pko domain param
 	struct pci_dev *virtfn;
 
@@ -340,24 +341,19 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 num_dqs,
 			identify(&pko->vf[i], domain_id, vf_idx);
 			pko_pf_gmctl_init(pko, i, get_gmid(domain_id));
 
-			/* Setup the PQ/SQ/DQ */
-			/* TODO: Distinguish BGX and LBK ports.*/
-			switch (port[vf_idx].lmac_type) {
-			case OCTTX_BGX_LMAC_TYPE_40GR:
-				gbps = 40;
-				break;
-			case OCTTX_BGX_LMAC_TYPE_XAUI:
-			case OCTTX_BGX_LMAC_TYPE_RXAUI:
-			case OCTTX_BGX_LMAC_TYPE_10GR:
-				gbps = 10;
-				break;
-			case OCTTX_BGX_LMAC_TYPE_SGMII:
-			default:
-				gbps = 1;
-				break;
-			}
-			pko_niff_start(pko, i, max_frame, gbps);
+			/* Setup the PKO Scheduling tree: PQ/SQ/DQ.
+			 * NOTE: mac_num is enumerated by PKO_LMAC_E.
+			 * TODO.1: Distinguish BGX and LBK ports.
+			 * Currently -- for BGX only.
+			 */
+			mac_num = pko_get_bgx_mac(pko->vf[i].bgx_mask,
+						  pko->vf[i].bgx_lmac);
+			chan = pko_get_bgx_channel(pko->vf[i].bgx_mask,
+						   pko->vf[i].bgx_lmac, 0);
+			mac_mode = port[vf_idx].lmac_type;
 
+			pko_pstree_setup(pko, i, max_frame,
+					 mac_num, mac_mode, chan);
 			vf_idx++;
 			if (vf_idx == num_dqs) {
 				pko->vfs_in_use += num_dqs;
@@ -563,44 +559,60 @@ free_irq:
 	return ret;
 }
 
-static int pko_pf_mac_init(struct pkopf *pko, int mac_num, u32 gbps)
+static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 {
-	u64 reg, skid, fifo_size, size, rate, fifo;
+	u64 reg, fifo;
 	int ptgf;
+	u64 fifo_size = 2500; /* 2.5KB */
+	u64 size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
+	u64 skid = 0x0; /* 16 */
+	u64 rate = 0x0; /* 6.25 Gpbs (6 inflight packets) */
 
-	/* 1. The following parameters have to be consistent (see 83xx HRM):
-	 * PKO_MAC(x)_CFG[fifo_num],[skid_max_cnt]
-	 * PKO_PTGF(x)_CFG[rate],[size]
-	 * PKO_MCI1_MAX_CRED(x)[max_cred_lim]
-	 * 2. The combined bit rate among all FIFOs should not exceed
-	 * 125 Gbps (80 inflight packets).
+	/* 1. FIFO group assignment map:
+	 * G0 (FIFOs: 0,1,2,3)     -- BGX0            (mac_num = 3,4,5,6)
+	 * G1 (FIFOs: 4,5,6,7)     -- BGX1            (mac_num = 7,8,9,10)
+	 * G2 (FIFOs: 8,9,10,11)   -- BGX2            (mac_num = 11,12,13,14)
+	 * G3 (FIFOs: 12,13,14,15) -- BGX3            (mac_num = 15,16,17,18)
+	 * G4 (FIFOs: 16,17,18,19) -- LBK0, LBK1, DPI (mac_num = 0,1,2)
+	 * G5 (FIFOs: Virtual)     -- NULL            (mac_num = 19)
 	 *
-	 * TODO: For now, use simple arithmetic: FIFO number = MAC number.
-	 * In general, any MAC may use any FIFO number.
+	 * 2. TODO: The combined bit rate among all FIFOs should not exceed
+	 * 125 Gbps (80 inflight packets).
 	 */
-	ptgf = mac_num / 4;
-	switch (gbps) {
-	case 40:
-		fifo_size = 10000; /* 10KB */
-		size = 4; /* {10.0, ---, ---, ---}KB */
-		skid = 0x2; /* 64 */
-		rate = 0x3; /* 50 Gpbs (48 inflight packets) */
-		fifo = ptgf * 4; /* Only the 1st one in group can be used.*/
-		break;
-	case 10:
-		fifo_size = 2500; /* 2.5KB */
-		size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
-		skid = 0x0; /* 16 */
-		rate = 0x1; /* 12.5 Gpbs (12 inflight packets) */
-		fifo = mac_num;
-		break;
-	default:
-		fifo_size = 2500; /* 2.5KB */
-		size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
-		skid = 0x0; /* 16 */
-		rate = 0x0; /* 6.25 Gpbs (6 inflight packets) */
-		fifo = mac_num;
-		break;
+	if (mac_num >= 3 && mac_num <= 18) { /* BGX */
+		fifo = mac_num - 3;
+		ptgf = fifo / 4;
+		switch (mac_mode) {
+		case OCTTX_BGX_LMAC_TYPE_40GR:
+			fifo_size = 10000; /* 10KB */
+			size = 4; /* {10.0, ---, ---, ---}KB */
+			rate = 0x3; /* 50 Gpbs (48 inflight packets) */
+			skid = 0x2; /* 64 */
+			break;
+		case OCTTX_BGX_LMAC_TYPE_XAUI:
+		case OCTTX_BGX_LMAC_TYPE_RXAUI:
+			fifo_size = 10000; /* 10KB */
+			size = 4; /* {10.0, ---, ---, ---}KB */
+			rate = 0x1; /* 12.5 Gpbs (12 inflight packets) */
+			skid = 0x1; /* 32 */
+			break;
+		case OCTTX_BGX_LMAC_TYPE_10GR: /* XFI */
+			fifo_size = 2500; /* 2.5KB */
+			size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
+			rate = 0x2; /* 25.0 Gpbs (24 inflight packets) */
+			skid = 0x1; /* 32 */
+			break;
+		default: /* SGMII, ... */
+			break;
+		}
+	} else if (mac_num >= 0 && mac_num <= 2) { /* LBK */
+		fifo = mac_num + 16;
+		ptgf = 4;
+	} else if (mac_num == 19) { /* NULL */
+		fifo = 19;
+		ptgf = 5;
+	} else {
+		return -EINVAL;
 	}
 	reg = fifo | (skid << 5) | (0x0 << 15) | (0x1 << 16);
 	dev_dbg(&pko->pdev->dev, "  write %016llx PKO_MAC%d_CFG\n",
@@ -625,8 +637,7 @@ static int pko_pf_mac_init(struct pkopf *pko, int mac_num, u32 gbps)
 	return 0;
 }
 
-static int pko_niff_pq_init(struct pkopf *pko, int vf,
-			    int mac_num, u32 max_frame)
+static int pko_pq_init(struct pkopf *pko, int vf, int mac_num, u32 max_frame)
 {
 	u64 reg;
 	int l1_sq;
@@ -723,8 +734,8 @@ static void pko_lX_set_shape(struct pkopf *pko, int level, int q, u64 reg)
 	}
 }
 
-static int pko_niff_sq_init(struct pkopf *pko, int vf, int level, u32 channel,
-			    u32 max_frame, int parent_sq)
+static int pko_sq_init(struct pkopf *pko, int vf, int level, u32 channel,
+		       u32 max_frame, int parent_sq)
 {
 	int mac_num;
 	int queue;
@@ -764,7 +775,7 @@ static int pko_niff_sq_init(struct pkopf *pko, int vf, int level, u32 channel,
 	return queue_base;
 }
 
-static int pko_niff_dq_init(struct pkopf *pko, int vf)
+static int pko_dq_init(struct pkopf *pko, int vf)
 {
 	int queue_base, i;
 	u64 reg;
@@ -785,30 +796,25 @@ static int pko_niff_dq_init(struct pkopf *pko, int vf)
 	return 0;
 }
 
-static int pko_niff_start(struct pkopf *pko, int vf, u32 max_frame, u32 gbps)
+static int pko_pstree_setup(struct pkopf *pko, int vf, u32 max_frame,
+			    int mac_num, int mac_mode, int channel)
 {
 	int lvl;
 	int err;
-	int mac_num;
-	int channel;
 
-	mac_num = pko_get_bgx_mac(pko->vf[vf].bgx_mask, pko->vf[vf].bgx_lmac);
-	channel = pko_get_bgx_channel(pko->vf[vf].bgx_mask,
-				      pko->vf[vf].bgx_lmac, 0);
-
-	err = pko_pf_mac_init(pko, mac_num, gbps);
+	err = pko_mac_init(pko, mac_num, mac_mode);
 	if (err)
 		return -ENODEV;
 
-	err = pko_niff_pq_init(pko, vf, mac_num, max_frame);
+	err = pko_pq_init(pko, vf, mac_num, max_frame);
 	if (err)
 		return -ENODEV;
 
 	err = mac_num;
 	for (lvl = 2; lvl <= pko->max_levels; lvl++)
-		err = pko_niff_sq_init(pko, vf, lvl, channel, max_frame, err);
+		err = pko_sq_init(pko, vf, lvl, channel, max_frame, err);
 
-	err = pko_niff_dq_init(pko, vf);
+	err = pko_dq_init(pko, vf);
 	if (err)
 		return -ENODEV;
 
