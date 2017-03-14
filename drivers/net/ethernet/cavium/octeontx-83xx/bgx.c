@@ -33,14 +33,6 @@
 #define BGX_CMR_RX_BP_STATUS		0xF0
 #define BGX_CMR_RX_DMAC_CAM(__dmac)	(0x200 + ((__dmac) * 0x8))
 
-/* LMAC types as in BGX(x)_CMR(x)_CONFIG[lmac_type] */
-#define BGX_LMAC_TYPE_SGMII	0x0
-#define BGX_LMAC_TYPE_XAUI	0x1
-#define BGX_LMAC_TYPE_RXAUI	0x2
-#define BGX_LMAC_TYPE_10GR	0x3
-#define BGX_LMAC_TYPE_40GR	0x4
-#define BGX_LMAC_TYPE_QSGMII	0x6
-
 /* BGX device Configuration and Control Block */
 struct bgxpf {
 	struct list_head list; /* List of BGX devices */
@@ -327,15 +319,15 @@ int bgx_port_config(struct octtx_bgx_port *port, mbox_bgx_port_conf_t *conf)
 	memcpy(conf->macaddr, macaddr, 6);
 
 	switch (conf->mode) {
-	case BGX_LMAC_TYPE_SGMII:
-	case BGX_LMAC_TYPE_QSGMII:
+	case OCTTX_BGX_LMAC_TYPE_SGMII:
+	case OCTTX_BGX_LMAC_TYPE_QSGMII:
 		reg = bgx_reg_read(bgx, port->lmac, BGX_GMP_GMI_RXX_JABBER);
 		conf->mtu = reg & 0xFFFF;
 		break;
-	case BGX_LMAC_TYPE_XAUI:
-	case BGX_LMAC_TYPE_RXAUI:
-	case BGX_LMAC_TYPE_10GR:
-	case BGX_LMAC_TYPE_40GR:
+	case OCTTX_BGX_LMAC_TYPE_XAUI:
+	case OCTTX_BGX_LMAC_TYPE_RXAUI:
+	case OCTTX_BGX_LMAC_TYPE_10GR:
+	case OCTTX_BGX_LMAC_TYPE_40GR:
 		reg = bgx_reg_read(bgx, port->lmac, BGX_SMUX_RX_JABBER);
 		conf->mtu = reg & 0xFFFF;
 		break;
@@ -562,14 +554,14 @@ int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu)
 	reg = (reg >> 8) & 0x7; /* LMAC_TYPE */
 
 	switch (reg) {
-	case BGX_LMAC_TYPE_SGMII:
-	case BGX_LMAC_TYPE_QSGMII:
+	case OCTTX_BGX_LMAC_TYPE_SGMII:
+	case OCTTX_BGX_LMAC_TYPE_QSGMII:
 		bgx_reg_write(bgx, port->lmac, BGX_GMP_GMI_RXX_JABBER, mtu);
 		break;
-	case BGX_LMAC_TYPE_XAUI:
-	case BGX_LMAC_TYPE_RXAUI:
-	case BGX_LMAC_TYPE_10GR:
-	case BGX_LMAC_TYPE_40GR:
+	case OCTTX_BGX_LMAC_TYPE_XAUI:
+	case OCTTX_BGX_LMAC_TYPE_RXAUI:
+	case OCTTX_BGX_LMAC_TYPE_10GR:
+	case OCTTX_BGX_LMAC_TYPE_40GR:
 		bgx_reg_write(bgx, port->lmac, BGX_SMUX_RX_JABBER, mtu);
 		break;
 	}
@@ -744,6 +736,12 @@ struct bgx_com_s *bgx_octeontx_init(void)
 			port->dom_port_idx = BGX_INVALID_ID;
 			reg = bgx_reg_read(bgx, lmac_idx, BGX_CMR_CONFIG);
 			port->lmac_type = (reg >> 8) & 0x7; /* LMAC_TYPE */
+			if (port->lmac_type == OCTTX_BGX_LMAC_TYPE_40GR)
+				reg = 0x100;
+			else
+				reg = 0x20;
+			bgx_reg_write(bgx, lmac_idx, BGX_SMUX_TX_THRESH, reg);
+
 			INIT_LIST_HEAD(&port->list);
 			list_add(&port->list, &octeontx_bgx_ports);
 			port_count++;
