@@ -589,17 +589,28 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 			rate = 0x3; /* 50 Gpbs (48 inflight packets) */
 			skid = 0x2; /* 64 */
 			break;
-		case OCTTX_BGX_LMAC_TYPE_XAUI:
-		case OCTTX_BGX_LMAC_TYPE_RXAUI:
+		case OCTTX_BGX_LMAC_TYPE_XAUI: /* Or DXAUI */
 			fifo_size = 10000; /* 10KB */
 			size = 4; /* {10.0, ---, ---, ---}KB */
-			rate = 0x1; /* 12.5 Gpbs (12 inflight packets) */
+			rate = 0x2; /* 25.0 Gpbs (24 inflight packets) */
+			skid = 0x1; /* 32 */
+			break;
+		case OCTTX_BGX_LMAC_TYPE_RXAUI:
+			/* TODO: RXAUI takes two BGX LMACs. Thus, the proper
+			 * FIFO-LMAC map would be using 2 * 5KB FIFOs (size=3).
+			 * Though, currently, there is some mess with the RXAUI
+			 * setup in U-Boot and THUNDER driver, so, for now,
+			 * it is safer to go with the default map.
+			 */
+			fifo_size = 2500; /* 2.5KB */
+			size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
+			rate = 0x2; /* 25.0 Gpbs (24 inflight packets) */
 			skid = 0x1; /* 32 */
 			break;
 		case OCTTX_BGX_LMAC_TYPE_10GR: /* XFI */
 			fifo_size = 2500; /* 2.5KB */
 			size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
-			rate = 0x2; /* 25.0 Gpbs (24 inflight packets) */
+			rate = 0x1; /* 12.5 Gpbs (12 inflight packets) */
 			skid = 0x1; /* 32 */
 			break;
 		default: /* SGMII, ... */
