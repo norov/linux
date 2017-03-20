@@ -342,11 +342,7 @@ struct nicvf {
 #define	NIC_PF_VF_MAILBOX_SIZE		2
 #define	NIC_MBOX_MSG_TIMEOUT		2000 /* ms */
 
-/* Mailbox message types
- * Message codes must be in the range of 0x01 to 0x7F
- * MSB (0x80) is used for marking response message in case it is not ACK/NACK
- */
-#define	NIC_MBOX_MSG_INVALID		0x00	/* Do not use - Invalid msg */
+/* Mailbox message types */
 #define	NIC_MBOX_MSG_READY		0x01	/* Is PF ready to rcv msgs */
 #define	NIC_MBOX_MSG_ACK		0x02	/* ACK the message received */
 #define	NIC_MBOX_MSG_NACK		0x03	/* NACK the message received */
@@ -371,9 +367,8 @@ struct nicvf {
 #define	NIC_MBOX_MSG_LOOPBACK		0x16	/* Set interface in loopback */
 #define	NIC_MBOX_MSG_RESET_STAT_COUNTER 0x17	/* Reset statistics counters */
 #define	NIC_MBOX_MSG_PFC		0x18	/* Pause frame control */
-#define	NIC_MBOX_MSG_CFG_DONE		0x7E	/* VF configuration done */
-#define	NIC_MBOX_MSG_SHUTDOWN		0x7F	/* VF is being shutdown */
-#define	NIC_MBOX_MSG_RES_BIT		0x80	/* Mark for response message */
+#define	NIC_MBOX_MSG_CFG_DONE		0xF0	/* VF configuration done */
+#define	NIC_MBOX_MSG_SHUTDOWN		0xF1	/* VF is being shutdown */
 
 struct nic_cfg_msg {
 	u8    msg;
