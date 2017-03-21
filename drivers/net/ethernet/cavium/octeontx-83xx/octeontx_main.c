@@ -143,33 +143,47 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 
 		if (!strncmp(start, "ssow", sizeof("ssow") - 1)) {
 			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
 			if (kstrtol(start, 10, &ssow_count))
 				goto error;
 		} else if (!strncmp(start, "fpa", sizeof("fpa") - 1)) {
 			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
 			if (kstrtol(start, 10, &fpa_count))
 				goto error;
 		} else if (!strncmp(start, "sso", sizeof("sso") - 1)) {
 			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
 			if (kstrtol(start, 10, &sso_count))
 				goto error;
 		} else if (!strncmp(start, "pko", sizeof("pko") - 1)) {
 			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
 			if (kstrtol(start, 10, &pko_count))
 				goto error;
 		} else if (!strncmp(start, "pki", sizeof("pki") - 1)) {
 			continue;
 		} else if (!strncmp(start, "tim", sizeof("tim") - 1)) {
 			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
 			if (kstrtol(start, 10, &tim_count))
 				goto error;
 		} else if (!strncmp(start, "net", sizeof("net") - 1)) {
 			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
 			if (kstrtol(start, 10, &bgx_port[bgx_count]))
 				goto error;
 			bgx_count++;
 		} else if (!strncmp(start, "virt", sizeof("virt") - 1)) {
 			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
 			if (kstrtol(start, 10, &lbk_port[lbk_count]))
 				goto error;
 			lbk_count++;
