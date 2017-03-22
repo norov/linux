@@ -542,15 +542,13 @@ struct __attribute__((__packed__)) mbox_tim_ring_conf {
 #define MBOX_PKI_PORT_MODIFY_QOS		12
 /* Delet the complete qpg entries attached to this port */
 #define MBOX_PKI_PORT_DELETE_QOS		13
-/* Enable/disable RSS by setting qpg_grptag in all the qpg entries */
-#define MBOX_PKI_PORT_ENABLE_RSS		14
-#define MBOX_PKI_PORT_PKTDROP_CONFIG		15
-#define MBOX_PKI_PORT_WQE_GEN_CONFIG		16
-#define MBOX_PKI_BACKPRESSURE_CONFIG		17
-#define MBOX_PKI_PORT_GET_STATS			18
-#define MBOX_PKI_PORT_RESET_STATS		19
-#define MBOX_PKI_GET_PORT_CONFIG		20
-#define MBOX_PKI_GET_PORT_QOS_CONFIG		22
+#define MBOX_PKI_PORT_PKTDROP_CONFIG		14
+#define MBOX_PKI_PORT_WQE_GEN_CONFIG		15
+#define MBOX_PKI_BACKPRESSURE_CONFIG		16
+#define MBOX_PKI_PORT_GET_STATS			17
+#define MBOX_PKI_PORT_RESET_STATS		18
+#define MBOX_PKI_GET_PORT_CONFIG		19
+#define MBOX_PKI_GET_PORT_QOS_CONFIG		20
 
 /* pki pkind parse mode */
 enum  {
@@ -712,6 +710,8 @@ struct mbox_pki_qos_entry {
 	u16 ggrp_ok;
 	u16 ggrp_bad;
 	u16 gaura;
+	u8 grptag_ok;
+	u8 grptag_bad;
 };
 
 /* hardcoded TODO */
@@ -740,20 +740,10 @@ typedef struct mbox_pki_port_modify_qos_entry {
 		u8 f_grp_ok:1;
 		u8 f_grp_bad:1;
 		u8 f_gaura:1;
+		u8 f_grptag_ok:1;
+		u8 f_grptag_bad:1;
 	} mmask;
 	struct mbox_pki_qos_entry qos_entry;
 } mbox_pki_mod_qos_t;
-
-/* pki flow/style enable rss
- * If this message is received before create_qos, store the number of queues in
- * the database and when enable_qos received, program it same for all the
- * entries in first release.
- */
-typedef struct mbox_pki_port_enable_rss {
-	u8 port_type;
-	/* 1=enable 0=disable*/
-	u8 en_dis;
-	u8 num_queues;
-} mbox_pki_rss_cfg_t;
 
 #endif
