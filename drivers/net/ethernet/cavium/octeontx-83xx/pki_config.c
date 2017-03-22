@@ -33,6 +33,12 @@ static void set_clear_bit(u64 *value, bool flag, u64 bit_num)
 		*value &= ~(0x1Ull << bit_num);
 }
 
+static inline void set_field(u64 *ptr, u64 field_mask, u8 field_shift, u64 val)
+{
+	*ptr &= ~(field_mask << field_shift);
+	*ptr |= (val & field_mask) << field_shift;
+}
+
 static int pki_frmlen_reg(struct pki_t *pki, u16 maxlen, u16 minlen)
 {
 	u64 cfg;
@@ -239,32 +245,36 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 	port->num_entry = qcfg->num_entry;
 	for (i = 0; i < pki->max_cls; i++) {
 		cfg = pki_reg_read(pki, PKI_CLX_STYLEX_ALG(i, style));
-		cfg |= (qcfg->qpg_qos & PKI_STYLE_ALG_QPG_QOS_MASK) <<
-			PKI_STYLE_ALG_QPG_QOS_SHIFT;
-		cfg |= (qcfg->tag_type & PKI_STYLE_ALG_TT_MASK) <<
-			PKI_STLYE_ALG_TT_SHIFT;
+		set_field(&cfg, PKI_STYLE_ALG_QPG_QOS_MASK,
+			  PKI_STYLE_ALG_QPG_QOS_SHIFT, qcfg->qpg_qos);
+		set_field(&cfg, PKI_STYLE_ALG_TT_MASK,
+			  PKI_STLYE_ALG_TT_SHIFT, qcfg->tag_type);
 		pki_reg_write(pki, PKI_CLX_STYLEX_ALG(i, style), cfg);
 	}
 	for (i = 0; i < qcfg->num_entry; i++) {
 		qpg = &qcfg->qos_entry[i];
 		cfg = pki_reg_read(pki, PKI_QPG_TBLX(qpg_base + i));
-		cfg |= (qpg->gaura & PKI_QPG_TBL_GAURA_MASK) <<
-			PKI_QPG_TBL_GAURA_SHIFT;
-		cfg |= (qpg->ggrp_ok & PKI_QPG_TBL_GRP_OK_MASK) <<
-			PKI_QPG_TBL_GRP_OK_SHIFT;
-		cfg |= (qpg->ggrp_bad & PKI_QPG_TBL_GRP_BAD_MASK) <<
-			PKI_QPG_TBL_GRP_BAD_SHIFT;
-		cfg |= (qpg->port_add & PKI_QPG_TBL_PORT_ADD_MASK) <<
-			PKI_QPG_TBL_PORT_ADD_SHIFT;
+		set_field(&cfg, PKI_QPG_TBL_GAURA_MASK,
+			  PKI_QPG_TBL_GAURA_SHIFT, qpg->gaura);
+		set_field(&cfg, PKI_QPG_TBL_GRP_OK_MASK,
+			  PKI_QPG_TBL_GRP_OK_SHIFT, qpg->ggrp_ok);
+		set_field(&cfg, PKI_QPG_TBL_GRP_BAD_MASK,
+			  PKI_QPG_TBL_GRP_BAD_SHIFT, qpg->ggrp_bad);
+		set_field(&cfg, PKI_QPG_TBL_PORT_ADD_MASK,
+			  PKI_QPG_TBL_PORT_ADD_SHIFT, qpg->port_add);
+		set_field(&cfg, PKI_QPG_TBL_GRPTAG_BAD_MASK,
+			  PKI_QPG_TBL_GRPTAG_BAD_SHIFT, qpg->grptag_bad);
+		set_field(&cfg, PKI_QPG_TBL_GRPTAG_OK_MASK,
+			  PKI_QPG_TBL_GRPTAG_OK_SHIFT, qpg->grptag_ok);
 		pki_reg_write(pki, PKI_QPG_TBLX(qpg_base + i), cfg);
 		cfg = pki_reg_read(pki, PKI_QPG_TBLBX(qpg_base + i));
-		cfg |= (vf->stream_id & PKI_QPG_TBLB_STRM_MASK) <<
-			PKI_QPG_TBLB_STRM_SHIFT;
+		set_field(&cfg, PKI_QPG_TBLB_STRM_MASK,
+			  PKI_QPG_TBLB_STRM_SHIFT, vf->stream_id);
 		pki_reg_write(pki, PKI_QPG_TBLBX(qpg_base + i), cfg);
 	}
 	for (i = 0; i < pki->max_cls; i++) {
 		cfg = pki_reg_read(pki, PKI_CLX_STYLEX_CFG(i, style));
-		cfg |= (port->qpg_base & PKI_STYLE_CFG_QPG_BASE_MASK);
+		set_field(&cfg, PKI_STYLE_CFG_QPG_BASE_MASK, 0, port->qpg_base);
 		pki_reg_write(pki, PKI_CLX_STYLEX_CFG(i, style), cfg);
 	}
 	port->state = PKI_PORT_STOP;
