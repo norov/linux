@@ -101,6 +101,7 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 			break;
 		}
 	}
+	spin_unlock(&octeontx_ssow_devices_lock);
 
 	if (!ssow) {
 		ret = -ENODEV;
@@ -182,7 +183,6 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 	}
 
 unlock:
-	spin_unlock(&octeontx_ssow_devices_lock);
 	return ret;
 }
 

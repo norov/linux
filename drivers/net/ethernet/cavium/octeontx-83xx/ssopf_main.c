@@ -267,11 +267,10 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
+	spin_unlock(&octeontx_sso_devices_lock);
 
-	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+	if (!sso)
 		return 0;
-	}
 
 	for (i = 0; i < sso->total_vfs; i++) {
 		if (sso->vf[i].domain.in_use) {
@@ -338,8 +337,6 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 			}
 		}
 	}
-
-	spin_unlock(&octeontx_sso_devices_lock);
 
 	if (vf_idx != num_grps) {
 		sso_pf_remove_domain(id, domain_id);

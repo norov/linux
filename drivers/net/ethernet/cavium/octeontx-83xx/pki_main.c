@@ -299,10 +299,9 @@ static int pki_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
-	if (!pki) {
-		spin_unlock(&octeontx_pki_devices_lock);
+	spin_unlock(&octeontx_pki_devices_lock);
+	if (!pki)
 		return -ENODEV;
-	}
 
 	for (i = 0; i < PKI_MAX_VF; i++) {
 		if (pki->vf[i].domain.in_use) {/* pki port config */
@@ -344,8 +343,6 @@ static int pki_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
-	spin_unlock(&octeontx_pki_devices_lock);
-
 	if (!found)
 		return -ENODEV;
 

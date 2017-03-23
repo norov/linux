@@ -297,11 +297,10 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 num_dqs,
 			break;
 		}
 	}
+	spin_unlock(&octeontx_pko_devices_lock);
 
-	if (!pko) {
-		spin_unlock(&octeontx_pko_devices_lock);
+	if (!pko)
 		return -ENODEV;
-	}
 
 	for (i = 0; i < pko->total_vfs; i++) {
 		if (pko->vf[i].domain.in_use) {
@@ -361,8 +360,6 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 num_dqs,
 			}
 		}
 	}
-
-	spin_unlock(&octeontx_pko_devices_lock);
 
 	if (vf_idx != num_dqs) {
 		pko_pf_remove_domain(id, domain_id);
