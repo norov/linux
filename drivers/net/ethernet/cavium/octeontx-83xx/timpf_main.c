@@ -274,7 +274,6 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 
 	gmid = get_gmid(domain_id);
 
-	spin_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(tim, &octeontx_tim_devices, list) {
 		for (i = 0; i < tim->total_vfs; i++) {
 			vf = &tim->vf[i];
@@ -316,7 +315,6 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 			}
 		}
 	}
-	spin_unlock(&octeontx_tim_dev_lock);
 	return 0;
 }
 
