@@ -3931,7 +3931,7 @@ static int reset_cavium_octeon_vf(struct pci_dev *pdev, int probe)
 	u64 val;
 	u64 addr;
 	int vf_id;
-	int count = 200;
+	int count = 2000;
 
 	dev_dbg(&pdev->dev, "reset_cavium_octeon_vf() called probe=%d\n",
 			probe);
