@@ -300,16 +300,13 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
+	spin_unlock(&octeontx_fpa_devices_lock);
 
-	if (!fpa) {
-		spin_unlock(&octeontx_fpa_devices_lock);
+	if (!fpa)
 		return -ENODEV;
-	}
 
-	if ((fpa->total_vfs - fpa->vfs_in_use) < num_vfs) {
-		spin_unlock(&octeontx_fpa_devices_lock);
+	if ((fpa->total_vfs - fpa->vfs_in_use) < num_vfs)
 		return -ENODEV;
-	}
 
 	for (i = 0; i < fpa->total_vfs; i++) {
 		if (fpa->vf[i].domain.in_use) {
@@ -384,8 +381,6 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 			}
 		}
 	}
-
-	spin_unlock(&octeontx_fpa_devices_lock);
 
 	if (vf_idx != num_vfs) {
 		fpa_pf_remove_domain(id, domain_id);
