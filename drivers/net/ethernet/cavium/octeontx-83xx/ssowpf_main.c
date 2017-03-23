@@ -172,6 +172,7 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 			}
 			identify(&ssow->vf[i], domain_id, vf_idx);
 			vf_idx++;
+			ret = -ENODEV;
 			if (vf_idx == vf_count) {
 				ssow->vfs_in_use += vf_count;
 				ret = 0;
