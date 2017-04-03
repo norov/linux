@@ -45,8 +45,8 @@ enum coproc_t {
 
 /*resp messages*/
 #define MBOX_RET_SUCCESS	0x0
-#define MBOX_RET_INVALID	0x2
-#define MBOX_RET_INTERNAL_ERR	0x3
+#define MBOX_RET_INVALID	0x1
+#define MBOX_RET_INTERNAL_ERR	0x2
 
 /* magic values used for normal and oob data notification */
 #define MBOX_TRIGGER_NORMAL	0x00 /* normal msg transport */
