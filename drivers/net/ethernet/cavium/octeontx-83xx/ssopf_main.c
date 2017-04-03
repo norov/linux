@@ -119,7 +119,12 @@ static u64 sso_pf_get_tmo(struct ssopf *sso)
 
 	/* Get current tick */
 	nw_clk = sso_reg_read(sso, SSO_PF_NW_TIM) & 0x3ff;
+	nw_clk += 1;
 
+	/* Conevrt from set-Bit to multiple of 1024 clock cycles
+	 * Refer HRM: SSO_NW_TIM
+	 */
+	nw_clk <<= 10;
 	/* Get SCLK */
 	sclk_freq = rst->get_sclk_freq(sso->id);
 
@@ -137,6 +142,12 @@ static void sso_pf_set_tmo(struct ssopf *sso, u64 ns)
 
 	/* Transalate nsec to clock */
 	nw_clk = NSEC2CLKS(ns, sclk_freq);
+	/* Conevrt from set-Bit to multiple of 1024 clock cycles
+	 * Refer HRM: SSO_NW_TIM
+	 */
+	nw_clk >>= 10;
+	if (nw_clk)
+		nw_clk -= 1;
 
 	/* write new clk value to Bit pos 9:0 of SSO_NW_TIM */
 	sso_reg_write(sso, SSO_PF_NW_TIM, nw_clk & 0x3ff);
@@ -153,14 +164,17 @@ static u32 sso_pf_ns_to_iter(struct ssopf *sso, u32 wait_ns)
 	/* Transalate nsec to clock */
 	new_tmo = NSEC2CLKS(wait_ns, sclk_freq);
 
-	/* 2. Get NW_TIM clock and translate to sclk_freq */
+	/*Get NW_TIM clock and translate to sclk_freq */
 	cur_tmo = sso_reg_read(sso, SSO_PF_NW_TIM) & 0x3ff;
-	cur_tmo *= PLL_REF_CLK;
+	cur_tmo += 1;
+	/* Conevrt from set-Bit to multiple of 1024 clock cycles
+	 * Refer HRM: SSO_NW_TIM
+	 */
+	cur_tmo <<= 10;
 
-	if (new_tmo > cur_tmo)
-		getwork_iter = (new_tmo - cur_tmo) / cur_tmo;
-	else
-		getwork_iter = 1; /* min 1 iter */
+	getwork_iter = new_tmo / cur_tmo;
+	if (!getwork_iter)
+		getwork_iter = 1;
 
 	return getwork_iter;
 }
