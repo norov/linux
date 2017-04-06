@@ -30,8 +30,16 @@
  */
 #define BGX_CMR_CONFIG			0x0
 #define BGX_CMR_GLOBAL_CONFIG		0x8
+#define BGX_CMR_RX_BP_ON		0xD0
+#define BGX_CMR_RX_BP_OFF		0xD8
 #define BGX_CMR_RX_BP_STATUS		0xF0
 #define BGX_CMR_RX_DMAC_CAM(__dmac)	(0x200 + ((__dmac) * 0x8))
+#define BGX_CMR_RX_OVR_BP		0x470
+#define BGX_CMR_TX_CHANNEL		0x500
+#define BGX_CMR_PRT_CBFC_CTL		0x508
+#define BGX_CMR_TX_OVR_BP		0x520
+
+#define BGX_SMU_HG2_CONTROL		0x20210
 
 /* BGX device Configuration and Control Block */
 struct bgxpf {
@@ -503,7 +511,8 @@ int bgx_port_bp_set(struct octtx_bgx_port *port, u8 on)
 	bgx = get_bgx_dev(port->node, port->bgx);
 	if (!bgx)
 		return -EINVAL;
-	/* TODO */
+
+	/* TODO: Setup channel backpressure */
 	return 0;
 }
 
@@ -544,16 +553,12 @@ int bgx_port_mcast_set(struct octtx_bgx_port *port, u8 on)
 int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu)
 {
 	struct bgxpf *bgx;
-	u64 reg;
 
 	bgx = get_bgx_dev(port->node, port->bgx);
 	if (!bgx)
 		return -EINVAL;
 
-	reg = bgx_reg_read(bgx, port->lmac, BGX_CMR_CONFIG);
-	reg = (reg >> 8) & 0x7; /* LMAC_TYPE */
-
-	switch (reg) {
+	switch (port->lmac_type) {
 	case OCTTX_BGX_LMAC_TYPE_SGMII:
 	case OCTTX_BGX_LMAC_TYPE_QSGMII:
 		bgx_reg_write(bgx, port->lmac, BGX_GMP_GMI_RXX_JABBER, mtu);
@@ -572,7 +577,7 @@ int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu)
  */
 static int bgx_create_domain(u32 id, u16 domain_id,
 			     struct octtx_bgx_port *port_tbl, int ports,
-		struct octeontx_master_com_t *com, void *domain)
+			     struct octeontx_master_com_t *com, void *domain)
 {
 	struct octtx_bgx_port *port, *gport;
 	struct bgxpf *bgx;
@@ -680,6 +685,28 @@ struct bgx_com_s bgx_com  = {
 };
 EXPORT_SYMBOL(bgx_com);
 
+static int bgx_set_ieee802_fc(struct bgxpf *bgx, int lmac, int lmac_type)
+{
+	u64 reg;
+
+	switch (lmac_type) {
+	case OCTTX_BGX_LMAC_TYPE_XAUI:
+	case OCTTX_BGX_LMAC_TYPE_RXAUI:
+	case OCTTX_BGX_LMAC_TYPE_10GR:
+	case OCTTX_BGX_LMAC_TYPE_40GR:
+		/* Power-on values for all of the following registers.*/
+		bgx_reg_write(bgx, lmac, BGX_CMR_RX_OVR_BP, 0);
+		bgx_reg_write(bgx, lmac, BGX_CMR_TX_OVR_BP, 0);
+		bgx_reg_write(bgx, lmac, BGX_CMR_TX_CHANNEL, 0);
+		reg = (0xFFull << 48) | (0xFFull << 32);
+		bgx_reg_write(bgx, lmac, BGX_SMUX_CBFC_CTL, reg);
+		reg = (0x1ull << 16) | 0xFFFFull;
+		bgx_reg_write(bgx, lmac, BGX_SMU_HG2_CONTROL, reg);
+		break;
+	}
+	return 0;
+}
+
 /* BGX "octeontx" driver specific initialization.
  * NOTE: The primiary BGX driver startup and initialization is performed
  * in the "thunder" driver.
@@ -693,7 +720,7 @@ struct bgx_com_s *bgx_octeontx_init(void)
 	int lmac_idx;
 	int port_count = 0;
 	int node = 0;
-	u64 iobase, iosize, reg;
+	u64 iobase, iosize, reg, thr;
 
 	thbgx = try_then_request_module(symbol_get(thunder_bgx_com),
 					"thunder_bgx");
@@ -736,11 +763,20 @@ struct bgx_com_s *bgx_octeontx_init(void)
 			port->dom_port_idx = BGX_INVALID_ID;
 			reg = bgx_reg_read(bgx, lmac_idx, BGX_CMR_CONFIG);
 			port->lmac_type = (reg >> 8) & 0x7; /* LMAC_TYPE */
-			if (port->lmac_type == OCTTX_BGX_LMAC_TYPE_40GR)
+
+			/* Adjust TX FIFO and BP thresholds to LMAC type.*/
+			if (port->lmac_type == OCTTX_BGX_LMAC_TYPE_40GR) {
+				reg = 0x400;
+				thr = 0x100;
+			} else {
 				reg = 0x100;
-			else
-				reg = 0x20;
-			bgx_reg_write(bgx, lmac_idx, BGX_SMUX_TX_THRESH, reg);
+				thr = 0x20;
+			}
+			bgx_reg_write(bgx, lmac_idx, BGX_CMR_RX_BP_ON, reg);
+			bgx_reg_write(bgx, lmac_idx, BGX_SMUX_TX_THRESH, thr);
+
+			/* Enable IEEE-802.3 PAUSE flow-control.*/
+			bgx_set_ieee802_fc(bgx, port->lmac, port->lmac_type);
 
 			INIT_LIST_HEAD(&port->list);
 			list_add(&port->list, &octeontx_bgx_ports);
