@@ -406,7 +406,7 @@ static int lbk_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	/* Setup LBK Port */
 	if (lbk->iconn == LBK_CONNECT_E_PKI &&
-	    lbk->oconn == LBK_CONNECT_E_PKO) {
+			lbk->oconn == LBK_CONNECT_E_PKO) {
 		port = &octeontx_lbk_ports[0];
 		port->ilbk = lbk_index_from_id(lbk->id);
 		port->olbk = lbk_index_from_id(lbk->id);
@@ -426,10 +426,10 @@ static int lbk_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		port->olbk = lbk_index_from_id(lbk->id);
 		port->olbk_base_chan = LBK_BASE_CHAN(port->olbk);
 		port->olbk_num_chans = LBK_NUM_CHANS;
+	} else {
+		/* LBK:NIC-to-NIC is not used.*/
+		return 0;
 	}
-	if (!port)
-		return -EINVAL;
-
 	INIT_LIST_HEAD(&port->list);
 	port->node = lbk_node_from_id(lbk->id);
 	return 0;
