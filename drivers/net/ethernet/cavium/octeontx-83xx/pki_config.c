@@ -151,8 +151,16 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 	u64 cfg;
 	int i;
 
-	/* TO_DO add support for loopback ports later*/
-	port = &vf->bgx_port[vf_id];
+	switch (port_data->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
 	if (port->state != PKI_PORT_CLOSE && port->valid != true)
 		return MBOX_RET_INVALID; /* modify fro virtual ports later*/
 	/* Release 1.0 assign style = pkind
@@ -209,8 +217,16 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 	int i;
 	int style;
 
-	/* TO_DO add support for loopback ports later*/
-	port = &vf->bgx_port[vf_id];
+	switch (qcfg->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
 	if ((port->state != PKI_PORT_OPEN && port->state != PKI_PORT_STOP) ||
 	    port->qpg_base != QPG_NOT_INIT)
 		return MBOX_RET_INVALID;
@@ -263,8 +279,16 @@ int pki_port_start(struct pkipf_vf *vf, u16 vf_id,
 	u64 cfg;
 	int i;
 
-	/* TO_DO add support for loopback ports later*/
-	port = &vf->bgx_port[vf_id];
+	switch (port_data->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
 	if (port->state != PKI_PORT_STOP || port->qpg_base == QPG_NOT_INIT)
 		return MBOX_RET_INVALID;
 	for (i = 0; i < pki->max_cls; i++) {
@@ -286,8 +310,16 @@ int pki_port_stop(struct pkipf_vf *vf, u16 vf_id,
 	int i;
 	struct pki_t *pki = vf->pki;
 
-	/* TO_DO add support for loopback ports later*/
-	port = &vf->bgx_port[vf_id];
+	switch (port_data->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
 	if (port->state != PKI_PORT_START)
 		return MBOX_RET_INVALID;
 	for (i = 0; i < pki->max_cls; i++) {
@@ -306,8 +338,16 @@ int pki_port_close(struct pkipf_vf *vf, u16 vf_id,
 {
 	struct pki_port *port;
 
-	/* TO_DO add support for loopback ports later*/
-	port = &vf->bgx_port[vf_id];
+	switch (port_data->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
 	/*TO_DO free up all the resources*/
 	/* TO_DO should we write all the register with reset
 	 * values at this point?
@@ -330,8 +370,16 @@ int pki_port_pktbuf_cfg(struct pkipf_vf *vf, u16 vf_id,
 	u8 pkt_outside_wqe, wqe_endian, cache_mode, wqe_hsz;
 	u16 mbuff_size, wqe_skip, first_skip, later_skip;
 
-	/* TO_DO add support for loopback ports later*/
-	port = &vf->bgx_port[vf_id];
+	switch (pcfg->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
 	if (port->state != PKI_PORT_OPEN && port->state != PKI_PORT_STOP)
 		return MBOX_RET_INVALID;
 
@@ -423,8 +471,16 @@ int pki_port_errchk(struct pkipf_vf *vf, u16 vf_id,
 	int i;
 	struct pki_t *pki = vf->pki;
 
-	/* TO_DO add support for loopback ports later*/
-	port = &vf->bgx_port[vf_id];
+	switch (cfg->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
 	if (port->state == PKI_PORT_CLOSE)
 		return MBOX_RET_INVALID;
 
@@ -509,8 +565,16 @@ int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 	int i;
 	struct pki_t *pki = vf->pki;
 
-	/* TO_DO add support for loopback ports later*/
-	port = &vf->bgx_port[vf_id];
+	switch (cfg->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
 	if (port->state == PKI_PORT_CLOSE)
 		return MBOX_RET_INVALID;
 

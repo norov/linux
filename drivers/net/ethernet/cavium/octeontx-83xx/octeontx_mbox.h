@@ -243,6 +243,14 @@ union mbox_data {
 	struct gen_resp		resp_hdr;
 };
 
+/* Interface types: */
+enum {
+	OCTTX_PORT_TYPE_NET, /* Network interface ports */
+	OCTTX_PORT_TYPE_INT, /* CPU internal interface ports */
+	OCTTX_PORT_TYPE_PCI, /* DPI/PCIe interface ports */
+	OCTTX_PORT_TYPE_MAX
+};
+
 /*----------------------------------------------------------------------------*/
 /* BGX messages:                                                              */
 /*----------------------------------------------------------------------------*/
@@ -560,6 +568,7 @@ typedef struct mbox_pki_port_type {
 
 /* pki port config */
 typedef struct mbox_pki_port_cfg {
+	u8 port_type;
 	struct {
 		/* modify mask 1=modify 0=dont modify*/
 		u8 fcs_pres:1;
@@ -585,6 +594,7 @@ typedef struct mbox_pki_port_cfg {
 
 /* pki Flow/style packet buffer config */
 typedef struct mbox_pki_port_pktbuf_cfg {
+	u8 port_type;
 	struct {
 		/* modify mask  1=modify 0=no moidfy*/
 		u16 f_mbuff_size:1;
@@ -606,6 +616,7 @@ typedef struct mbox_pki_port_pktbuf_cfg {
 
 /* pki flow/style tag config */
 typedef struct mbox_pki_port_hash_cfg {
+	u8 port_type;
 	u32 tag_slf:1;
 	u32 tag_sle:1;
 	u32 tag_sld:1;
@@ -626,6 +637,7 @@ typedef struct mbox_pki_port_hash_cfg {
 
 /* pki flow/style errcheck config */
 typedef struct mbox_pki_port_errcheck_cfg {
+	u8 port_type;
 	struct {
 		/* modify mask 1=modify 0=dont modify*/
 		u32 f_ip6_udp_opt:1;
@@ -707,6 +719,7 @@ struct mbox_pki_qos_entry {
 
 /* pki flow/style enable qos */
 typedef struct mbox_pki_port_create_qos {
+	u8 port_type;
 	u8 qpg_qos;
 	/* number of qos entries to create */
 	u8 num_entry;
@@ -719,6 +732,7 @@ typedef struct mbox_pki_port_create_qos {
 
 /* pki flow/style enable qos */
 typedef struct mbox_pki_port_modify_qos_entry {
+	u8 port_type;
 	u16 index;
 	struct {
 		/* modify mask 1=modify 0=don't modify*/
@@ -736,6 +750,7 @@ typedef struct mbox_pki_port_modify_qos_entry {
  * entries in first release.
  */
 typedef struct mbox_pki_port_enable_rss {
+	u8 port_type;
 	/* 1=enable 0=disable*/
 	u8 en_dis;
 	u8 num_queues;
