@@ -280,8 +280,6 @@
 
 struct pkopf_vf {
 	struct octeontx_pf_vf	domain;
-	u32			bgx_mask;
-	u32			bgx_lmac;
 };
 
 struct pkopf {
@@ -306,9 +304,11 @@ struct pkopf {
 };
 
 struct pkopf_com_s {
-	int (*create_domain)(u32, u16, u32, struct octtx_bgx_port *port,
+	int (*create_domain)(u32 id, u16 domain_id, u32 pko_vf_count,
+			     struct octtx_bgx_port *bgx_port, int bgx_count,
+			     struct octtx_lbk_port *lbk_port, int lbk_count,
 			     void *master, void *master_data,
-				struct kobject *kobj, char *g_name);
+			     struct kobject *kobj, char *g_name);
 	int (*free_domain)(u32, u16);
 	int (*reset_domain)(u32, u16);
 	int (*receive_message)(u32, u16 domain_id,
