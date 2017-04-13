@@ -17,6 +17,17 @@
 #define DRV_NAME "octeontx-pko"
 #define DRV_VERSION "0.1"
 
+/* PKO MAC type (enumerated by PKO_LMAC_E) */
+#define PKO_MAC_LBK	0
+#define PKO_MAC_BGX	1
+#define PKO_MAC_DPI	2
+
+#define LBK_CHAN_BASE	0x0
+#define LBK_CHAN_RANGE	BIT(8)
+
+#define BGX_CHAN_BASE	0x800
+#define BGX_CHAN_RANGE	BIT(8)
+
 static atomic_t pko_count = ATOMIC_INIT(0);
 static DEFINE_SPINLOCK(octeontx_pko_devices_lock);
 static LIST_HEAD(octeontx_pko_devices);
@@ -44,16 +55,28 @@ static u64 pko_reg_read(struct pkopf *pko, u64 offset)
 	return readq_relaxed(pko->reg_base + offset);
 }
 
-static int pko_get_bgx_channel(int bgx, int lmac, int chan)
+static int pko_get_bgx_chan(int bgx, int lmac, int chan)
 {
-	//NOTE: this is highly 83xx pki centric
-	return 0x800 + (0x100 * bgx) + (0x10 * lmac) + chan;
+	return BGX_CHAN_BASE + (BGX_CHAN_RANGE * bgx) + (0x10 * lmac) + chan;
 }
 
 static int pko_get_bgx_mac(int bgx, int lmac)
 {
-	//NOTE: this is highly 83xx pko centric
+	/* 3 = PKO BGX base MAC, 0x4 = number of MACs used by BGX. */
 	return 3 + (0x4 * bgx) + lmac;
+}
+
+static int pko_get_lbk_chan(int lbk, int chan)
+{
+	return LBK_CHAN_BASE + (LBK_CHAN_RANGE * lbk) + chan;
+}
+
+static int pko_get_lbk_mac(int lbk)
+{
+	/* Only LBK0 and LBK2 are connected to PKO, which are mapped
+	 * to PKO MAC as follows: LBK0 => MAC0, LBK2 => MAC1.
+	 */
+	return (lbk) ? 1 : 0;
 }
 
 int pkopf_master_send_message(struct mbox_hdr *hdr,
@@ -273,18 +296,19 @@ static void pko_pf_gmctl_init(struct pkopf *pf, int vf, u16 gmid)
 	reg = pko_reg_read(pf, PKO_PF_VFX_GMCTL(vf));
 }
 
-static int pko_pf_create_domain(u32 id, u16 domain_id, u32 num_dqs,
-				struct octtx_bgx_port *port, void *master,
-				void *master_data, struct kobject *kobj,
-				char *g_name)
+static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
+				struct octtx_bgx_port *bgx_port, int bgx_count,
+				struct octtx_lbk_port *lbk_port, int lbk_count,
+				void *master, void *master_data,
+				struct kobject *kobj, char *g_name)
 {
 	struct pkopf *pko = NULL;
 	struct pkopf *curr;
-	u64 i;
-	int vf_idx = 0;
+	int i, pko_mac = PKO_MAC_BGX;
+	int vf_idx = 0, port_idx = 0;
 	resource_size_t vf_start;
 	int mac_num, mac_mode, chan;
-	const u32 max_frame = 0xffff; // FIXME: consider new pko domain param
+	const u32 max_frame = 0xffff;
 	struct pci_dev *virtfn;
 
 	if (!kobj || !g_name)
@@ -324,44 +348,55 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 num_dqs,
 			if (!pko->vf[i].domain.reg_base)
 				break;
 
-			pko->vf[i].bgx_mask = port[vf_idx].bgx;
-			pko->vf[i].bgx_lmac = port[vf_idx].lmac;
-
 			virtfn = pci_get_domain_bus_and_slot(pci_domain_nr(
 					pko->pdev->bus),
 					pci_iov_virtfn_bus(pko->pdev, i),
 					pci_iov_virtfn_devfn(pko->pdev, i));
 			if (!virtfn)
 				break;
-			sysfs_add_link_to_group(kobj, g_name,
-						&virtfn->dev.kobj,
-				virtfn->dev.kobj.name);
+
+			sysfs_add_link_to_group(kobj, g_name, &virtfn->dev.kobj,
+						virtfn->dev.kobj.name);
 
 			identify(&pko->vf[i], domain_id, vf_idx);
 			pko_pf_gmctl_init(pko, i, get_gmid(domain_id));
 
 			/* Setup the PKO Scheduling tree: PQ/SQ/DQ.
-			 * NOTE: mac_num is enumerated by PKO_LMAC_E.
-			 * TODO.1: Distinguish BGX and LBK ports.
-			 * Currently -- for BGX only.
 			 */
-			mac_num = pko_get_bgx_mac(pko->vf[i].bgx_mask,
-						  pko->vf[i].bgx_lmac);
-			chan = pko_get_bgx_channel(pko->vf[i].bgx_mask,
-						   pko->vf[i].bgx_lmac, 0);
-			mac_mode = port[vf_idx].lmac_type;
-
+			if (pko_mac == PKO_MAC_BGX) {
+				mac_num = pko_get_bgx_mac(
+						bgx_port[port_idx].bgx,
+						bgx_port[port_idx].lmac);
+				chan = pko_get_bgx_chan(
+						bgx_port[port_idx].bgx,
+						bgx_port[port_idx].lmac, 0);
+				mac_mode = bgx_port[port_idx].lmac_type;
+				port_idx++;
+				if (port_idx >= bgx_count) {
+					pko_mac = PKO_MAC_LBK;
+					port_idx = 0;
+				}
+			} else if (pko_mac == PKO_MAC_LBK) {
+				mac_num = pko_get_lbk_mac(
+						lbk_port[port_idx].olbk);
+				chan = pko_get_lbk_chan(
+						lbk_port[port_idx].olbk, 0);
+				mac_mode = 0;
+				port_idx++;
+			} else {
+				break;
+			}
 			pko_pstree_setup(pko, i, max_frame,
 					 mac_num, mac_mode, chan);
 			vf_idx++;
-			if (vf_idx == num_dqs) {
-				pko->vfs_in_use += num_dqs;
+			if (vf_idx == pko_vf_count) {
+				pko->vfs_in_use += pko_vf_count;
 				break;
 			}
 		}
 	}
 
-	if (vf_idx != num_dqs) {
+	if (vf_idx != pko_vf_count) {
 		pko_pf_remove_domain(id, domain_id);
 		return -ENODEV;
 	}
@@ -743,15 +778,12 @@ static void pko_lX_set_shape(struct pkopf *pko, int level, int q, u64 reg)
 }
 
 static int pko_sq_init(struct pkopf *pko, int vf, int level, u32 channel,
-		       u32 max_frame, int parent_sq)
+		       int mac_num, u32 max_frame, int parent_sq)
 {
-	int mac_num;
 	int queue;
 	int channel_level;
 	int queue_base;
 	u64 reg;
-
-	mac_num = pko_get_bgx_mac(pko->vf[vf].bgx_mask, pko->vf[vf].bgx_lmac);
 
 	queue = pko_lX_get_queue(pko, level);
 	channel_level = pko_reg_read(pko, PKO_PF_CHANNEL_LEVEL);
@@ -820,7 +852,8 @@ static int pko_pstree_setup(struct pkopf *pko, int vf, u32 max_frame,
 
 	err = mac_num;
 	for (lvl = 2; lvl <= pko->max_levels; lvl++)
-		err = pko_sq_init(pko, vf, lvl, channel, max_frame, err);
+		err = pko_sq_init(pko, vf, lvl, channel, mac_num,
+				  max_frame, err);
 
 	err = pko_dq_init(pko, vf);
 	if (err)
