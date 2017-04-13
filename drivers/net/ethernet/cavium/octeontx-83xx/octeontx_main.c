@@ -70,8 +70,8 @@ struct octtx_domain {
 	u64 aura_set;
 	u64 grp_mask;
 
-	int num_bgx_ports;
-	int num_lbk_ports;
+	int bgx_count;
+	int lbk_count;
 	struct octtx_bgx_port bgx_port[OCTTX_MAX_BGX_PORTS];
 	struct octtx_lbk_port lbk_port[OCTTX_MAX_LBK_PORTS];
 
@@ -272,8 +272,22 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 		timpf->receive_message(0, domain->domain_id, hdr,
 				req, resp, add_data);
 		break;
-	case SSOW_COPROC:
 	case SSO_COPROC:
+		if (hdr->msg == SSO_GETDOMAINCFG) {
+			struct dcfg_resp *dcfg = add_data;
+
+			dcfg->sso_count = domain->sso_vf_count;
+			dcfg->ssow_count = domain->ssow_vf_count;
+			dcfg->fpa_count = domain->fpa_vf_count;
+			dcfg->pko_count = domain->pko_vf_count;
+			dcfg->tim_count = domain->tim_vf_count;
+			dcfg->net_port_count = domain->bgx_count;
+			dcfg->virt_port_count = domain->lbk_count;
+			resp->data = sizeof(struct dcfg_resp);
+			hdr->res_code = MBOX_RET_SUCCESS;
+			break;
+		}
+	case SSOW_COPROC:
 	default:
 		dev_err(octtx_device, "invalid mbox message\n");
 		hdr->res_code = MBOX_RET_INVALID;
@@ -417,8 +431,8 @@ int octeontx_create_domain(const char *name, int type,
 	 * virt1: transferring packets between PKO/PKI and NIC (LBK1 + LBK2).
 	 * NOTE: The domain specification validity should be done here.
 	 */
-	domain->num_lbk_ports = lbk_count;
-	for (i = 0; i < domain->num_lbk_ports; i++) {
+	domain->lbk_count = lbk_count;
+	for (i = 0; i < domain->lbk_count; i++) {
 		domain->lbk_port[i].domain_id = domain_id;
 		domain->lbk_port[i].dom_port_idx = i;
 		domain->lbk_port[i].glb_port_idx = lbk_port[i];
@@ -443,8 +457,8 @@ int octeontx_create_domain(const char *name, int type,
 	 * given to this domain, except port 0, which is under
 	 * Linux, hosting the dataplane application, control.
 	 */
-	domain->num_bgx_ports = bgx_count;
-	for (i = 0; i < domain->num_bgx_ports; i++) {
+	domain->bgx_count = bgx_count;
+	for (i = 0; i < domain->bgx_count; i++) {
 		domain->bgx_port[i].domain_id = domain_id;
 		domain->bgx_port[i].dom_port_idx = i;
 		domain->bgx_port[i].glb_port_idx = bgx_port[i];
@@ -456,7 +470,7 @@ int octeontx_create_domain(const char *name, int type,
 		goto error;
 	}
 	/* Now that we know which exact ports we have, set pkinds for them. */
-	for (i = 0; i < domain->num_bgx_ports; i++) {
+	for (i = 0; i < domain->bgx_count; i++) {
 		ret = pki->add_bgx_port(node, domain_id, &domain->bgx_port[i]);
 		if (ret < 0) {
 			dev_err(octtx_device,
@@ -482,8 +496,6 @@ int octeontx_create_domain(const char *name, int type,
 		goto error;
 	}
 	/* remove this once PKO init extends for LBK. */
-	lbk_count = 0;
-
 	domain->pko_vf_count = bgx_count + lbk_count;
 	if (domain->pko_vf_count != pko_count) {
 		dev_err(octtx_device,
@@ -492,7 +504,8 @@ int octeontx_create_domain(const char *name, int type,
 		dev_err(octtx_device, " proceeding with proper value..\n");
 	}
 	ret = pkopf->create_domain(node, domain_id, domain->pko_vf_count,
-				domain->bgx_port,
+				domain->bgx_port, domain->bgx_count,
+				domain->lbk_port, domain->lbk_count,
 				&octtx_master_com, domain,
 				&octtx_device->kobj, domain->name);
 	if (ret) {
@@ -627,7 +640,7 @@ static void poll_for_link(struct work_struct *work)
 		if (!domain->setup)
 			continue;
 
-		for (i = 0; i < domain->num_bgx_ports; i++) {
+		for (i = 0; i < domain->bgx_count; i++) {
 			node = domain->bgx_port[i].node;
 			bgx_idx = domain->bgx_port[i].bgx;
 			lmac = domain->bgx_port[i].lmac;
