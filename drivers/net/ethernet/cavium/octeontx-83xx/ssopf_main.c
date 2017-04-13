@@ -617,26 +617,6 @@ static int handle_mbox_msg_from_sso_vf(struct ssopf *sso,
 		hdr->res_code = MBOX_RET_SUCCESS;
 		ret = 0;
 		break;
-	case SSO_GETDOMAINCFG:
-		/* This is temp, this will be moved to octeontx*/
-		hdr->res_code = MBOX_RET_SUCCESS;
-		resp->cfg.sso_count = 1;
-		resp->cfg.ssow_count = 32;
-		resp->cfg.fpa_count = 1;
-		resp->cfg.pko_count = 1;
-		resp->cfg.tim_count = 0;
-		/* Note:
-		 * - remove above resp-> value update and always
-		 * use add_data for resp message
-		 * - above resp-> update gonna become redundent as
-		 *   because coming patch will get rid of *resp param
-		 *   from function
-		 */
-		memcpy(add_data, resp, sizeof(*resp));
-		resp->data = sizeof(*resp);
-		ret = 0;
-		break;
-
 	case SSO_GET_DEV_INFO:
 		get_dev_info = add_data;
 
@@ -759,17 +739,19 @@ static void handle_mbox_msg_from_vf(struct ssopf *sso, int vf_idx)
 	resp.data = 0;
 	switch (hdr.coproc) {
 	case SSO_COPROC:
-		memcpy(&req, ram_mbox_buf, sizeof(req));
-		ret = handle_mbox_msg_from_sso_vf(
-			sso, sso->vf[vf_idx].domain.domain_id,
-			&hdr,
-			&req /* Unused for sso */,
-			&resp,
-			ram_mbox_buf);
-		/* prep for replymsg */
-		replymsg = ram_mbox_buf;
-		replysize = resp.data;
-		break;
+		if (hdr.msg != SSO_GETDOMAINCFG) {
+			memcpy(&req, ram_mbox_buf, sizeof(req));
+			ret = handle_mbox_msg_from_sso_vf(
+				sso, sso->vf[vf_idx].domain.domain_id,
+				&hdr,
+				&req /* Unused for sso */,
+				&resp,
+				ram_mbox_buf);
+			/* prep for replymsg */
+			replymsg = ram_mbox_buf;
+			replysize = resp.data;
+			break;
+		}
 	default:
 		/* call octtx_master_receive_message for msg dispatch */
 		ret = sso->vf[vf_idx].domain.master->receive_message(
