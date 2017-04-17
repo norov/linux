@@ -80,7 +80,12 @@ static void reset_port_reg(struct pki_t *pki, struct pki_port *port)
 	pki_reg_write(pki, PKI_STYLEX_TAG_SEL(style), cfg);
 	pki_reg_write(pki, PKI_STYLEX_WQ2(style), cfg);
 	pki_reg_write(pki, PKI_STYLEX_WQ4(style), cfg);
-	cfg = 0x1800020;
+
+	cfg = 0x6ull << PKI_STYLEX_BUF_FIRST_SKIP_SHIFT |
+#ifdef __BIG_ENDIAN
+		0x1ull << PKI_STYLEX_BUF_WQE_BEND_SHIFT |
+#endif
+		0x20ull << PKI_STYLEX_BUF_MB_SIZE_SHIFT;
 	pki_reg_write(pki, PKI_STYLEX_BUF(style), cfg);
 	cfg = 0;
 	for (i = 0; i < port->num_entry; i++) {
@@ -139,11 +144,15 @@ void init_styles(struct pki_t *pki)
 
 {
 	u32 i, j;
-	u64 cfg = 0;
-
-	cfg |= (0x1ULL << PKI_STYLE_CFG_DROP_SHIFT);
+	u64 cfg = 0x1ull << PKI_STYLE_CFG_DROP_SHIFT;
+	u64 buf = 0x6ull << PKI_STYLEX_BUF_FIRST_SKIP_SHIFT |
+#ifdef __BIG_ENDIAN
+		0x1ull << PKI_STYLEX_BUF_WQE_BEND_SHIFT |
+#endif
+		0x20ull << PKI_STYLEX_BUF_MB_SIZE_SHIFT;
 
 	for (i = 0; i < pki->max_fstyles; i++) {
+		pki_reg_write(pki, PKI_STYLEX_BUF(i), buf);
 		for (j = 0; j < pki->max_cls; j++)
 			pki_reg_write(pki, PKI_CLX_STYLEX_CFG(j, i), cfg);
 	}

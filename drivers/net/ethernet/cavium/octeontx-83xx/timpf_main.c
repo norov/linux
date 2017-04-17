@@ -27,7 +27,7 @@
 #define TIM_PF_MSIX_COUNT	2
 
 #define TIM_DEV_PER_NODE	1
-#define TIM_VFS_PER_DEV		4
+#define TIM_VFS_PER_DEV		64
 
 #define TIM_RINGS_PER_DEV	TIM_VFS_PER_DEV
 #define TIM_RING_NODE_SHIFT	6 /* 2 pow(6) */
@@ -406,6 +406,9 @@ static int tim_init(struct timpf *tim)
 
 	/* Initialize TIM rings.*/
 	reg = (1ull << 48) |  /*LOCK_EN*/
+#ifdef __BIG_ENDIAN
+		(1ull << 54) | /*BE*/
+#endif
 		(1ull << 44); /*ENA_LDWB*/
 	for (i = 0; i < TIM_RINGS_PER_DEV; i++) {
 		tim_reg_write(tim, TIM_RING_CTL1(i), reg);
