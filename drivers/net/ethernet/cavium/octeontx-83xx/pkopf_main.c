@@ -982,6 +982,15 @@ static int pko_init(struct pkopf *pko)
 		pko_reg_write(pko, PKO_PF_FORMATX_CTL(i), 0x0);
 	pko_reg_write(pko, PKO_PF_FORMATX_CTL(1), 0x101);
 
+	reg = pko_reg_read(pko, PKO_PF_DQ_CONST);
+	n = (reg & ((1ull << 16) - 1)) / pko->dqs_per_vf;
+#ifdef __BIG_ENDIAN
+	reg = 1ull << 24; /*BE*/
+#else
+	reg = 0;
+#endif
+	for (i = 0; i < n; i++)
+		pko_reg_write(pko, PKO_PF_VFX_GMCTL(i), reg);
 	return 0;
 }
 
