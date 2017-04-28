@@ -76,7 +76,7 @@ static struct ssopf_vf *get_vf(struct ssopf *sso, u16 domain_id,
 	for (i = 0; i < sso->total_vfs; i++) {
 		if (sso->vf[i].domain.in_use &&
 		    sso->vf[i].domain.domain_id == domain_id &&
-		    sso->vf[i].domain.subdomain_id == 0) {
+		    sso->vf[i].domain.subdomain_id == subdomain_id) {
 			if (vf_idx)
 				*vf_idx = i;
 			return &sso->vf[i];
