@@ -201,6 +201,7 @@ static void  nicvf_handle_mbx_intr(struct nicvf *nic)
 	switch (mbx.msg.msg) {
 	case NIC_MBOX_MSG_READY:
 		nic->pf_acked = true;
+		nic->lbk_mode = mbx.nic_cfg.lbk_mode;
 		nic->vf_id = mbx.nic_cfg.vf_id & 0x7F;
 		nic->tns_mode = mbx.nic_cfg.tns_mode & 0x7F;
 		nic->node = mbx.nic_cfg.node_id;
@@ -1584,6 +1585,8 @@ void nicvf_update_lmac_stats(struct nicvf *nic)
 	int stat = 0;
 	union nic_mbx mbx = {};
 
+	if (nic->lbk_mode)
+		return;
 	if (!netif_running(nic->netdev))
 		return;
 
@@ -2129,6 +2132,12 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	netdev->max_mtu = NIC_HW_MAX_FRS;
 
 	INIT_WORK(&nic->reset_task, nicvf_reset_task);
+
+	if (nic->lbk_mode) {
+		if (dev_alloc_name(netdev, "lbk%d") < 0)
+			goto err_unregister_interrupts;
+		netdev->hw_features &= ~NETIF_F_LOOPBACK;
+	}
 
 	err = register_netdev(netdev);
 	if (err) {
