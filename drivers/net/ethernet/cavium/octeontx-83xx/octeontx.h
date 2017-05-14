@@ -102,6 +102,7 @@ struct octtx_lbk_port {
 	int	olbk_base_chan; /* Node-local base channel (PKI_CHAN_E) */
 	int	olbk_num_chans;
 	int	pkind; /* PKI port number */
+	void	*vnic; /* NIC port descriptor */
 };
 #endif
 
