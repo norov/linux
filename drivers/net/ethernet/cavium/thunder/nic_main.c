@@ -17,6 +17,7 @@
 #include "nic.h"
 #include "q_struct.h"
 #include "thunder_bgx.h"
+#include "thunder_lbk.h"
 
 #define DRV_NAME	"thunder-nic"
 #define DRV_VERSION	"1.0"
@@ -69,6 +70,7 @@ struct nicpf {
 	u8			num_vec;
 	bool			irq_allocated[NIC_PF_MSIX_VECTORS];
 	char			irq_name[NIC_PF_MSIX_VECTORS][20];
+	int			lbk_vf;
 };
 
 /* Supported devices */
@@ -159,6 +161,86 @@ static void nic_send_msg_to_vf(struct nicpf *nic, int vf, union nic_mbx *mbx)
 	}
 }
 
+#define LBK_PKIND 15
+
+static u8 lbk_link_up;
+
+static int nic_get_lbk_port_pkind(void)
+{
+	return LBK_PKIND;
+}
+
+static int nic_start_lbk_port(void)
+{
+	lbk_link_up = 1;
+	return 0;
+}
+
+static void nic_stop_lbk_port(void)
+{
+	lbk_link_up = 0;
+}
+
+struct thunder_lbk_com_s thunder_lbk_com = {
+	.port_start = nic_start_lbk_port,
+	.port_stop = nic_stop_lbk_port,
+	.get_port_pkind = nic_get_lbk_port_pkind
+};
+EXPORT_SYMBOL(thunder_lbk_com);
+
+static void nic_lbk_link_update(struct nicpf *nic)
+{
+	union nic_mbx mbx = {};
+	u8 vf = nic->lbk_vf;
+
+	if (nic->mbx_lock[vf])
+		return;
+
+	mbx.link_status.msg = NIC_MBOX_MSG_BGX_LINK_CHANGE;
+	if (lbk_link_up) {
+		nic->link[vf] = true;
+		nic->duplex[vf] = 1;
+		nic->speed[vf] = 1000;
+
+		mbx.link_status.link_up = true;
+		mbx.link_status.duplex = 1;
+		mbx.link_status.speed = 1000;
+		mbx.link_status.mac_type = LBK_MODE_LMAC;
+	} else {
+		nic->link[vf] = false;
+		nic->duplex[vf] = DUPLEX_UNKNOWN;
+		nic->speed[vf] = SPEED_UNKNOWN;
+
+		mbx.link_status.link_up = false;
+		mbx.link_status.duplex = DUPLEX_UNKNOWN;
+		mbx.link_status.speed = SPEED_UNKNOWN;
+		mbx.link_status.mac_type = LBK_MODE_LMAC;
+	}
+	nic_send_msg_to_vf(nic, vf, &mbx);
+}
+
+static void nic_create_lbk_interface(struct nicpf *nic)
+{
+	u64 lmac_credit;
+	u16 sdevid;
+
+	pci_read_config_word(nic->pdev, PCI_SUBSYSTEM_ID, &sdevid);
+	if (sdevid != PCI_SUBSYS_DEVID_83XX_NIC_PF)
+		return;
+	nic->num_vf_en++; /* Additional vf for LBK */
+
+	nic->lbk_vf = nic->num_vf_en - 1;
+	lmac_credit = nic_reg_read(nic, NIC_PF_LMAC_0_7_CREDIT +
+			(NIC_LBK_PKIO_LMAC * 8));
+
+	lmac_credit = (1ull << 1); /* channel credit enable */
+	lmac_credit |= (0x1ff << 2); /* Max outstanding pkt count */
+	lmac_credit |= (((16 * 1024 - NIC_HW_MAX_FRS) / 16) << 12);
+
+	nic_reg_write(nic, NIC_PF_LMAC_0_7_CREDIT +
+			(NIC_LBK_PKIO_LMAC * 8), lmac_credit);
+}
+
 /* Responds to VF's READY message with VF's
  * ID, node, MAC address e.t.c
  * @vf: VF which sent READY message
@@ -173,8 +255,8 @@ static void nic_mbx_send_ready(struct nicpf *nic, int vf)
 	mbx.nic_cfg.vf_id = vf;
 
 	mbx.nic_cfg.tns_mode = NIC_TNS_BYPASS_MODE;
+	if (vf < nic->num_vf_en && vf != nic->lbk_vf) {
 
-	if (vf < nic->num_vf_en) {
 		bgx_idx = NIC_GET_BGX_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vf]);
 		lmac = NIC_GET_LMAC_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vf]);
 
@@ -183,6 +265,7 @@ static void nic_mbx_send_ready(struct nicpf *nic, int vf)
 			ether_addr_copy((u8 *)&mbx.nic_cfg.mac_addr, mac);
 	}
 	mbx.nic_cfg.sqs_mode = (vf >= nic->num_vf_en) ? true : false;
+	mbx.nic_cfg.lbk_mode = (vf == nic->lbk_vf) ? true : false;
 	mbx.nic_cfg.node_id = nic->node;
 
 	mbx.nic_cfg.loopback_supported = vf < nic->num_vf_en;
@@ -366,6 +449,9 @@ static void nic_set_lmac_vf_mapping(struct nicpf *nic)
 			break;
 		}
 	}
+
+	/* Create additional primary nic for lbk on 83xx */
+	nic_create_lbk_interface(nic);
 }
 
 static void nic_get_hw_info(struct nicpf *nic)
@@ -492,10 +578,15 @@ static void nic_config_cpi(struct nicpf *nic, struct cpi_cfg_msg *cfg)
 	u8  qset, rq_idx = 0;
 
 	vnic = cfg->vf_id;
-	bgx = NIC_GET_BGX_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vnic]);
-	lmac = NIC_GET_LMAC_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vnic]);
+	if (vnic == nic->lbk_vf) {
+		lmac = NIC_LBK_PKIO_LMAC;
+		chan = NIC_LBK_CHAN_BASE + NIC_LBK_PKIO * hw->chans_per_lbk;
+	} else {
+		bgx = NIC_GET_BGX_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vnic]);
+		lmac = NIC_GET_LMAC_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vnic]);
+		chan = (lmac * hw->chans_per_lmac) + (bgx * hw->chans_per_bgx);
+	}
 
-	chan = (lmac * hw->chans_per_lmac) + (bgx * hw->chans_per_bgx);
 	cpi_base = vnic * NIC_MAX_CPI_PER_LMAC;
 	rssi_base = vnic * hw->rss_ind_tbl_size;
 
@@ -638,7 +729,7 @@ static void nic_tx_channel_cfg(struct nicpf *nic, u8 vnic,
 			       struct sq_cfg_msg *sq)
 {
 	struct hw_info *hw = nic->hw;
-	u32 bgx, lmac, chan;
+	u32 bgx = 0, lmac, chan;
 	u32 tl2, tl3, tl4;
 	u32 rr_quantum;
 	u8 sq_idx = sq->sq_num;
@@ -650,8 +741,15 @@ static void nic_tx_channel_cfg(struct nicpf *nic, u8 vnic,
 	else
 		pqs_vnic = vnic;
 
-	bgx = NIC_GET_BGX_FROM_VF_LMAC_MAP(nic->vf_lmac_map[pqs_vnic]);
-	lmac = NIC_GET_LMAC_FROM_VF_LMAC_MAP(nic->vf_lmac_map[pqs_vnic]);
+	if (vnic == nic->lbk_vf) {
+		lmac = NIC_LBK_PKIO_LMAC;
+		chan = NIC_LBK_CHAN_BASE + NIC_LBK_PKIO * hw->chans_per_lbk;
+	} else {
+		bgx = NIC_GET_BGX_FROM_VF_LMAC_MAP(nic->vf_lmac_map[pqs_vnic]);
+		lmac =
+		      NIC_GET_LMAC_FROM_VF_LMAC_MAP(nic->vf_lmac_map[pqs_vnic]);
+		chan = (lmac * hw->chans_per_lmac) + (bgx * hw->chans_per_bgx);
+	}
 
 	/* 24 bytes for FCS, IPG and preamble */
 	rr_quantum = ((NIC_HW_MAX_FRS + 24) / 4);
@@ -692,7 +790,6 @@ static void nic_tx_channel_cfg(struct nicpf *nic, u8 vnic,
 	 * On 81xx/83xx TL3_CHAN reg should be configured with channel
 	 * within LMAC i.e 0-7 and not the actual channel number like on 88xx
 	 */
-	chan = (lmac * hw->chans_per_lmac) + (bgx * hw->chans_per_bgx);
 	if (hw->tl1_per_bgx)
 		nic_reg_write(nic, NIC_PF_TL3_0_255_CHAN | (tl3 << 3), chan);
 	else
@@ -1153,12 +1250,18 @@ static void nic_handle_mbx_intr(struct nicpf *nic, int vf)
 			ret = -1; /* NACK */
 			break;
 		}
+		if (vf == nic->lbk_vf) {
+			ret = 0;
+			break;
+		}
 		lmac = mbx.mac.vf_id;
 		bgx = NIC_GET_BGX_FROM_VF_LMAC_MAP(nic->vf_lmac_map[lmac]);
 		lmac = NIC_GET_LMAC_FROM_VF_LMAC_MAP(nic->vf_lmac_map[lmac]);
 		bgx_set_lmac_mac(nic->node, bgx, lmac, mbx.mac.mac_addr);
 		break;
 	case NIC_MBOX_MSG_SET_MAX_FRS:
+		if (vf == nic->lbk_vf)
+			break;
 		ret = nic_update_hw_frs(nic, mbx.frs.max_frs,
 					mbx.frs.vf_id);
 		break;
@@ -1174,7 +1277,10 @@ static void nic_handle_mbx_intr(struct nicpf *nic, int vf)
 		break;
 	case NIC_MBOX_MSG_CFG_DONE:
 		/* Last message of VF config msg sequence */
-		nic_enable_vf(nic, vf, true);
+		if (vf == nic->lbk_vf)
+			nic->vf_enabled[vf] = true;
+		else
+			nic_enable_vf(nic, vf, true);
 		goto unlock;
 	case NIC_MBOX_MSG_SHUTDOWN:
 		/* First msg in VF teardown sequence */
@@ -1183,7 +1289,10 @@ static void nic_handle_mbx_intr(struct nicpf *nic, int vf)
 				nic->vf_sqs[vf][i] = NIC_VF_UNASSIGNED;
 		}
 		nic->pqs_vf[vf] = NIC_VF_UNASSIGNED;
-		nic_enable_vf(nic, vf, false);
+		if (vf == nic->lbk_vf)
+			nic->vf_enabled[vf] = false;
+		else
+			nic_enable_vf(nic, vf, false);
 		break;
 	case NIC_MBOX_MSG_ALLOC_SQS:
 		nic_alloc_sqs(nic, vf, &mbx.sqs_alloc);
@@ -1396,6 +1505,11 @@ static void nic_poll_for_link(struct work_struct *work)
 		/* Poll only if VF is UP */
 		if (!nic->vf_enabled[vf])
 			continue;
+		if (vf == nic->lbk_vf) {
+			if (lbk_link_up != nic->link[vf])
+				nic_lbk_link_update(nic);
+			continue;
+		}
 
 		/* Get BGX, LMAC indices for the VF */
 		bgx = NIC_GET_BGX_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vf]);
@@ -1532,6 +1646,7 @@ static int nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	nic->node = nic_get_node_id(pdev);
+	nic->lbk_vf = -1; /* Default No lbk interface assigned*/
 
 	/* Get HW capability info */
 	nic_get_hw_info(nic);
