@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Cavium, Inc.
+ * Copyright (C) 2017 Cavium, Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License
@@ -11,6 +11,7 @@
 #include <linux/pci.h>
 #include <linux/random.h>
 
+#include "../thunder/thunder_lbk.h"
 #include "lbk.h"
 
 #define DRV_NAME "octeontx-lbk"
@@ -71,6 +72,9 @@ static struct octtx_lbk_port octeontx_lbk_ports[LBK_MAX_PORTS] = {
 	{.glb_port_idx = 0, .domain_id = LBK_INVALID_ID},
 	{.glb_port_idx = 1, .domain_id = LBK_INVALID_ID}
 };
+
+/* Interface with Thunder NIC driver */
+static struct thunder_lbk_com_s *thlbk;
 
 static int lbk_index_from_id(int id)
 {
@@ -268,15 +272,15 @@ int lbk_port_status(struct octtx_lbk_port *port, mbox_lbk_port_status_t *stat)
 /* Domain create function.
  */
 static int lbk_create_domain(u32 id, u16 domain_id,
-			     struct octtx_lbk_port *port_tbl, int ports,
+			     struct octtx_lbk_port *port_tbl, int port_count,
 		struct octeontx_master_com_t *com, void *domain)
 {
 	struct octtx_lbk_port *port, *gport;
 	struct lbkpf *lbk;
-	int i, j, k;
+	int rc = -ENODEV, i, j, k, pkind;
 
 	spin_lock(&octeontx_lbk_lock);
-	for (i = 0; i < ports; i++) {
+	for (i = 0; i < port_count; i++) {
 		port = &port_tbl[i];
 		for (j = 0; j < LBK_MAX_PORTS; j++) {
 			gport = &octeontx_lbk_ports[j];
@@ -293,14 +297,27 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 			gport->domain_id = domain_id;
 			gport->dom_port_idx = i;
 
+			if (port->glb_port_idx == 1) {
+				rc = thlbk->port_start();
+				if (rc)
+					goto err;
+				pkind = thlbk->get_port_pkind();
+			} else {
+				pkind = port->pkind;
+			}
 			lbk = get_lbk_dev(port->node, port->ilbk);
 			for (k = 0; k < lbk->channels; k++)
 				lbk_reg_write(lbk, LBK_CH_PKIND(k),
-					      port->pkind);
+						port->pkind);
+			lbk = get_lbk_dev(port->node, port->olbk);
+			for (k = 0; k < lbk->channels; k++)
+				lbk_reg_write(lbk, LBK_CH_PKIND(k), pkind);
 		}
 	}
+	rc = 0;
+err:
 	spin_unlock(&octeontx_lbk_lock);
-	return 0;
+	return rc;
 }
 
 /* Domain destroy function.
@@ -323,6 +340,8 @@ static int lbk_destroy_domain(u32 id, u16 domain_id)
 		port->domain_id = LBK_INVALID_ID;
 		port->ilbk = LBK_INVALID_ID;
 		port->olbk = LBK_INVALID_ID;
+		if (port->vnic)
+			thlbk->port_stop();
 	}
 	spin_unlock(&octeontx_lbk_lock);
 	return 0;
@@ -368,6 +387,12 @@ static int lbk_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct lbkpf *lbk;
 	u64 ioaddr;
 	int err, node;
+
+	/* Setup interface with NIC driver */
+	thlbk = try_then_request_module(symbol_get(thunder_lbk_com),
+					"thunder_lbk");
+	if (!thlbk)
+		return -ENODEV;
 
 	/* Setup LBK Device */
 	lbk = devm_kzalloc(dev, sizeof(*lbk), GFP_KERNEL);
