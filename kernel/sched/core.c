@@ -76,6 +76,7 @@
 #include <linux/frame.h>
 #include <linux/prefetch.h>
 #include <linux/isolation.h>
+#include <linux/debugfs.h>
 
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
@@ -3111,16 +3112,22 @@ void scheduler_tick(void)
 }
 
 #ifdef CONFIG_NO_HZ_FULL
+static u32 sched_tick_max_deferment = HZ;
+
 /**
  * scheduler_tick_max_deferment
  *
- * Keep at least one tick per second when a single
+ * Keep at least one tick per second (or whatever is set
+ * as sched_tick_max_deferment value) when a single
  * active task is running because the scheduler doesn't
  * yet completely support full dynticks environment.
  *
  * This makes sure that uptime, CFS vruntime, load
  * balancing, etc... continue to move forward, even
  * with a very low granularity.
+ *
+ * For isolated tasks or when sched_tick_max_deferment is
+ * set to -1, return KTIME_MAX.
  *
  * Return: Maximum deferment in nanoseconds.
  */
@@ -3129,13 +3136,26 @@ u64 scheduler_tick_max_deferment(void)
 	struct rq *rq = this_rq();
 	unsigned long next, now = READ_ONCE(jiffies);
 
-	next = rq->last_sched_tick + HZ;
+	if ((sched_tick_max_deferment == -1)
+	    || test_thread_flag(TIF_TASK_ISOLATION))
+		return KTIME_MAX;
+
+	next = rq->last_sched_tick + sched_tick_max_deferment;
 
 	if (time_before_eq(next, now))
 		return 0;
 
 	return jiffies_to_nsecs(next - now);
 }
+
+static __init int sched_nohz_full_init_debug(void)
+{
+	debugfs_create_u32("sched_tick_max_deferment", 0644, NULL,
+			   &sched_tick_max_deferment);
+
+	return 0;
+}
+late_initcall(sched_nohz_full_init_debug);
 #endif
 
 #if defined(CONFIG_PREEMPT) && (defined(CONFIG_DEBUG_PREEMPT) || \
