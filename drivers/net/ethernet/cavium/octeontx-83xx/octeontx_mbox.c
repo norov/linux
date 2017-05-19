@@ -127,7 +127,7 @@ int mbox_send(struct mbox *mbox, struct mbox_hdr *hdr, const void *txmsg,
 	}
 	if (!wait)
 		return -1; /* timeout */
-	if ((mbox->tag_own + 1) != ram_hdr.tag)
+	if ((u16)(mbox->tag_own + 1) != ram_hdr.tag)
 		return -1; /* tag mismatch */
 	(mbox->tag_own)++;
 
