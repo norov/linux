@@ -368,7 +368,7 @@ int ssow_reset_domain(u32 id, u16 domain_id, u64 grp_mask)
 	bool de_sched = false;
 	int retry = 0;
 	u64 addr;
-	int count;
+	int count = 0;
 	struct wqe_s wqe;
 	u64 reg;
 	void __iomem *reg_base;
@@ -430,13 +430,12 @@ int ssow_reset_domain(u32 id, u16 domain_id, u64 grp_mask)
 					retry++;
 				count = __get_sso_group_pend(id, grp_mask);
 			} while (count && retry < 1000);
-			if (count)
-				dev_err(&ssow->pdev->dev,
-					"Failed to reset vf[%d]\n", i);
 			sso_pf_set_value(id, SSO_PF_HWSX_SX_GRPMASK(i, 0), 0);
 			sso_pf_set_value(id, SSO_PF_HWSX_SX_GRPMASK(i, 1), 0);
 		}
 	}
+	if (count)
+	dev_err(&ssow->pdev->dev, "Failed to reset vf[%d]\n", i);
 
 	for (i = 0; i < ssow->total_vfs; i++) {
 		if (ssow->vf[i].domain.in_use &&
