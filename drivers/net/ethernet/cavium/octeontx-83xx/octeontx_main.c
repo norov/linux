@@ -9,6 +9,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/arm-smccc.h>
 #include <linux/moduleparam.h>
 #include <linux/interrupt.h>
 #include <linux/etherdevice.h>
@@ -53,6 +54,8 @@ struct delayed_work dwork_reset;
 struct workqueue_struct *check_link;
 struct workqueue_struct *reset_domain;
 
+#define MAX_GPIO 80
+
 struct octtx_domain {
 	struct list_head list;
 	int node;
@@ -78,6 +81,8 @@ struct octtx_domain {
 	struct attribute_group sysfs_group;
 	struct device_attribute dom_attr;
 };
+
+struct octtx_gpio gpio;
 
 static DEFINE_SPINLOCK(octeontx_domains_lock);
 static LIST_HEAD(octeontx_domains);
@@ -684,21 +689,88 @@ void octtx_reset_domain(struct work_struct *work)
 	queue_delayed_work(reset_domain, &dwork_reset, 10);
 }
 
+static unsigned long __install_el3_inthandler(unsigned long gpio_num,
+					      unsigned long sp,
+					      unsigned long cpu,
+					      unsigned long ttbr0)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(THUNDERX_INSTALL_GPIO_INT, gpio_num, sp, cpu, ttbr0,
+		      0, 0, 0, &res);
+	return res.a0;
+}
+
+static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
+{
+	int err = 0;
+	struct octtx_gpio_usr_data gpio_usr;
+	int ret;
+	struct task_struct *task = current;
+
+	if (!gpio.in_use)
+		return -EINVAL;
+
+	if (_IOC_TYPE(cmd) != OCTTX_IOC_MAGIC)
+		return -ENOTTY;
+
+	if (_IOC_DIR(cmd) & _IOC_READ)
+		err = !access_ok(VERIFY_WRITE, (void __user *)arg,
+				 _IOC_SIZE(cmd));
+	else if (_IOC_TYPE(cmd) & _IOC_WRITE)
+		err = !access_ok(VERIFY_READ, (void __user *)arg,
+				 _IOC_SIZE(cmd));
+	if (err)
+		return -EFAULT;
+
+	switch (cmd) {
+	case OCTTX_IOC_SET_GPIO_HANDLER: /*Install GPIO ISR handler*/
+		ret = copy_from_user(&gpio_usr, (void *)arg, _IOC_SIZE(cmd));
+		if (ret)
+			return -EFAULT;
+		gpio.ttbr = 0;
+		//TODO: reserve a asid to avoid asid rollovers
+		asm volatile("mrs %0, ttbr0_el1\n\t" : "=r"(gpio.ttbr));
+		gpio.isr_base = gpio_usr.isr_base;
+		gpio.sp = gpio_usr.sp;
+		gpio.cpu = gpio_usr.cpu;
+		gpio.gpio_num = gpio_usr.gpio_num;
+		ret = __install_el3_inthandler(gpio.gpio_num, gpio.sp, gpio.cpu,
+					       gpio.isr_base);
+//		printk("%s::%d ttbr:%llx sp:%llx isr_base:%llx\n",
+//		       __FILE__, __LINE__, gpio.ttbr, gpio.sp, gpio.isr_base);
+		break;
+	case OCTTX_IOC_CLR_GPIO_HANDLER: /*Clear GPIO ISR handler*/
+		break;
+	default:
+		return -ENOTTY;
+	}
+	return 0;
+}
+
 static int octtx_dev_open(struct inode *inode, struct file *fp)
 {
-	/* Nothing to do */
+	if (gpio.in_use)
+		return -EALREADY;
+
+	gpio.in_use = 1;
 	return 0;
 }
 
 static int octtx_dev_release(struct inode *inode, struct file *fp)
 {
+	if (gpio.in_use == 0)
+		return -EINVAL;
+
+	gpio.in_use = 0;
 	return 0;
 }
 
 static const struct file_operations fops = {
 	.owner = THIS_MODULE,
 	.open = octtx_dev_open,
-	.release = octtx_dev_release
+	.release = octtx_dev_release,
+	.unlocked_ioctl = octtx_dev_ioctl
 };
 
 static int __init octeontx_init_module(void)
