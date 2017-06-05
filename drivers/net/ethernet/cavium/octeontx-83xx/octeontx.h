@@ -10,6 +10,7 @@
 #define OCTEONTX_H
 
 #include <linux/netdevice.h>
+#include <linux/ioctl.h>
 
 #include "octeontx_mbox.h"
 
@@ -47,6 +48,14 @@ struct wqe_s {
 	u64 *work1;
 };
 
+#define OCTTX_IOC_MAGIC	0xF2
+
+/* THUNDERX SMC definitons */
+/* X1 - gpio_num, X2 - sp, X3 - cpu, X4 - ttbr0 */
+#define THUNDERX_INSTALL_GPIO_INT       0x43000801
+/* X1 - gpio_num */
+#define THUNDERX_REMOVE_GPIO_INT        0x43000802
+
 struct intr_hand {
 	u64	mask;
 	char	name[50];
@@ -54,6 +63,28 @@ struct intr_hand {
 	u64	soffset;
 	irqreturn_t (*handler)(int, void *);
 };
+
+struct octtx_gpio {
+	u64	ttbr;
+	u64	isr_base;
+	u64	sp;
+	int	in_use;
+	u64	cpu;
+	u64	gpio_num;
+};
+
+struct octtx_gpio_usr_data {
+	u64	isr_base;
+	u64	sp;
+	u64	cpu;
+	u64	gpio_num;
+};
+
+#define OCTTX_IOC_SET_GPIO_HANDLER \
+	_IOW(OCTTX_IOC_MAGIC, 1, struct octtx_gpio_usr_data)
+
+#define OCTTX_IOC_CLR_GPIO_HANDLER \
+	_IOW(OCTTX_IOC_MAGIC, 2, int)
 
 enum domain_type {
 	APP_NET = 0,
@@ -104,5 +135,6 @@ struct octtx_lbk_port {
 	int	pkind; /* PKI port number */
 	void	*vnic; /* NIC port descriptor */
 };
+
 #endif
 
