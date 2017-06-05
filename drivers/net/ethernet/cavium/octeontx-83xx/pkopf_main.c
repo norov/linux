@@ -812,12 +812,20 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 	reg = (rate << 3) | size;
 	pko_reg_write(pko, PKO_PF_PTGFX_CFG(ptgf), reg);
 
-	reg = (1ull << 63) | 0x10; /* 0x10 -- recommended in HRM.*/
-	/* Note: For XFI interface, this value may be big and can create
-	 * "underflow" condition in the BGX TX FIFO. If this happens,
-	 * use value = 3..6.
-	 */
+	reg = (1ull << 63)
+	       | fpa->pool_iova /* dummy read address -- required by any
+				 * descriptor segment that does not have
+				 * a native data read fetch associated
+				 * with it (eg. SEND_JUMP, SEND_IMM).
+				 */
+	       | 0x10; /* 0x10 -- recommended in HRM.*/
+	       /* Note: For XFI interface, this value may be big and can create
+		* "underflow" condition in the BGX TX FIFO. If this happens,
+		* use value = 3..6.
+		*/
+
 	pko_reg_write(pko, PKO_PF_PTF_IOBP_CFG, reg);
+
 	return 0;
 }
 
