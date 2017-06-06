@@ -701,12 +701,20 @@ static unsigned long __install_el3_inthandler(unsigned long gpio_num,
 	return res.a0;
 }
 
+static void __remove_el3_inthandler(unsigned long gpio_num)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(THUNDERX_REMOVE_GPIO_INT, gpio_num,
+		      0, 0, 0, 0, 0, 0, &res);
+}
+
 static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	int err = 0;
 	struct octtx_gpio_usr_data gpio_usr;
 	int ret;
-	struct task_struct *task = current;
+	//struct task_struct *task = current;
 
 	if (!gpio.in_use)
 		return -EINVAL;
@@ -741,6 +749,10 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 //		       __FILE__, __LINE__, gpio.ttbr, gpio.sp, gpio.isr_base);
 		break;
 	case OCTTX_IOC_CLR_GPIO_HANDLER: /*Clear GPIO ISR handler*/
+		ret = copy_from_user(&gpio_usr, (void *)arg, _IOC_SIZE(cmd));
+		if (ret)
+			return -EFAULT;
+		__remove_el3_inthandler(gpio_usr.gpio_num);
 		break;
 	default:
 		return -ENOTTY;
@@ -761,6 +773,9 @@ static int octtx_dev_release(struct inode *inode, struct file *fp)
 {
 	if (gpio.in_use == 0)
 		return -EINVAL;
+
+	if (gpio.gpio_num)
+		__remove_el3_inthandler(gpio.gpio_num);
 
 	gpio.in_use = 0;
 	return 0;
