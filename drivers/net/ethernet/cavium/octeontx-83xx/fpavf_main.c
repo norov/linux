@@ -17,7 +17,7 @@
 #define DRV_NAME "octeontx-fpavf"
 #define DRV_VERSION "0.1"
 
-static int setup_test = 1;
+static int setup_test;
 module_param(setup_test, int, 0644);
 MODULE_PARM_DESC(setup_test, "does a test after doing setup");
 
@@ -61,7 +61,6 @@ static u64 fpa_vf_alloc(struct fpavf *fpa, u32 aura)
 
 static int fpa_vf_do_test(struct fpavf *fpa, u64 num_buffers)
 {
-	int buf_count = num_buffers;
 	u64 *buf;
 	u64 avail;
 	int i;
@@ -73,7 +72,7 @@ static int fpa_vf_do_test(struct fpavf *fpa, u64 num_buffers)
 	memset(buf, 0, sizeof(u64) * num_buffers);
 
 	i = 0;
-	while (buf_count) {
+	while (true) {
 		buf[i] = fpa_vf_alloc(fpa, 0);
 		if (!buf[i])
 			break;
@@ -87,7 +86,7 @@ static int fpa_vf_do_test(struct fpavf *fpa, u64 num_buffers)
 	}
 
 	while (i) {
-		fpa_vf_free(fpa, 0, buf[i], 0);
+		fpa_vf_free(fpa, 0, buf[i - 1], 0);
 		i--;
 	}
 	avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
@@ -156,8 +155,6 @@ static int fpa_vf_setup(struct fpavf *fpa, u64 num_buffers, u32 buf_len,
 
 	buf_len = round_up(buf_len, FPA_LN_SIZE);
 	num_buffers = round_up(num_buffers, FPA_LN_SIZE);
-	fpa->pool_size = round_up(num_buffers / fpa->stack_ln_ptrs,
-			FPA_LN_SIZE);
 	fpa->pool_size = num_buffers * FPA_LN_SIZE;
 
 	fpa->pool_addr = dma_zalloc_coherent(&fpa->pdev->dev, fpa->pool_size,
@@ -216,7 +213,7 @@ static int fpa_vf_setup(struct fpavf *fpa, u64 num_buffers, u32 buf_len,
 
 	/*Setup THRESHOLD*/
 	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_THRESHOLD(0), num_buffers / 2);
-	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_LIMIT(0), num_buffers - 50);
+	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_LIMIT(0), num_buffers - 110);
 
 	return 0;
 }
