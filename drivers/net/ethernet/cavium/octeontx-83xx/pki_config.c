@@ -71,7 +71,9 @@ static void reset_port_reg(struct pki_t *pki, struct pki_port *port)
 			      cfg);
 		pki_reg_write(pki, PKI_CLX_PKINDX_LG_CUSTOM(i, port->pkind),
 			      cfg);
+		cfg = 0x1ull << PKI_STYLE_CFG_DROP_SHIFT;
 		pki_reg_write(pki, PKI_CLX_STYLEX_CFG(i, style), cfg);
+		cfg = 0x0;
 		pki_reg_write(pki, PKI_CLX_STYLEX_CFG2(i, style), cfg);
 		pki_reg_write(pki, PKI_CLX_STYLEX_ALG(i, style), cfg);
 	}
@@ -196,6 +198,7 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 		cfg |= (0x1ULL << PKI_STYLE_CFG_FCS_STRIP_SHIFT);
 	}
 	cfg |= (0x1ULL << PKI_STYLE_CFG_LENERR_EN_SHIFT);
+	cfg |= (0x1ull << PKI_STYLE_CFG_DROP_SHIFT);
 	for (i = 0; i < pki->max_cls; i++)
 		pki_reg_write(pki, PKI_CLX_STYLEX_CFG(i, port->init_style),
 			      cfg);
