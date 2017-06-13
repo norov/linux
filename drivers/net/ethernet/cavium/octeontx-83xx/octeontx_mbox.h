@@ -225,6 +225,12 @@ struct mbox_fpa_cfg {
 	u64	aura_cfg;
 };
 
+struct mbox_fpa_lvls {
+	u64	pool_levels;
+	u64	cnt_levels;
+	u16	gaura;
+};
+
 /* SSOW */
 struct mbox_ssow_identify {
 	u16	domain_id;
@@ -712,6 +718,8 @@ struct mbox_pki_qos_entry {
 	u16 gaura;
 	u8 grptag_ok;
 	u8 grptag_bad;
+	u8 ena_red;
+	u8 ena_drop;
 };
 
 /* hardcoded TODO */
