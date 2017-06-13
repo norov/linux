@@ -28,7 +28,7 @@
 #define FPA_VF_MSIX_COUNT		1
 #define FPA_MAX_VF			32
 
-/* FPA FP register offsets */
+/* FPA PF register offsets */
 #define FPA_PF_SFT_RST			0x0
 #define FPA_PF_CONST			0x10
 #define FPA_PF_CONST1			0x18
