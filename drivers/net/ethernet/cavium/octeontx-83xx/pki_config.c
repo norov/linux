@@ -279,6 +279,10 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 		cfg = pki_reg_read(pki, PKI_QPG_TBLBX(qpg_base + i));
 		set_field(&cfg, PKI_QPG_TBLB_STRM_MASK,
 			  PKI_QPG_TBLB_STRM_SHIFT, vf->stream_id);
+		set_field(&cfg, PKI_QPG_TBLB_ENA_RED_MASK,
+			  PKI_QPG_TBLB_ENA_RED_SHIFT, qpg->ena_red);
+		set_field(&cfg, PKI_QPG_TBLB_ENA_DROP_MASK,
+			  PKI_QPG_TBLB_ENA_DROP_SHIFT, qpg->ena_drop);
 		pki_reg_write(pki, PKI_QPG_TBLBX(qpg_base + i), cfg);
 	}
 	for (i = 0; i < pki->max_cls; i++) {

@@ -105,6 +105,7 @@ static int fpa_pf_receive_message(u32 id, u16 domain_id,
 	struct fpapf_vf *vf;
 	struct fpapf *fpa = NULL;
 	struct mbox_fpa_cfg *cfg;
+	struct mbox_fpa_lvls *lvls;
 	unsigned int aura, pool;
 	u64 reg;
 	int i;
@@ -211,11 +212,30 @@ static int fpa_pf_receive_message(u32 id, u16 domain_id,
 		break;
 
 	case FPA_SETAURALVL:
+		lvls = add_data;
+		aura = vf->hardware_aura_set * FPA_AURA_SET_SIZE +
+			(lvls->gaura % FPA_AURA_SET_SIZE);
+
+		fpa_reg_write(fpa, FPA_PF_AURAX_CNT_LEVELS(aura),
+			      lvls->cnt_levels);
+		fpa_reg_write(fpa, FPA_PF_AURAX_POOL_LEVELS(aura),
+			      lvls->pool_levels);
+		break;
+
 	case FPA_GETAURALVL:
-		/* also take care - error handlig code path::
-		 * overall in fpapf driver.
-		 * break;
-		 */
+		lvls = add_data;
+		aura = vf->hardware_aura_set * FPA_AURA_SET_SIZE +
+			(lvls->gaura % FPA_AURA_SET_SIZE);
+
+		lvls->cnt_levels = fpa_reg_read(fpa,
+				FPA_PF_AURAX_CNT_LEVELS(aura));
+		lvls->pool_levels = fpa_reg_read(fpa,
+				FPA_PF_AURAX_POOL_LEVELS(aura));
+
+		/* Update data read len */
+		resp->data = sizeof(struct mbox_fpa_lvls);
+		break;
+
 	default:
 		hdr->res_code = MBOX_RET_INVALID;
 		break;
