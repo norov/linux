@@ -166,6 +166,8 @@ static struct octtx_lbk_port *lbk_get_port_by_chan(int node, u16 domain_id,
 
 /* Main MBOX message processing function.
  */
+static int lbk_port_start(struct octtx_lbk_port *port);
+static int lbk_port_stop(struct octtx_lbk_port *port);
 static int lbk_port_config(struct octtx_lbk_port *port,
 			   mbox_lbk_port_conf_t *conf);
 static int lbk_port_status(struct octtx_lbk_port *port,
@@ -176,16 +178,15 @@ static int lbk_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 			       void *mdata)
 {
 	struct octtx_lbk_port *port;
+	int rc = 0;
 
 	/* Determine LBK devices, which back this domain:port */
 	port = get_lbk_port(domain_id, hdr->vfid);
-	if (!port) {
-		hdr->res_code = MBOX_RET_INVALID;
-		return -ENODEV;
+	if (!port || !mdata) {
+		rc = -ENODEV;
+		goto err;
 	}
 	/* Process messages */
-	if (!mdata)
-		return -ENOMEM;
 	switch (hdr->msg) {
 	case MBOX_LBK_PORT_OPEN:
 		lbk_port_config(port, mdata);
@@ -206,13 +207,22 @@ static int lbk_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 		*(u8 *)mdata = 1; /* Always up. */
 		resp->data = sizeof(u8);
 		break;
-	/* Mandatary MBOX interface messages, but not supported in 83XX. */
 	case MBOX_LBK_PORT_GET_STATS:
 		memset(mdata, 0, sizeof(mbox_lbk_port_stats_t));
 		resp->data = sizeof(mbox_lbk_port_stats_t);
 		break;
-	case MBOX_LBK_PORT_STOP:
 	case MBOX_LBK_PORT_START:
+		rc = lbk_port_start(port);
+		if (rc < 0) {
+			rc = -EIO;
+			goto err;
+		}
+		resp->data = 0;
+		break;
+	case MBOX_LBK_PORT_STOP:
+		lbk_port_stop(port);
+		resp->data = 0;
+		break;
 	case MBOX_LBK_PORT_CLR_STATS:
 		resp->data = 0;
 		break;
@@ -223,10 +233,51 @@ static int lbk_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 	}
 	hdr->res_code = MBOX_RET_SUCCESS;
 	return 0;
+err:
+	hdr->res_code = MBOX_RET_INVALID;
+	return rc;
 }
 
 /* MBOX message processing support functions.
  */
+int lbk_port_start(struct octtx_lbk_port *port)
+{
+	int rc, pkind, i;
+	struct lbkpf *lbk;
+
+	if (port->glb_port_idx == 1) {
+		rc = thlbk->port_start();
+		if (rc)
+			return -EIO;
+		pkind = thlbk->get_port_pkind();
+	} else {
+		pkind = port->pkind;
+	}
+	lbk = get_lbk_dev(port->node, port->ilbk);
+	for (i = 0; i < lbk->channels; i++)
+		lbk_reg_write(lbk, LBK_CH_PKIND(i), port->pkind);
+	lbk = get_lbk_dev(port->node, port->olbk);
+	for (i = 0; i < lbk->channels; i++)
+		lbk_reg_write(lbk, LBK_CH_PKIND(i), pkind);
+	return 0;
+}
+
+int lbk_port_stop(struct octtx_lbk_port *port)
+{
+	struct lbkpf *lbk;
+	int i;
+
+	if (port->glb_port_idx == 1)
+		thlbk->port_stop();
+	lbk = get_lbk_dev(port->node, port->ilbk);
+	for (i = 0; i < lbk->channels; i++)
+		lbk_reg_write(lbk, LBK_CH_PKIND(i), 0);
+	lbk = get_lbk_dev(port->node, port->olbk);
+	for (i = 0; i < lbk->channels; i++)
+		lbk_reg_write(lbk, LBK_CH_PKIND(i), 0);
+	return 0;
+}
+
 int lbk_port_config(struct octtx_lbk_port *port, mbox_lbk_port_conf_t *conf)
 {
 	u64 reg;
@@ -276,8 +327,7 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 		struct octeontx_master_com_t *com, void *domain)
 {
 	struct octtx_lbk_port *port, *gport;
-	struct lbkpf *lbk;
-	int rc = -ENODEV, i, j, k, pkind;
+	int i, j;
 
 	spin_lock(&octeontx_lbk_lock);
 	for (i = 0; i < port_count; i++) {
@@ -294,30 +344,13 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 			port->ilbk_num_chans = gport->ilbk_num_chans;
 			port->olbk_base_chan = gport->olbk_base_chan;
 			port->olbk_num_chans = gport->olbk_num_chans;
+			gport->pkind = port->pkind;
 			gport->domain_id = domain_id;
 			gport->dom_port_idx = i;
-
-			if (port->glb_port_idx == 1) {
-				rc = thlbk->port_start();
-				if (rc)
-					goto err;
-				pkind = thlbk->get_port_pkind();
-			} else {
-				pkind = port->pkind;
-			}
-			lbk = get_lbk_dev(port->node, port->ilbk);
-			for (k = 0; k < lbk->channels; k++)
-				lbk_reg_write(lbk, LBK_CH_PKIND(k),
-						port->pkind);
-			lbk = get_lbk_dev(port->node, port->olbk);
-			for (k = 0; k < lbk->channels; k++)
-				lbk_reg_write(lbk, LBK_CH_PKIND(k), pkind);
 		}
 	}
-	rc = 0;
-err:
 	spin_unlock(&octeontx_lbk_lock);
-	return rc;
+	return 0;
 }
 
 /* Domain destroy function.
@@ -325,23 +358,17 @@ err:
 static int lbk_destroy_domain(u32 id, u16 domain_id)
 {
 	struct octtx_lbk_port *port;
-	struct lbkpf *lbk;
-	int i, j;
+	int i;
 
 	spin_lock(&octeontx_lbk_lock);
-	for (j = 0; j < LBK_MAX_PORTS; j++) {
-		port = &octeontx_lbk_ports[j];
+	for (i = 0; i < LBK_MAX_PORTS; i++) {
+		port = &octeontx_lbk_ports[i];
 		if (port->domain_id != domain_id)
 			continue;
-		lbk = get_lbk_dev(port->node, port->ilbk);
-		for (i = 0; i < lbk->channels; i++)
-			lbk_reg_write(lbk, LBK_CH_PKIND(i), 0);
-
+		lbk_port_stop(port);
 		port->domain_id = LBK_INVALID_ID;
 		port->ilbk = LBK_INVALID_ID;
 		port->olbk = LBK_INVALID_ID;
-		if (port->vnic)
-			thlbk->port_stop();
 	}
 	spin_unlock(&octeontx_lbk_lock);
 	return 0;
@@ -351,7 +378,17 @@ static int lbk_destroy_domain(u32 id, u16 domain_id)
  */
 static int lbk_reset_domain(u32 id, u16 domain_id)
 {
-	/* Nothing to do. */
+	struct octtx_lbk_port *port;
+	int i;
+
+	spin_lock(&octeontx_lbk_lock);
+	for (i = 0; i < LBK_MAX_PORTS; i++) {
+		port = &octeontx_lbk_ports[i];
+		if (port->domain_id != domain_id)
+			continue;
+		lbk_port_stop(port);
+	}
+	spin_unlock(&octeontx_lbk_lock);
 	return 0;
 }
 
