@@ -323,10 +323,10 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 	spin_unlock(&octeontx_fpa_devices_lock);
 
 	if (!fpa)
-		return -ENODEV;
+		return ret;
 
 	if ((fpa->total_vfs - fpa->vfs_in_use) < num_vfs)
-		return -ENODEV;
+		return ret;
 
 	for (i = 0; i < fpa->total_vfs; i++) {
 		if (fpa->vf[i].domain.in_use) {
@@ -383,7 +383,7 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 						, pci_iov_virtfn_devfn(fpa->pdev
 						, i));
 				if (!virtfn) {
-					ret = -ENODEV;
+					ret = 0;
 					break;
 				}
 
