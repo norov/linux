@@ -23,6 +23,7 @@
 #include "nic.h"
 #include "nicvf_queues.h"
 #include "thunder_bgx.h"
+#include "../drivers/ptp/cavium_ptp.h"
 
 #define DRV_NAME	"thunder-nicvf"
 #define DRV_VERSION	"1.0"
@@ -521,7 +522,8 @@ static void nicvf_snd_ptp_handler(struct net_device *netdev,
 
 	/* Get the timestamp */
 	memset(&ts, 0, sizeof(ts));
-	ts.hwtstamp = ns_to_ktime(cqe_tx->ptp_timestamp);
+	ts.hwtstamp = ns_to_ktime(cqe_tx->ptp_timestamp +
+				  thunder_get_adjtime());
 	skb_tstamp_tx(nic->ptp_skb, &ts);
 
 no_tstamp:
@@ -624,7 +626,7 @@ static inline void nicvf_set_rxtstamp(struct nicvf *nic, struct sk_buff *skb)
 
 	/* The first 8 bytes is the timestamp */
 	ns = be64_to_cpu(*(u64 *)skb->data);
-	skb_hwtstamps(skb)->hwtstamp = ns_to_ktime(ns);
+	skb_hwtstamps(skb)->hwtstamp = ns_to_ktime(ns + thunder_get_adjtime());
 	__skb_pull(skb, 8);
 }
 

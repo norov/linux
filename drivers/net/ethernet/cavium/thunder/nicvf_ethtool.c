@@ -16,6 +16,7 @@
 #include "nicvf_queues.h"
 #include "q_struct.h"
 #include "thunder_bgx.h"
+#include "../drivers/ptp/cavium_ptp.h"
 
 #define DRV_NAME	"thunder-nicvf"
 #define DRV_VERSION     "1.0"
@@ -814,7 +815,12 @@ static int nicvf_get_ts_info(struct net_device *netdev,
 				SOF_TIMESTAMPING_TX_HARDWARE |
 				SOF_TIMESTAMPING_RX_HARDWARE |
 				SOF_TIMESTAMPING_RAW_HARDWARE;
-	info->phc_index = -1;
+
+	if (thunder_ptp_clock && thunder_ptp_clock->cavium_ptp_clock)
+		info->phc_index = ptp_clock_index(
+				thunder_ptp_clock->cavium_ptp_clock->ptp_clock);
+	else
+		info->phc_index = -1;
 
 	info->tx_types = (1 << HWTSTAMP_TX_OFF) | (1 << HWTSTAMP_TX_ON);
 
