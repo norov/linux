@@ -311,6 +311,11 @@ struct nicvf {
 	struct tasklet_struct	qs_err_task;
 	struct work_struct	reset_task;
 
+	/* PTP timestamp */
+	bool			hw_rx_tstamp;
+	struct sk_buff		*ptp_skb;
+	atomic_t		tx_ptp_skbs;
+
 	/* Interrupt coalescing settings */
 	u32			cq_coalesce_usecs;
 	u32			msg_enable;
@@ -369,6 +374,7 @@ struct nicvf {
 #define	NIC_MBOX_MSG_LOOPBACK		0x16	/* Set interface in loopback */
 #define	NIC_MBOX_MSG_RESET_STAT_COUNTER 0x17	/* Reset statistics counters */
 #define	NIC_MBOX_MSG_PFC		0x18	/* Pause frame control */
+#define	NIC_MBOX_MSG_PTP_CFG		0x19	/* HW packet timestamp */
 #define	NIC_MBOX_MSG_CFG_DONE		0xF0	/* VF configuration done */
 #define	NIC_MBOX_MSG_SHUTDOWN		0xF1	/* VF is being shutdown */
 
@@ -520,6 +526,11 @@ struct pfc {
 	u8    fc_tx;
 };
 
+struct set_ptp {
+	u8    msg;
+	bool  enable;
+};
+
 /* 128 bit shared memory between PF and each VF */
 union nic_mbx {
 	struct { u8 msg; }	msg;
@@ -539,6 +550,7 @@ union nic_mbx {
 	struct set_loopback	lbk;
 	struct reset_stat_cfg	reset_stat;
 	struct pfc		pfc;
+	struct set_ptp		ptp;
 };
 
 #define NIC_NODE_ID_MASK	0x03

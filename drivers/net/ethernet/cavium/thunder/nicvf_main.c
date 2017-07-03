@@ -17,6 +17,7 @@
 #include <linux/prefetch.h>
 #include <linux/irq.h>
 #include <linux/iommu.h>
+#include <linux/net_tstamp.h>
 
 #include "nic_reg.h"
 #include "nic.h"
@@ -496,6 +497,41 @@ static int nicvf_init_resources(struct nicvf *nic)
 	return 0;
 }
 
+static void nicvf_snd_ptp_handler(struct net_device *netdev,
+				  struct cqe_send_t *cqe_tx)
+{
+	struct nicvf *nic = netdev_priv(netdev);
+	struct skb_shared_hwtstamps ts;
+
+	nic = nic->pnicvf;
+	/* Sync for 'ptp_skb' */
+	smp_rmb();
+
+	/* New timestamp request can be queued now */
+	atomic_set(&nic->tx_ptp_skbs, 0);
+
+	/* Check for timestamp requested skb */
+	if (!nic->ptp_skb)
+		return;
+
+	/* Check if timestamping is timedout, which is set to 10us */
+	if ((cqe_tx->send_status == CQ_TX_ERROP_TSTMP_TIMEOUT) ||
+	    (cqe_tx->send_status == CQ_TX_ERROP_TSTMP_CONFLICT))
+		goto no_tstamp;
+
+	/* Get the timestamp */
+	memset(&ts, 0, sizeof(ts));
+	ts.hwtstamp = ns_to_ktime(cqe_tx->ptp_timestamp);
+	skb_tstamp_tx(nic->ptp_skb, &ts);
+
+no_tstamp:
+	/* Free the original skb */
+	dev_kfree_skb_any(nic->ptp_skb);
+	nic->ptp_skb = NULL;
+	/* Sync 'ptp_skb' */
+	smp_wmb();
+}
+
 static void nicvf_snd_pkt_handler(struct net_device *netdev,
 				  struct cqe_send_t *cqe_tx,
 				  int budget, int *subdesc_cnt,
@@ -535,7 +571,12 @@ static void nicvf_snd_pkt_handler(struct net_device *netdev,
 		prefetch(skb);
 		(*tx_pkts)++;
 		*tx_bytes += skb->len;
-		napi_consume_skb(skb, budget);
+		/* If timestamp is requested for this skb, don't free it */
+		if (skb_shinfo(skb)->tx_flags & SKBTX_IN_PROGRESS &&
+		    !nic->pnicvf->ptp_skb)
+			nic->pnicvf->ptp_skb = skb;
+		else
+			napi_consume_skb(skb, budget);
 		sq->skbuff[cqe_tx->sqe_ptr] = (u64)NULL;
 	} else {
 		/* In case of SW TSO on 88xx, only last segment will have
@@ -572,6 +613,19 @@ static inline void nicvf_set_rxhash(struct net_device *netdev,
 	}
 
 	skb_set_hash(skb, hash, hash_type);
+}
+
+static inline void nicvf_set_rxtstamp(struct nicvf *nic, struct sk_buff *skb)
+{
+	u64 ns;
+
+	if (!nic->hw_rx_tstamp)
+		return;
+
+	/* The first 8 bytes is the timestamp */
+	ns = be64_to_cpu(*(u64 *)skb->data);
+	skb_hwtstamps(skb)->hwtstamp = ns_to_ktime(ns);
+	__skb_pull(skb, 8);
 }
 
 static void nicvf_rcv_pkt_handler(struct net_device *netdev,
@@ -618,6 +672,7 @@ static void nicvf_rcv_pkt_handler(struct net_device *netdev,
 		return;
 	}
 
+	nicvf_set_rxtstamp(nic, skb);
 	nicvf_set_rxhash(netdev, cqe_rx, skb);
 
 	skb_record_rx_queue(skb, rq_idx);
@@ -692,10 +747,12 @@ loop:
 					      &tx_pkts, &tx_bytes);
 			tx_done++;
 		break;
+		case CQE_TYPE_SEND_PTP:
+			nicvf_snd_ptp_handler(netdev, (void *)cq_desc);
+		break;
 		case CQE_TYPE_INVALID:
 		case CQE_TYPE_RX_SPLIT:
 		case CQE_TYPE_RX_TCP:
-		case CQE_TYPE_SEND_PTP:
 			/* Ignore for now */
 		break;
 		}
@@ -1204,10 +1261,26 @@ int nicvf_stop(struct net_device *netdev)
 
 	nicvf_free_cq_poll(nic);
 
+	/* Free any pending SKB saved to receive timestamp */
+	if (nic->ptp_skb) {
+		dev_kfree_skb_any(nic->ptp_skb);
+		nic->ptp_skb = NULL;
+	}
+
 	/* Clear multiqset info */
 	nic->pnicvf = nic;
 
 	return 0;
+}
+
+static int nicvf_config_hw_rx_tstamp(struct nicvf *nic, bool enable)
+{
+	union nic_mbx mbx = {};
+
+	mbx.ptp.msg = NIC_MBOX_MSG_PTP_CFG;
+	mbx.ptp.enable = enable;
+
+	return nicvf_send_msg_to_pf(nic, &mbx);
 }
 
 static int nicvf_update_hw_max_frs(struct nicvf *nic, int mtu)
@@ -1278,6 +1351,11 @@ int nicvf_open(struct net_device *netdev)
 	nicvf_request_sqs(nic);
 	if (nic->sqs_mode)
 		nicvf_get_primary_vf_struct(nic);
+
+	/* Configure PTP timestamp */
+	nicvf_config_hw_rx_tstamp(nic, nic->hw_rx_tstamp);
+	atomic_set(&nic->tx_ptp_skbs, 0);
+	nic->ptp_skb = NULL;
 
 	/* Configure receive side scaling and MTU */
 	if (!nic->sqs_mode) {
@@ -1557,6 +1635,74 @@ static int nicvf_set_features(struct net_device *netdev,
 	return 0;
 }
 
+int nicvf_config_hwtstamp(struct net_device *netdev, struct ifreq *ifr)
+{
+	struct hwtstamp_config config;
+	struct nicvf *nic = netdev_priv(netdev);
+
+	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
+		return -EFAULT;
+
+	/* reserved for future extensions */
+	if (config.flags)
+		return -EINVAL;
+
+	switch (config.tx_type) {
+	case HWTSTAMP_TX_OFF:
+	case HWTSTAMP_TX_ON:
+		break;
+	default:
+		return -ERANGE;
+	}
+
+	switch (config.rx_filter) {
+	case HWTSTAMP_FILTER_NONE:
+		nic->hw_rx_tstamp = false;
+		break;
+	case HWTSTAMP_FILTER_ALL:
+	case HWTSTAMP_FILTER_SOME:
+	case HWTSTAMP_FILTER_PTP_V1_L4_EVENT:
+	case HWTSTAMP_FILTER_PTP_V1_L4_SYNC:
+	case HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ:
+	case HWTSTAMP_FILTER_PTP_V2_L4_EVENT:
+	case HWTSTAMP_FILTER_PTP_V2_L4_SYNC:
+	case HWTSTAMP_FILTER_PTP_V2_L4_DELAY_REQ:
+	case HWTSTAMP_FILTER_PTP_V2_L2_EVENT:
+	case HWTSTAMP_FILTER_PTP_V2_L2_SYNC:
+	case HWTSTAMP_FILTER_PTP_V2_L2_DELAY_REQ:
+	case HWTSTAMP_FILTER_PTP_V2_EVENT:
+	case HWTSTAMP_FILTER_PTP_V2_SYNC:
+	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
+		nic->hw_rx_tstamp = true;
+		config.rx_filter = HWTSTAMP_FILTER_ALL;
+		break;
+	default:
+		return -ERANGE;
+	}
+
+	if (netif_running(netdev)) {
+		if (nic->hw_rx_tstamp)
+			nicvf_config_hw_rx_tstamp(nic, true);
+		else
+			nicvf_config_hw_rx_tstamp(nic, false);
+	}
+
+	if (copy_to_user(ifr->ifr_data, &config, sizeof(config)))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int nicvf_ioctl(struct net_device *netdev, struct ifreq *req, int cmd)
+{
+	switch (cmd) {
+	case SIOCSHWTSTAMP:
+		return nicvf_config_hwtstamp(netdev, req);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
 static const struct net_device_ops nicvf_netdev_ops = {
 	.ndo_open		= nicvf_open,
 	.ndo_stop		= nicvf_stop,
@@ -1567,6 +1713,7 @@ static const struct net_device_ops nicvf_netdev_ops = {
 	.ndo_tx_timeout         = nicvf_tx_timeout,
 	.ndo_fix_features       = nicvf_fix_features,
 	.ndo_set_features       = nicvf_set_features,
+	.ndo_do_ioctl		= nicvf_ioctl,
 };
 
 static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
