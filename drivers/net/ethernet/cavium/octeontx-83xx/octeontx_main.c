@@ -242,7 +242,7 @@ int octtx_sysfs_init(struct device *octtx_device)
 
 void octtx_sysfs_remove(struct device *octtx_device)
 {
-	kobject_put(&octtx_device->kobj);
+	sysfs_remove_group(&octtx_device->kobj, &octtx_attr_group);
 }
 
 static int octtx_master_receive_message(struct mbox_hdr *hdr,
@@ -845,6 +845,7 @@ static int __init octeontx_init_module(void)
 		symbol_put(pkopf_com);
 		return -ENODEV;
 	}
+
 	/* Register a physical link status poll fn() */
 	check_link = alloc_workqueue("octeontx_check_link_status",
 				     WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
@@ -868,8 +869,11 @@ static int __init octeontx_init_module(void)
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		symbol_put(timpf_com);
 		return -ENOMEM;
 	}
+
 	INIT_DELAYED_WORK(&dwork, poll_for_link);
 	INIT_DELAYED_WORK(&dwork_reset, octtx_reset_domain);
 	queue_delayed_work(check_link, &dwork, 0);
@@ -883,26 +887,34 @@ static int __init octeontx_init_module(void)
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		symbol_put(timpf_com);
 		return -ENODEV;
 	}
 	octtx_cdev = cdev_alloc();
 	if (!octtx_cdev) {
+		unregister_chrdev_region(octtx_dev, 1);
 		symbol_put(lbk_com);
 		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		symbol_put(timpf_com);
 		return -ENODEV;
 	}
 	cdev_init(octtx_cdev, &fops);
 	ret = cdev_add(octtx_cdev, octtx_dev, 1);
 	if (ret < 0) {
 		cdev_del(octtx_cdev);
+		unregister_chrdev_region(octtx_dev, 1);
 		symbol_put(lbk_com);
 		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		symbol_put(timpf_com);
 		return -ENODEV;
 	}
 
@@ -910,11 +922,14 @@ static int __init octeontx_init_module(void)
 	octtx_class = class_create(THIS_MODULE, CLASS_NAME);
 	if (IS_ERR(octtx_class)) {
 		cdev_del(octtx_cdev);
+		unregister_chrdev_region(octtx_dev, 1);
 		symbol_put(lbk_com);
 		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		symbol_put(timpf_com);
 		return -ENODEV;
 	}
 
@@ -924,26 +939,55 @@ static int __init octeontx_init_module(void)
 		class_unregister(octtx_class);
 		class_destroy(octtx_class);
 		cdev_del(octtx_cdev);
+		unregister_chrdev_region(octtx_dev, 1);
 		symbol_put(lbk_com);
 		symbol_put(pki_com);
 		symbol_put(ssopf_com);
 		symbol_put(ssowpf_com);
 		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		symbol_put(timpf_com);
 		return -ENODEV;
 	}
 
-	octtx_sysfs_init(octtx_device);
+	ret = octtx_sysfs_init(octtx_device);
+	if (ret != 0) {
+		device_destroy(octtx_class, octtx_dev);
+		class_unregister(octtx_class);
+		class_destroy(octtx_class);
+		cdev_del(octtx_cdev);
+		unregister_chrdev_region(octtx_dev, 1);
+		symbol_put(lbk_com);
+		symbol_put(pki_com);
+		symbol_put(ssopf_com);
+		symbol_put(ssowpf_com);
+		symbol_put(fpapf_com);
+		symbol_put(pkopf_com);
+		symbol_put(timpf_com);
+		return -ENODEV;
+	}
+
 	/* Done */
 	return 0;
 }
 
 static void __exit octeontx_cleanup_module(void)
 {
+	cancel_delayed_work(&dwork);
+	cancel_delayed_work(&dwork_reset);
+	flush_workqueue(check_link);
+	flush_workqueue(reset_domain);
+	destroy_workqueue(check_link);
+	destroy_workqueue(reset_domain);
+
 	octtx_sysfs_remove(octtx_device);
 	device_destroy(octtx_class, octtx_dev);
 	class_unregister(octtx_class);
 	class_destroy(octtx_class);
+
 	cdev_del(octtx_cdev);
+	unregister_chrdev_region(octtx_dev, 1);
+
 	symbol_put(pki_com);
 	symbol_put(ssopf_com);
 	symbol_put(ssowpf_com);
