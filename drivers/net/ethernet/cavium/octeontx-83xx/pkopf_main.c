@@ -242,11 +242,21 @@ static struct intr_hand intr[] = {
 
 };
 
-static int pko_pf_remove_domain(u32 id, u16 domain_id)
+static void identify(struct pkopf_vf *vf, u16 domain_id,
+		     u16 subdomain_id)
+{
+	u64 reg = (((u64)subdomain_id << 16) | (domain_id)) << 7;
+
+	writeq_relaxed(reg, vf->domain.reg_base + PKO_VF_DQ_FC_CONFIG);
+}
+
+static int pko_pf_destroy_domain(u32 id, u16 domain_id,
+				 struct kobject *kobj, char *g_name)
 {
 	struct pkopf *pko = NULL;
+	struct pci_dev *virtfn;
 	struct pkopf *curr;
-	int i;
+	int i, vf_idx = 0;
 
 	spin_lock(&octeontx_pko_devices_lock);
 	list_for_each_entry(curr, &octeontx_pko_devices, list) {
@@ -265,21 +275,27 @@ static int pko_pf_remove_domain(u32 id, u16 domain_id)
 		if (pko->vf[i].domain.in_use &&
 		    pko->vf[i].domain.domain_id == domain_id) {
 			pko->vf[i].domain.in_use = false;
+			identify(&pko->vf[i], 0x0, 0x0);
 			iounmap(pko->vf[i].domain.reg_base);
+
+			virtfn = pci_get_domain_bus_and_slot(
+					pci_domain_nr(pko->pdev->bus),
+					pci_iov_virtfn_bus(pko->pdev, i),
+					pci_iov_virtfn_devfn(pko->pdev, i));
+			if (virtfn && kobj && g_name)
+				sysfs_remove_link_from_group(kobj, g_name,
+							     virtfn->dev.kobj.
+							     name);
+
+			dev_info(&pko->pdev->dev,
+				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
+				 i, pko->vf[i].domain.domain_id, vf_idx++);
 		}
 	}
 
 	spin_unlock(&octeontx_pko_devices_lock);
 
 	return 0;
-}
-
-static void identify(struct pkopf_vf *vf, u16 domain_id,
-		     u16 subdomain_id)
-{
-	u64 reg = (((u64)subdomain_id << 16) | (domain_id)) << 7;
-
-	writeq_relaxed(reg, vf->domain.reg_base + PKO_VF_DQ_FC_CONFIG);
 }
 
 static void pko_pf_gmctl_init(struct pkopf *pf, int vf, u16 gmid)
@@ -304,12 +320,12 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 {
 	struct pkopf *pko = NULL;
 	struct pkopf *curr;
+	struct pci_dev *virtfn;
+	resource_size_t vf_start;
 	int i, pko_mac = PKO_MAC_BGX;
 	int vf_idx = 0, port_idx = 0;
-	resource_size_t vf_start;
-	int mac_num, mac_mode, chan;
+	int mac_num, mac_mode, chan, ret = 0;
 	const u32 max_frame = 0xffff;
-	struct pci_dev *virtfn;
 
 	if (!kobj || !g_name)
 		return -EINVAL;
@@ -321,15 +337,27 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 			break;
 		}
 	}
-	spin_unlock(&octeontx_pko_devices_lock);
 
-	if (!pko)
-		return -ENODEV;
+	if (!pko) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
 
 	for (i = 0; i < pko->total_vfs; i++) {
 		if (pko->vf[i].domain.in_use) {
 			continue;
 		} else {
+			virtfn = pci_get_domain_bus_and_slot(
+					   pci_domain_nr(pko->pdev->bus),
+					   pci_iov_virtfn_bus(pko->pdev, i),
+					   pci_iov_virtfn_devfn(pko->pdev, i));
+			if (!virtfn)
+				break;
+
+			sysfs_add_link_to_group(kobj, g_name,
+						&virtfn->dev.kobj,
+						virtfn->dev.kobj.name);
+
 			pko->vf[i].domain.domain_id = domain_id;
 			pko->vf[i].domain.subdomain_id = vf_idx;
 			pko->vf[i].domain.gmid = get_gmid(domain_id);
@@ -347,16 +375,6 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 
 			if (!pko->vf[i].domain.reg_base)
 				break;
-
-			virtfn = pci_get_domain_bus_and_slot(pci_domain_nr(
-					pko->pdev->bus),
-					pci_iov_virtfn_bus(pko->pdev, i),
-					pci_iov_virtfn_devfn(pko->pdev, i));
-			if (!virtfn)
-				break;
-
-			sysfs_add_link_to_group(kobj, g_name, &virtfn->dev.kobj,
-						virtfn->dev.kobj.name);
 
 			identify(&pko->vf[i], domain_id, vf_idx);
 			pko_pf_gmctl_init(pko, i, get_gmid(domain_id));
@@ -397,11 +415,17 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 	}
 
 	if (vf_idx != pko_vf_count) {
-		pko_pf_remove_domain(id, domain_id);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_unlock;
 	}
 
-	return 0;
+	spin_unlock(&octeontx_pko_devices_lock);
+	return ret;
+
+err_unlock:
+	spin_unlock(&octeontx_pko_devices_lock);
+	pko_pf_destroy_domain(id, domain_id, kobj, g_name);
+	return ret;
 }
 
 /*caller is responsible for locks
@@ -510,7 +534,7 @@ int pko_reset_domain(u32 id, u16 domain_id)
 
 	if (!pko) {
 		spin_unlock(&octeontx_pko_devices_lock);
-		return 0;
+		return -ENODEV;
 	}
 
 	for (i = 0; i < pko->total_vfs; i++) {
@@ -528,7 +552,7 @@ int pko_reset_domain(u32 id, u16 domain_id)
 
 struct pkopf_com_s pkopf_com  = {
 	.create_domain = pko_pf_create_domain,
-	.free_domain = pko_pf_remove_domain,
+	.destroy_domain = pko_pf_destroy_domain,
 	.reset_domain = pko_reset_domain,
 	.receive_message = pko_pf_receive_message,
 	.get_vf_count = pko_pf_get_vf_count
