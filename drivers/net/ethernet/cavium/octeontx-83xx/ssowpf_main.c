@@ -18,15 +18,24 @@ static atomic_t ssow_count = ATOMIC_INIT(0);
 static DEFINE_SPINLOCK(octeontx_ssow_devices_lock);
 static LIST_HEAD(octeontx_ssow_devices);
 
-static int ssow_pf_remove_domain(u32 id, u16 domain_id)
+static void identify(struct ssowpf_vf *vf, u16 domain_id,
+		     u16 subdomain_id)
 {
-	struct ssowpf *ssow = NULL;
-	struct ssowpf *curr;
-	int i, vf_idx, ret;
-	u64 reg;
+	struct mbox_ssow_identify *ident;
 
-	vf_idx = 0;
-	ret = 0;
+	ident = (struct mbox_ssow_identify *)vf->ram_mbox_addr;
+	ident->domain_id = domain_id;
+	ident->subdomain_id = subdomain_id;
+}
+
+static int ssow_pf_destroy_domain(u32 id, u16 domain_id,
+				  struct kobject *kobj, char *g_name)
+{
+	int i, vf_idx = 0, ret = 0;
+	struct ssowpf *ssow = NULL;
+	struct pci_dev *virtfn;
+	struct ssowpf *curr;
+	u64 reg;
 
 	spin_lock(&octeontx_ssow_devices_lock);
 	list_for_each_entry(curr, &octeontx_ssow_devices, list) {
@@ -47,6 +56,17 @@ static int ssow_pf_remove_domain(u32 id, u16 domain_id)
 			ssow->vf[i].domain.domain_id = 0;
 			ssow->vf[i].domain.in_use = 0;
 
+			virtfn = pci_get_domain_bus_and_slot(
+					pci_domain_nr(ssow->pdev->bus),
+					pci_iov_virtfn_bus(ssow->pdev, i),
+					pci_iov_virtfn_devfn(ssow->pdev, i));
+			if (virtfn && kobj && g_name)
+				sysfs_remove_link_from_group(kobj, g_name,
+							     virtfn->dev.kobj.
+							     name);
+			dev_info(&ssow->pdev->dev,
+				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
+				 i, ssow->vf[i].domain.domain_id, vf_idx);
 			/* sso: clear hws's gmctl register */
 			reg = 0;
 			reg = SSO_MAP_GMID(1); /* write reset value '1'*/
@@ -56,6 +76,7 @@ static int ssow_pf_remove_domain(u32 id, u16 domain_id)
 				goto unlock;
 			}
 			vf_idx++;	/* HWS cnt */
+			identify(&ssow->vf[i], 0x0, 0x0);
 			iounmap(ssow->vf[i].domain.reg_base);
 			ssow->vf[i].domain.in_use = false;
 		}
@@ -69,30 +90,19 @@ unlock:
 	return ret;
 }
 
-static void identify(struct ssowpf_vf *vf, u16 domain_id,
-		     u16 subdomain_id)
-{
-	struct mbox_ssow_identify *ident;
-
-	ident = (struct mbox_ssow_identify *)vf->ram_mbox_addr;
-	ident->domain_id = domain_id;
-	ident->subdomain_id = subdomain_id;
-}
-
 static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 				 void *master, void *master_data,
 				 struct kobject *kobj, char *g_name)
 {
 	struct ssowpf *ssow = NULL;
 	struct ssowpf *curr;
-	resource_size_t vf_start;
-	u64 i, reg;
-	int vf_idx, ret;
 	struct pci_dev *virtfn;
+	resource_size_t vf_start;
+	u64 i, reg = 0;
+	int vf_idx = 0, ret = 0;
 
-	vf_idx = 0;
-	reg = 0;
-	ret = -ENODEV;
+	if (!kobj || !g_name)
+		return -EINVAL;
 
 	spin_lock(&octeontx_ssow_devices_lock);
 	list_for_each_entry(curr, &octeontx_ssow_devices, list) {
@@ -101,17 +111,26 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 			break;
 		}
 	}
-	spin_unlock(&octeontx_ssow_devices_lock);
 
 	if (!ssow) {
 		ret = -ENODEV;
-		goto unlock;
+		goto err_unlock;
 	}
 
 	for (i = 0; i < ssow->total_vfs; i++) {
 		if (ssow->vf[i].domain.in_use) {
 			continue;
 		} else {
+			virtfn = pci_get_domain_bus_and_slot(
+					pci_domain_nr(ssow->pdev->bus),
+					pci_iov_virtfn_bus(ssow->pdev, i),
+					pci_iov_virtfn_devfn(ssow->pdev, i));
+			if (!virtfn)
+				break;
+			sysfs_add_link_to_group(kobj, g_name,
+						&virtfn->dev.kobj,
+						virtfn->dev.kobj.name);
+
 			ssow->vf[i].domain.domain_id = domain_id;
 			ssow->vf[i].domain.subdomain_id = vf_idx;
 			ssow->vf[i].domain.gmid = get_gmid(domain_id);
@@ -127,7 +146,7 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 					       reg);
 			if (ret < 0) {
 				ret = -EIO;
-				goto unlock;
+				goto err_unlock;
 			}
 
 			/* Clear out groupmask, have VF enable the groups it
@@ -139,7 +158,7 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 					       SSO_PF_HWSX_SX_GRPMASK(i, 1), 0);
 			if (ret < 0) {
 				ret = -EIO;
-				goto unlock;
+				goto err_unlock;
 			}
 
 			ssow->vf[i].ram_mbox_addr =
@@ -147,33 +166,18 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 					SSOW_RAM_MBOX_SIZE);
 			if (!ssow->vf[i].ram_mbox_addr) {
 				ret = -ENOMEM;
-				goto unlock;
+				goto err_unlock;
 			}
 			vf_start = SSOW_VF_BASE(i);
 			ssow->vf[i].domain.reg_base =
 				ioremap(vf_start, SSOW_VF_SIZE);
-			if (!ssow->vf[i].domain.reg_base)
-				return -ENOMEM;
-
-			if (kobj && g_name) {
-				virtfn = pci_get_domain_bus_and_slot(
-						pci_domain_nr(ssow->pdev->bus),
-						pci_iov_virtfn_bus(ssow->pdev,
-								   i),
-						pci_iov_virtfn_devfn(ssow->pdev,
-								     i));
-				if (!virtfn) {
-					ret = -ENODEV;
-					break;
-				}
-
-				sysfs_add_link_to_group(kobj, g_name,
-							&virtfn->dev.kobj,
-							virtfn->dev.kobj.name);
+			if (!ssow->vf[i].domain.reg_base) {
+				ret = -ENOMEM;
+				goto err_unlock;
 			}
+
 			identify(&ssow->vf[i], domain_id, vf_idx);
 			vf_idx++;
-			ret = -ENODEV;
 			if (vf_idx == vf_count) {
 				ssow->vfs_in_use += vf_count;
 				ret = 0;
@@ -182,7 +186,17 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 		}
 	}
 
-unlock:
+	if (vf_idx != vf_count) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
+
+	spin_unlock(&octeontx_ssow_devices_lock);
+	return ret;
+
+err_unlock:
+	spin_unlock(&octeontx_ssow_devices_lock);
+	ssow_pf_destroy_domain(id, domain_id, kobj, g_name);
 	return ret;
 }
 
@@ -386,9 +400,9 @@ int ssow_reset_domain(u32 id, u16 domain_id, u64 grp_mask)
 		goto unlock;
 	}
 
-	/*0. Clear any active TAG switches
+	/* 0. Clear any active TAG switches
 	 * 1. Loop thorugh SSO_ENT_GRP and clear NSCHED
-	 *2. do get_work on all HWS until VHGRP_INT_CNT and AQ_CNT == 0
+	 * 2. do get_work on all HWS until VHGRP_INT_CNT and AQ_CNT == 0
 	 */
 
 	for (i = 0; i < ssow->total_vfs; i++) {
@@ -405,13 +419,18 @@ int ssow_reset_domain(u32 id, u16 domain_id, u64 grp_mask)
 			if (reg >> 63) {
 				if (((reg >> 32) & 0x3) < 2)
 					writeq_relaxed(0x0, reg_base +
-						       SSOW_VF_VHWSX_OP_DESCHED(0));
+						SSOW_VF_VHWSX_OP_DESCHED(0));
 			} else {
 				reg = readq_relaxed(reg_base +
-						    SSOW_VF_VHWSX_TAG(0));
-				if (((reg >> 32) & 0x3) < 2)
-					writeq_relaxed(0x0, reg_base +
-						       SSOW_VF_VHWSX_OP_SWTAG_UNTAG(0));
+						    SSOW_VF_VHWSX_WQP(0));
+				if (reg) {
+					reg = readq_relaxed(reg_base +
+							SSOW_VF_VHWSX_TAG(0));
+
+					if (((reg >> 32) & 0x3) < 2)
+						writeq_relaxed(0x0, reg_base +
+					      SSOW_VF_VHWSX_OP_SWTAG_UNTAG(0));
+				}
 			}
 
 			if (!de_sched) {
@@ -435,7 +454,7 @@ int ssow_reset_domain(u32 id, u16 domain_id, u64 grp_mask)
 		}
 	}
 	if (count)
-	dev_err(&ssow->pdev->dev, "Failed to reset vf[%d]\n", i);
+		dev_err(&ssow->pdev->dev, "Failed to reset vf[%d]\n", i);
 
 	for (i = 0; i < ssow->total_vfs; i++) {
 		if (ssow->vf[i].domain.in_use &&
@@ -452,7 +471,7 @@ unlock:
 
 struct ssowpf_com_s ssowpf_com = {
 	.create_domain = ssow_pf_create_domain,
-	.free_domain = ssow_pf_remove_domain,
+	.destroy_domain = ssow_pf_destroy_domain,
 	.reset_domain = ssow_reset_domain,
 	.receive_message = ssow_pf_receive_message,
 	.get_vf_count = ssow_pf_get_vf_count,

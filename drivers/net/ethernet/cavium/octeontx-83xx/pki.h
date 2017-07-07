@@ -409,7 +409,7 @@ struct pki_t {
 struct pki_com_s {
 	int (*create_domain)(u32, u16, struct octeontx_master_com_t *, void *,
 			     struct kobject *kobj, char *g_name);
-	int (*free_domain)(u32, u16);
+	int (*destroy_domain)(u32, u16, struct kobject *kobj, char *g_name);
 	int (*reset_domain)(u32, u16);
 	int (*receive_message)(u32, u16 domain_id,
 			       struct mbox_hdr *hdr,
@@ -450,6 +450,7 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 int pki_port_start(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
 int pki_port_stop(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
 int pki_port_close(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
+void pki_port_reset_regs(struct pki_t *pki, struct pki_port *port);
 int pki_port_pktbuf_cfg(struct pkipf_vf *vf, u16 vf_id,
 			mbox_pki_pktbuf_cfg_t *pcfg);
 int pki_port_errchk(struct pkipf_vf *vf, u16 vf_id,
