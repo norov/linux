@@ -309,7 +309,7 @@ struct pkopf_com_s {
 			     struct octtx_lbk_port *lbk_port, int lbk_count,
 			     void *master, void *master_data,
 			     struct kobject *kobj, char *g_name);
-	int (*free_domain)(u32, u16);
+	int (*destroy_domain)(u32, u16, struct kobject *kobj, char *g_name);
 	int (*reset_domain)(u32, u16);
 	int (*receive_message)(u32, u16 domain_id,
 			       struct mbox_hdr *hdr,
