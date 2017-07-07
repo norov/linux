@@ -252,11 +252,13 @@ static struct pkipf_vf *pki_get_vf(u32 id, u16 domain_id)
 		return NULL;
 }
 
-static int pki_remove_domain(u32 id, u16 domain_id)
+static int pki_destroy_domain(u32 id, u16 domain_id,
+			      struct kobject *kobj, char *g_name)
 {
 	struct pki_t *pki = NULL;
+	struct pci_dev *virtfn;
 	struct pki_t *curr;
-	int i;
+	int i, port, vf_idx = 0;
 
 	spin_lock(&octeontx_pki_devices_lock);
 	list_for_each_entry(curr, &octeontx_pki_devices, list) {
@@ -272,8 +274,27 @@ static int pki_remove_domain(u32 id, u16 domain_id)
 
 	for (i = 0; i < PKI_MAX_VF; i++) {
 		if (pki->vf[i].domain.in_use &&
-		    pki->vf[i].domain.domain_id == domain_id)
+		    pki->vf[i].domain.domain_id == domain_id) {
 			pki->vf[i].domain.in_use = false;
+
+			virtfn = pci_get_domain_bus_and_slot(
+					pci_domain_nr(pki->pdev->bus),
+					pci_iov_virtfn_bus(pki->pdev, i),
+					pci_iov_virtfn_devfn(pki->pdev, i));
+			if (virtfn && kobj && g_name)
+				sysfs_remove_link_from_group(kobj, g_name,
+							     virtfn->dev.kobj.
+							     name);
+
+			dev_info(&pki->pdev->dev,
+				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
+				 i, pki->vf[i].domain.domain_id, vf_idx++);
+
+			for (port = 0; port < MAX_PKI_PORTS; port++) {
+				pki->vf[i].bgx_port[port].valid = false;
+				pki->vf[i].lbk_port[port].valid = false;
+			}
+		}
 	}
 	spin_unlock(&octeontx_pki_devices_lock);
 	return 0;
@@ -285,12 +306,15 @@ static int pki_create_domain(u32 id, u16 domain_id,
 		struct kobject *kobj, char *g_name)
 {
 	struct pki_t *pki = NULL;
+	struct pci_dev *virtfn;
 	struct pki_t *curr;
-	int i;
+	bool found = false;
+	int i, ret = 0;
 	u8 stream;
 	u64 cfg;
-	bool found = false;
-	struct pci_dev *virtfn;
+
+	if (!kobj || !g_name)
+		return -EINVAL;
 
 	spin_lock(&octeontx_pki_devices_lock);
 	list_for_each_entry(curr, &octeontx_pki_devices, list) {
@@ -299,33 +323,30 @@ static int pki_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
-	spin_unlock(&octeontx_pki_devices_lock);
-	if (!pki)
-		return -ENODEV;
+
+	if (!pki) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
 
 	for (i = 0; i < PKI_MAX_VF; i++) {
 		if (pki->vf[i].domain.in_use) {/* pki port config */
 
 			continue;
 		} else {
+			virtfn = pci_get_domain_bus_and_slot(
+					pci_domain_nr(pki->pdev->bus),
+					pci_iov_virtfn_bus(pki->pdev, i),
+					pci_iov_virtfn_devfn(pki->pdev, i));
+			if (!virtfn)
+				break;
+			sysfs_add_link_to_group(kobj, g_name,
+						&virtfn->dev.kobj,
+						virtfn->dev.kobj.name);
+
 			pki->vf[i].domain.domain_id = domain_id;
 			pki->vf[i].domain.subdomain_id = 0;
 			pki->vf[i].domain.gmid = get_gmid(domain_id);
-
-			if (kobj && g_name) {
-				virtfn = pci_get_domain_bus_and_slot(
-						pci_domain_nr(pki->pdev->bus),
-						pci_iov_virtfn_bus(pki->pdev,
-								   i),
-						pci_iov_virtfn_devfn(pki->pdev,
-								     i));
-				if (!virtfn)
-					break;
-				sysfs_add_link_to_group(kobj, g_name,
-							&virtfn->dev.kobj,
-					virtfn->dev.kobj.name);
-			}
-
 			pki->vf[i].domain.in_use = true;
 			stream = i + 1;
 			pki->vf[i].stream_id = stream;
@@ -343,10 +364,19 @@ static int pki_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
-	if (!found)
-		return -ENODEV;
 
-	return 0;
+	if (!found) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
+
+	spin_unlock(&octeontx_pki_devices_lock);
+	return ret;
+
+err_unlock:
+	spin_unlock(&octeontx_pki_devices_lock);
+	pki_destroy_domain(id, domain_id, kobj, g_name);
+	return ret;
 }
 
 static int pki_receive_message(u32 id, u16 domain_id,
@@ -370,7 +400,6 @@ static int pki_receive_message(u32 id, u16 domain_id,
 		spin_unlock(&octeontx_pki_devices_lock);
 		return -ENODEV;
 	}
-	spin_unlock(&octeontx_pki_devices_lock);
 
 	switch (hdr->msg) {
 	case MBOX_PKI_PORT_OPEN:
@@ -401,12 +430,32 @@ static int pki_receive_message(u32 id, u16 domain_id,
 		hdr->res_code = pki_port_hashcfg(vf, hdr->vfid, mdata);
 		break;
 	}
+
+	spin_unlock(&octeontx_pki_devices_lock);
 	return 0;
 }
 
 int pki_reset_domain(u32 id, u16 domain_id)
 {
-	/* TO_DO*/
+	int i;
+	struct pkipf_vf *vf = NULL;
+
+	spin_lock(&octeontx_pki_devices_lock);
+
+	vf = pki_get_vf(id, domain_id);
+	if (!vf) {
+		spin_unlock(&octeontx_pki_devices_lock);
+		return -ENODEV;
+	}
+
+	for (i = 0; i < MAX_PKI_PORTS; i++) {
+		if (vf->bgx_port[i].valid)
+			pki_port_reset_regs(vf->pki, &vf->bgx_port[i]);
+		if (vf->lbk_port[i].valid)
+			pki_port_reset_regs(vf->pki, &vf->lbk_port[i]);
+	}
+
+	spin_unlock(&octeontx_pki_devices_lock);
 	return 0;
 }
 
@@ -454,7 +503,7 @@ int pki_add_lbk_port(u32 id, u16 domain_id, struct octtx_lbk_port *port)
 
 struct pki_com_s pki_com  = {
 	.create_domain = pki_create_domain,
-	.free_domain = pki_remove_domain,
+	.destroy_domain = pki_destroy_domain,
 	.reset_domain = pki_reset_domain,
 	.receive_message = pki_receive_message,
 	.add_bgx_port = pki_add_bgx_port,

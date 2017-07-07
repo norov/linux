@@ -320,14 +320,32 @@ int lbk_port_status(struct octtx_lbk_port *port, mbox_lbk_port_status_t *stat)
 	return 0;
 }
 
+/* Domain destroy function.
+ */
+static int lbk_destroy_domain(u32 id, u16 domain_id)
+{
+	struct octtx_lbk_port *port;
+	int i;
+
+	spin_lock(&octeontx_lbk_lock);
+	for (i = 0; i < LBK_MAX_PORTS; i++) {
+		port = &octeontx_lbk_ports[i];
+		if (port->domain_id != domain_id)
+			continue;
+		port->domain_id = LBK_INVALID_ID;
+	}
+	spin_unlock(&octeontx_lbk_lock);
+	return 0;
+}
+
 /* Domain create function.
  */
 static int lbk_create_domain(u32 id, u16 domain_id,
 			     struct octtx_lbk_port *port_tbl, int port_count,
-		struct octeontx_master_com_t *com, void *domain)
+			     struct octeontx_master_com_t *com, void *domain)
 {
 	struct octtx_lbk_port *port, *gport;
-	int i, j;
+	int i, j, rc = 0;
 
 	spin_lock(&octeontx_lbk_lock);
 	for (i = 0; i < port_count; i++) {
@@ -336,6 +354,11 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 			gport = &octeontx_lbk_ports[j];
 			if (port->glb_port_idx != gport->glb_port_idx)
 				continue;
+			/* Check for conflicts with other domains. */
+			if (gport->domain_id != LBK_INVALID_ID) {
+				rc = -EINVAL;
+				goto err;
+			}
 
 			port->node = gport->node;
 			port->ilbk = gport->ilbk;
@@ -349,29 +372,14 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 			gport->dom_port_idx = i;
 		}
 	}
-	spin_unlock(&octeontx_lbk_lock);
-	return 0;
-}
 
-/* Domain destroy function.
- */
-static int lbk_destroy_domain(u32 id, u16 domain_id)
-{
-	struct octtx_lbk_port *port;
-	int i;
-
-	spin_lock(&octeontx_lbk_lock);
-	for (i = 0; i < LBK_MAX_PORTS; i++) {
-		port = &octeontx_lbk_ports[i];
-		if (port->domain_id != domain_id)
-			continue;
-		lbk_port_stop(port);
-		port->domain_id = LBK_INVALID_ID;
-		port->ilbk = LBK_INVALID_ID;
-		port->olbk = LBK_INVALID_ID;
-	}
 	spin_unlock(&octeontx_lbk_lock);
-	return 0;
+	return rc;
+
+err:
+	spin_unlock(&octeontx_lbk_lock);
+	lbk_destroy_domain(id, domain_id);
+	return rc;
 }
 
 /* Domain reset function.
@@ -396,7 +404,7 @@ static int lbk_reset_domain(u32 id, u16 domain_id)
  */
 struct lbk_com_s lbk_com  = {
 	.create_domain = lbk_create_domain,
-	.free_domain = lbk_destroy_domain,
+	.destroy_domain = lbk_destroy_domain,
 	.reset_domain = lbk_reset_domain,
 	.receive_message = lbk_receive_message,
 	.get_num_ports = lbk_get_num_ports,
