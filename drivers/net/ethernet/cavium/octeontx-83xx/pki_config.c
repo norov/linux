@@ -53,7 +53,7 @@ static int pki_frmlen_reg(struct pki_t *pki, u16 maxlen, u16 minlen)
 	return -1;
 }
 
-static void reset_port_reg(struct pki_t *pki, struct pki_port *port)
+void pki_port_reset_regs(struct pki_t *pki, struct pki_port *port)
 {
 	u32 style = port->init_style;
 	u32 qpg_base = port->qpg_base;
@@ -378,7 +378,7 @@ int pki_port_close(struct pkipf_vf *vf, u16 vf_id,
 	/* TO_DO should we write all the register with reset
 	 * values at this point?
 	 */
-	reset_port_reg(vf->pki, port);
+	pki_port_reset_regs(vf->pki, port);
 	port->init_style = PKI_DROP_STYLE;
 	port->qpg_base = QPG_NOT_INIT;
 	port->num_entry = 0;

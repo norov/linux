@@ -245,9 +245,11 @@ static int fpa_pf_receive_message(u32 id, u16 domain_id,
 	return 0;
 }
 
-static int fpa_pf_remove_domain(u32 id, u16 domain_id)
+static int fpa_pf_destroy_domain(u32 id, u16 domain_id,
+				 struct kobject *kobj, char *g_name)
 {
 	struct fpapf *fpa = NULL;
+	struct pci_dev *virtfn;
 	struct fpapf *curr;
 	int i, vf_idx = 0;
 	u64 reg;
@@ -268,9 +270,28 @@ static int fpa_pf_remove_domain(u32 id, u16 domain_id)
 	for (i = 0; i < fpa->total_vfs; i++) {
 		if (fpa->vf[i].domain.in_use &&
 		    fpa->vf[i].domain.domain_id == domain_id) {
+			writeq_relaxed(0x0, fpa->vf[i].domain.reg_base +
+					FPA_VF_VHPOOL_START_ADDR(0));
+			reg = -1;
+			writeq_relaxed(reg, fpa->vf[i].domain.reg_base +
+				       FPA_VF_VHAURA_CNT_THRESHOLD(0));
+
+			writeq_relaxed(reg, fpa->vf[i].domain.reg_base +
+					FPA_VF_VHPOOL_THRESHOLD(0));
+
 			iounmap(fpa->vf[i].domain.reg_base);
 
-			dev_info(&fpa->pdev->dev, "Free vf[%d] from domain_id:%d subdomain_id:%d\n",
+			virtfn = pci_get_domain_bus_and_slot(
+					pci_domain_nr(fpa->pdev->bus),
+					pci_iov_virtfn_bus(fpa->pdev, i),
+					pci_iov_virtfn_devfn(fpa->pdev, i));
+			if (virtfn && kobj && g_name)
+				sysfs_remove_link_from_group(kobj, g_name,
+							     virtfn->dev.kobj.
+							     name);
+
+			dev_info(&fpa->pdev->dev,
+				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
 				 i, fpa->vf[i].domain.domain_id, vf_idx);
 			memset(&fpa->vf[i], 0, sizeof(struct octeontx_pf_vf));
 			reg = FPA_MAP_VALID(0) | FPA_MAP_VHAURASET(i)
@@ -295,22 +316,20 @@ static int fpa_pf_remove_domain(u32 id, u16 domain_id)
  * domain_id: domain id to bind different resources together
  * num_vfs: number of FPA vfs requested.
  * ret: will return bit mask of VFs assigned to this domain
- * on failuere: returns 0
+ * on failure: returns 0
  *
  * Created domain also does the mappings for AURASET to GARUARASET
  */
 static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 				u32 num_vfs, struct kobject *kobj, char *g_name)
 {
+	int i, j, aura, vf_idx = 0;
 	struct fpapf *fpa = NULL;
-	struct fpapf *curr;
-	u64 reg;
-	int i, vf_idx = 0;
-	int j;
-	unsigned long ret = 0;
-	int aura;
 	resource_size_t vf_start;
 	struct pci_dev *virtfn;
+	unsigned long ret = 0;
+	struct fpapf *curr;
+	u64 reg;
 
 	spin_lock(&octeontx_fpa_devices_lock);
 	/* this loop is unnecessary as nodid is always 0 :: ask tirumalesh? */
@@ -320,18 +339,29 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
-	spin_unlock(&octeontx_fpa_devices_lock);
 
 	if (!fpa)
-		return ret;
+		goto err_unlock;
 
 	if ((fpa->total_vfs - fpa->vfs_in_use) < num_vfs)
-		return ret;
+		goto err_unlock;
 
 	for (i = 0; i < fpa->total_vfs; i++) {
 		if (fpa->vf[i].domain.in_use) {
 			continue;
 		} else {
+			if (kobj && g_name) {
+				virtfn = pci_get_domain_bus_and_slot(
+					   pci_domain_nr(fpa->pdev->bus),
+					   pci_iov_virtfn_bus(fpa->pdev, i),
+					   pci_iov_virtfn_devfn(fpa->pdev, i));
+				if (!virtfn)
+					break;
+				sysfs_add_link_to_group(kobj, g_name,
+							&virtfn->dev.kobj,
+							virtfn->dev.kobj.name);
+			}
+
 			fpa->vf[i].domain.domain_id = domain_id;
 			fpa->vf[i].domain.subdomain_id = vf_idx;
 			fpa->vf[i].domain.gmid = get_gmid(domain_id);
@@ -346,10 +376,8 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 			fpa->vf[i].domain.reg_base =
 				ioremap(vf_start, FPA_VF_CFG_SIZE);
 
-			if (!fpa->vf[i].domain.reg_base) {
-				ret = 0;
+			if (!fpa->vf[i].domain.reg_base)
 				break;
-			}
 
 			for (j = 0; j < FPA_AURA_SET_SIZE; j++) {
 				aura = (i * FPA_AURA_SET_SIZE) + j;
@@ -375,23 +403,6 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 
 			fpa->vf[i].domain.in_use = true;
 			set_bit(i, &ret);
-
-			if (kobj && g_name) {
-				virtfn = pci_get_domain_bus_and_slot(
-						pci_domain_nr(fpa->pdev->bus),
-						pci_iov_virtfn_bus(fpa->pdev, i)
-						, pci_iov_virtfn_devfn(fpa->pdev
-						, i));
-				if (!virtfn) {
-					ret = 0;
-					break;
-				}
-
-				sysfs_add_link_to_group(kobj, g_name,
-							&virtfn->dev.kobj,
-							virtfn->dev.kobj.name);
-			}
-
 			identify(&fpa->vf[i], domain_id, vf_idx,
 				 fpa->stack_ln_ptrs);
 			vf_idx++;
@@ -403,10 +414,16 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 	}
 
 	if (vf_idx != num_vfs) {
-		fpa_pf_remove_domain(id, domain_id);
-		return 0;
+		ret = 0;
+		goto err_unlock;
 	}
 
+	spin_unlock(&octeontx_fpa_devices_lock);
+	return ret;
+
+err_unlock:
+	spin_unlock(&octeontx_fpa_devices_lock);
+	fpa_pf_destroy_domain(id, domain_id, kobj, g_name);
 	return ret;
 }
 
@@ -528,7 +545,7 @@ empty:
 
 struct fpapf_com_s fpapf_com = {
 	.create_domain = fpa_pf_create_domain,
-	.free_domain = fpa_pf_remove_domain,
+	.destroy_domain = fpa_pf_destroy_domain,
 	.reset_domain = fpa_reset_domain,
 	.receive_message = fpa_pf_receive_message,
 	.get_vf_count = fpa_pf_get_vf_count,
