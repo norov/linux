@@ -182,8 +182,9 @@ struct fpapf {
  * free_domain: nodeid, domain_id
  */
 struct fpapf_com_s {
-	u64 (*create_domain)(u32, u16, u32, struct kobject *kobj, char *g_name);
-	int (*free_domain)(u32, u16);
+	u64 (*create_domain)(u32, u16, u32, struct kobject *kobj,
+			     char *g_name);
+	int (*destroy_domain)(u32, u16, struct kobject *kobj, char *g_name);
 	int (*reset_domain)(u32, u16);
 	int (*receive_message)(u32, u16 domain_id,
 			       struct mbox_hdr *hdr,

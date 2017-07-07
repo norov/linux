@@ -17,7 +17,7 @@ struct bgx_com_s {
 	int (*create_domain)(u32 id, u16 domain_id,
 			     struct octtx_bgx_port *port_tbl, int ports,
 			struct octeontx_master_com_t *com, void *domain);
-	int (*free_domain)(u32 id, u16 domain_id);
+	int (*destroy_domain)(u32 id, u16 domain_id);
 	int (*reset_domain)(u32 id, u16 domain_id);
 	int (*receive_message)(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 			       union mbox_data *req, union mbox_data *resp,

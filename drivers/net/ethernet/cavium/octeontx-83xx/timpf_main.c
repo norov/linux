@@ -261,24 +261,81 @@ void identify(struct timpf_vf *vf, u16 domain_id, u16 subdomain_id)
 
 /* Domain control functions.
  */
+static int tim_pf_destroy_domain(u32 id, u16 domain_id,
+				 struct kobject *kobj, char *g_name)
+{
+	struct timpf *tim = NULL;
+	struct pci_dev *virtfn;
+	struct timpf_vf *vf;
+	int i, vf_idx = 0;
+	u64 reg;
+
+	spin_lock(&octeontx_tim_dev_lock);
+	list_for_each_entry(tim, &octeontx_tim_devices, list) {
+		for (i = 0; i < tim->total_vfs; i++) {
+			vf = &tim->vf[i];
+			if (vf->domain.in_use &&
+			    vf->domain.domain_id == domain_id) {
+				vf->domain.in_use = false;
+
+				virtfn = pci_get_domain_bus_and_slot(
+					   pci_domain_nr(tim->pdev->bus),
+					   pci_iov_virtfn_bus(tim->pdev, i),
+					   pci_iov_virtfn_devfn(tim->pdev, i));
+				if (virtfn && kobj && g_name)
+					sysfs_remove_link_from_group(kobj,
+								     g_name,
+								     virtfn->
+								     dev.kobj.
+								     name);
+				dev_info(&tim->pdev->dev,
+					 "Free vf[%d] from domain:%d subdomain_id:%d\n",
+					 i, tim->vf[i].domain.domain_id,
+					 vf_idx++);
+				/* Cleanup MMU info.*/
+				reg = tim_reg_read(tim, TIM_RING_GMCTL(i));
+				reg &= ~0xFFFFull; /*GMID*/
+				tim_reg_write(tim, TIM_RING_GMCTL(i), reg);
+				identify(vf, 0x0, 0x0);
+				iounmap(tim->vf[i].domain.reg_base);
+			}
+		}
+	}
+	spin_unlock(&octeontx_tim_dev_lock);
+	return 0;
+}
+
 static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 				struct octeontx_master_com_t *com, void *domain,
 		struct kobject *kobj, char *g_name)
 {
 	struct timpf *tim = NULL;
 	struct timpf_vf *vf;
-	resource_size_t ba;
-	u64 reg, gmid;
-	int i, vf_idx = 0;
 	struct pci_dev *virtfn;
+	resource_size_t ba;
+	u64 reg = 0, gmid;
+	int i, vf_idx = 0, ret = 0;
 
+	if (!kobj || !g_name)
+		return -EINVAL;
 	gmid = get_gmid(domain_id);
 
+	spin_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(tim, &octeontx_tim_devices, list) {
 		for (i = 0; i < tim->total_vfs; i++) {
 			vf = &tim->vf[i];
 			if (vf->domain.in_use)
 				continue;
+
+			virtfn = pci_get_domain_bus_and_slot(
+					pci_domain_nr(tim->pdev->bus),
+					pci_iov_virtfn_bus(tim->pdev, i),
+					pci_iov_virtfn_devfn(tim->pdev, i));
+			if (!virtfn)
+				break;
+			sysfs_add_link_to_group(kobj, g_name,
+						&virtfn->dev.kobj,
+						virtfn->dev.kobj.name);
 
 			ba = pci_resource_start(tim->pdev, PCI_TIM_PF_CFG_BAR);
 			ba += TIM_VF_OFFSET(i);
@@ -293,20 +350,6 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 			reg = ((uint64_t)i + 1) << 16 /*STRM*/ | gmid; /*GMID*/
 			tim_reg_write(tim, TIM_RING_GMCTL(i), reg);
 
-			if (kobj && g_name) {
-				virtfn = pci_get_domain_bus_and_slot(
-						pci_domain_nr(tim->pdev->bus),
-						pci_iov_virtfn_bus(tim->pdev,
-								   i),
-						pci_iov_virtfn_devfn(
-						tim->pdev, i));
-				if (!virtfn)
-					break;
-
-				sysfs_add_link_to_group(kobj, g_name,
-							&virtfn->dev.kobj,
-					virtfn->dev.kobj.name);
-			}
 			identify(vf, domain_id, vf_idx);
 			vf_idx++;
 			if (vf_idx == num_vfs) {
@@ -315,32 +358,19 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 			}
 		}
 	}
-	return 0;
-}
 
-static int tim_pf_destroy_domain(u32 id, u16 domain_id)
-{
-	struct timpf *tim = NULL;
-	struct timpf_vf *vf;
-	u64 reg;
-	int i;
-
-	spin_lock(&octeontx_tim_dev_lock);
-	list_for_each_entry(tim, &octeontx_tim_devices, list) {
-		for (i = 0; i < tim->total_vfs; i++) {
-			vf = &tim->vf[i];
-			if (vf->domain.in_use &&
-			    vf->domain.domain_id == domain_id) {
-				vf->domain.in_use = false;
-				/* Cleanup MMU info.*/
-				reg = tim_reg_read(tim, TIM_RING_GMCTL(i));
-				reg &= ~0xFFFFull; /*GMID*/
-				tim_reg_write(tim, TIM_RING_GMCTL(i), reg);
-			}
-		}
+	if (vf_idx != num_vfs) {
+		ret = -ENODEV;
+		goto err_unlock;
 	}
+
 	spin_unlock(&octeontx_tim_dev_lock);
-	return 0;
+	return ret;
+
+err_unlock:
+	spin_unlock(&octeontx_tim_dev_lock);
+	tim_pf_destroy_domain(id, domain_id, kobj, g_name);
+	return ret;
 }
 
 static int tim_ring_reset(struct timpf *tim, int ring)
@@ -390,7 +420,7 @@ static int tim_pf_get_vf_count(u32 id)
  */
 struct timpf_com_s timpf_com  = {
 	.create_domain = tim_pf_create_domain,
-	.free_domain = tim_pf_destroy_domain,
+	.destroy_domain = tim_pf_destroy_domain,
 	.reset_domain = tim_pf_reset_domain,
 	.receive_message = tim_pf_receive_message,
 	.get_vf_count = tim_pf_get_vf_count
