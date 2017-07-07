@@ -16,8 +16,9 @@
 struct timpf_com_s {
 	int (*create_domain)(u32 id, u16 domain_id, u32 num_vfs,
 			     struct octeontx_master_com_t *com, void *domain,
-		struct kobject *kobj, char *g_name);
-	int (*free_domain)(u32 id, u16 domain_id);
+			     struct kobject *kobj, char *g_name);
+	int (*destroy_domain)(u32 id, u16 domain_id,
+			      struct kobject *kobj, char *g_name);
 	int (*reset_domain)(u32 id, u16 domain_id);
 	int (*receive_message)(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 			       union mbox_data *req, union mbox_data *resp,

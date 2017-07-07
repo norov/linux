@@ -573,53 +573,6 @@ int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu)
 	return 0;
 }
 
-/* Domain create function.
- */
-static int bgx_create_domain(u32 id, u16 domain_id,
-			     struct octtx_bgx_port *port_tbl, int ports,
-			     struct octeontx_master_com_t *com, void *domain)
-{
-	struct octtx_bgx_port *port, *gport;
-	struct bgxpf *bgx;
-	int port_idx;
-
-	/* For each domain port, find requested entry in the list of
-	 * global ports and sync up those two port structures.
-	 */
-	spin_lock(&octeontx_bgx_lock);
-	for (port_idx = 0; port_idx < ports; port_idx++) {
-		port = &port_tbl[port_idx];
-
-		list_for_each_entry(gport, &octeontx_bgx_ports, list) {
-			if (gport->node != id)
-				continue;
-			if (gport->glb_port_idx != port->glb_port_idx)
-				continue;
-			/* Check for conflicts with other domains. */
-			if (gport->domain_id != BGX_INVALID_ID) {
-				spin_unlock(&octeontx_bgx_lock);
-				return -EINVAL;
-			}
-			/* Domain port: */
-			port->node = gport->node;
-			port->bgx = gport->bgx;
-			port->lmac = gport->lmac;
-			port->lmac_type = gport->lmac_type;
-			port->base_chan = gport->base_chan;
-			port->num_chans = gport->num_chans;
-			/* Global port: */
-			gport->domain_id = domain_id;
-			gport->dom_port_idx = port_idx;
-			/* Hardware: */
-			bgx = get_bgx_dev(port->node, port->bgx);
-			bgx_reg_write(bgx, port->lmac,
-				      BGX_CMRX_RX_ID_MAP, 0);
-		}
-	}
-	spin_unlock(&octeontx_bgx_lock);
-	return 0;
-}
-
 /* Domain destroy function.
  */
 static int bgx_destroy_domain(u32 id, u16 domain_id)
@@ -639,6 +592,59 @@ static int bgx_destroy_domain(u32 id, u16 domain_id)
 	}
 	spin_unlock(&octeontx_bgx_lock);
 	return 0;
+}
+
+/* Domain create function.
+ */
+static int bgx_create_domain(u32 id, u16 domain_id,
+			     struct octtx_bgx_port *port_tbl, int ports,
+			     struct octeontx_master_com_t *com, void *domain)
+{
+	struct octtx_bgx_port *port, *gport;
+	struct bgxpf *bgx;
+	int port_idx, ret = 0;
+
+	/* For each domain port, find requested entry in the list of
+	 * global ports and sync up those two port structures.
+	 */
+	spin_lock(&octeontx_bgx_lock);
+	for (port_idx = 0; port_idx < ports; port_idx++) {
+		port = &port_tbl[port_idx];
+
+		list_for_each_entry(gport, &octeontx_bgx_ports, list) {
+			if (gport->node != id)
+				continue;
+			if (gport->glb_port_idx != port->glb_port_idx)
+				continue;
+			/* Check for conflicts with other domains. */
+			if (gport->domain_id != BGX_INVALID_ID) {
+				ret = -EINVAL;
+				goto err_unlock;
+			}
+			/* Domain port: */
+			port->node = gport->node;
+			port->bgx = gport->bgx;
+			port->lmac = gport->lmac;
+			port->lmac_type = gport->lmac_type;
+			port->base_chan = gport->base_chan;
+			port->num_chans = gport->num_chans;
+			/* Global port: */
+			gport->domain_id = domain_id;
+			gport->dom_port_idx = port_idx;
+			/* Hardware: */
+			bgx = get_bgx_dev(port->node, port->bgx);
+			bgx_reg_write(bgx, port->lmac,
+				      BGX_CMRX_RX_ID_MAP, 0);
+		}
+	}
+
+	spin_unlock(&octeontx_bgx_lock);
+	return ret;
+
+err_unlock:
+	spin_unlock(&octeontx_bgx_lock);
+	bgx_destroy_domain(id, domain_id);
+	return ret;
 }
 
 /* Domain reset function.
@@ -675,7 +681,7 @@ static int bgx_set_pkind(u32 id, u16 domain_id, int port, int pkind)
  */
 struct bgx_com_s bgx_com  = {
 	.create_domain = bgx_create_domain,
-	.free_domain = bgx_destroy_domain,
+	.destroy_domain = bgx_destroy_domain,
 	.reset_domain = bgx_reset_domain,
 	.receive_message = bgx_receive_message,
 	.get_num_ports = bgx_get_num_ports,
