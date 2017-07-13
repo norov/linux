@@ -283,6 +283,9 @@ void die(const char *str, struct pt_regs *regs, int err)
 	raw_spin_unlock_irq(&die_lock);
 	oops_exit();
 
+	if (preemptible())
+		preempt_disable();
+
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 	if (panic_on_oops)
