@@ -136,5 +136,7 @@ struct octtx_lbk_port {
 	void	*vnic; /* NIC port descriptor */
 };
 
+extern atomic_t octtx_sso_reset[];
+
 #endif
 

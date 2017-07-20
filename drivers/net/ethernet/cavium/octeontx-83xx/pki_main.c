@@ -252,6 +252,13 @@ static struct pkipf_vf *pki_get_vf(u32 id, u16 domain_id)
 		return NULL;
 }
 
+static void identify(struct pkipf_vf *vf, u16 domain_id, u16 subdomain_id)
+{
+	u64 reg = (((u64)subdomain_id << 16) | domain_id);
+
+	writeq_relaxed(reg, vf->domain.reg_base);
+}
+
 static int pki_destroy_domain(u32 id, u16 domain_id,
 			      struct kobject *kobj, char *g_name)
 {
@@ -294,6 +301,7 @@ static int pki_destroy_domain(u32 id, u16 domain_id,
 				pki->vf[i].bgx_port[port].valid = false;
 				pki->vf[i].lbk_port[port].valid = false;
 			}
+			identify(&pki->vf[i], 0x0, 0x0);
 		}
 	}
 	spin_unlock(&octeontx_pki_devices_lock);
@@ -306,6 +314,7 @@ static int pki_create_domain(u32 id, u16 domain_id,
 		struct kobject *kobj, char *g_name)
 {
 	struct pki_t *pki = NULL;
+	resource_size_t vf_start;
 	struct pci_dev *virtfn;
 	struct pki_t *curr;
 	bool found = false;
@@ -356,10 +365,19 @@ static int pki_create_domain(u32 id, u16 domain_id,
 			pki->vf[i].max_auras = pki->max_auras;
 			pki->vf[i].max_qpgs = pki->max_qpgs;
 			pki->vf[i].max_pcam_ents = pki->max_pcam_ents;
-			cfg = pki_reg_read(pki, PKI_STRMX_CFG(stream));
-			cfg |= (pki->vf[i].domain.gmid) &
-				PKI_STRM_CFG_GMID_MASK;
+			cfg = (pki->vf[i].domain.gmid) &
+			       PKI_STRM_CFG_GMID_MASK;
 			pki_reg_write(pki, PKI_STRMX_CFG(stream), cfg);
+			vf_start = PKI_VF_BASE(i);
+			pki->vf[i].domain.reg_base = ioremap(vf_start,
+							     PKI_VF_SIZE);
+			if (!pki->vf[i].domain.reg_base) {
+				ret = -ENOMEM;
+				goto err_unlock;
+			}
+
+			identify(&pki->vf[i], pki->vf[i].domain.domain_id,
+				 pki->vf[i].domain.subdomain_id);
 			found = true;
 			break;
 		}
@@ -454,6 +472,8 @@ int pki_reset_domain(u32 id, u16 domain_id)
 		if (vf->lbk_port[i].valid)
 			pki_port_reset_regs(vf->pki, &vf->lbk_port[i]);
 	}
+
+	identify(vf, vf->domain.domain_id, vf->domain.subdomain_id);
 
 	spin_unlock(&octeontx_pki_devices_lock);
 	return 0;
