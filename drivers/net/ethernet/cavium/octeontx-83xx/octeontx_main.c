@@ -232,9 +232,9 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 
 	ret = octeontx_create_domain(name, type, sso_count, fpa_count,
 				     ssow_count, pko_count, 1, tim_count,
-					bgx_count, lbk_count,
-					(const long int *)bgx_port,
-					(const long int *)lbk_port);
+				     bgx_count, lbk_count,
+				     (const long int *)bgx_port,
+				     (const long int *)lbk_port);
 	if (ret)
 		goto error;
 
@@ -497,9 +497,13 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	int i;
 
 	list_for_each_entry(domain, &octeontx_domains, list) {
-		if (!strcmp(name, domain->name))
+		if (!strcmp(name, domain->name)) {
+			dev_err(octtx_device,
+				"Domain name \"%s\" already exists\n", name);
 			return -EEXIST;
+		}
 	}
+
 	/*get DOMAIN ID */
 	while (!found) {
 		domain_id = atomic_add_return(1, &gbl_domain_id);
@@ -595,11 +599,24 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	 */
 	domain->lbk_count = lbk_count;
 	for (i = 0; i < domain->lbk_count; i++) {
+		if (lbk_port[i] > 1) {
+			dev_err(octtx_device, "LBK invalid port g%ld\n",
+				lbk_port[i]);
+			goto error;
+		}
+
 		domain->lbk_port[i].domain_id = domain_id;
 		domain->lbk_port[i].dom_port_idx = i;
 		domain->lbk_port[i].glb_port_idx = lbk_port[i];
 		domain->lbk_port[i].pkind = pki->add_lbk_port(node, domain_id,
 							&domain->lbk_port[i]);
+		if (domain->lbk_port[i].pkind < 0) {
+			dev_err(octtx_device,
+				"LBK failed to allocate PKIND for port l%d(g%d)\n",
+				domain->lbk_port[i].dom_port_idx,
+				domain->lbk_port[i].glb_port_idx);
+			goto error;
+		}
 	}
 	ret = lbk->create_domain(node, domain_id, domain->lbk_port, i,
 			&octtx_master_com, domain);
@@ -651,7 +668,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 				     domain->bgx_port[i].pkind);
 		if (ret < 0) {
 			dev_err(octtx_device,
-				"Failed to set PKIND for port l%d(g%d)\n",
+				"BGX failed to set PKIND for port l%d(g%d)\n",
 				domain->bgx_port[i].dom_port_idx,
 				domain->bgx_port[i].glb_port_idx);
 			goto error;
@@ -852,7 +869,7 @@ void octtx_reset_domain(struct work_struct *work)
 {
 	struct octtx_domain *domain;
 	int i, master_sso;
-	extern atomic_t octtx_sso_reset[];
+	u64 mask = -1;
 	u64 val;
 
 	spin_lock(&octeontx_domains_lock);
@@ -860,7 +877,7 @@ void octtx_reset_domain(struct work_struct *work)
 		/* find first SSO from domain */
 		master_sso = __ffs(domain->grp_mask);
 		for_each_set_bit(i, (unsigned long *)&domain->grp_mask,
-				 sizeof(domain->aura_set) * 8) {
+				 sizeof(domain->grp_mask) * 8) {
 			val = atomic_read(&octtx_sso_reset[i]);
 			if ((master_sso == i) && val) {
 				spin_unlock(&octeontx_domains_lock);
@@ -868,10 +885,18 @@ void octtx_reset_domain(struct work_struct *work)
 				spin_lock(&octeontx_domains_lock);
 			}
 			atomic_set(&octtx_sso_reset[i], 0);
-			/*makesure the otherend receives it*/
-			mb();
 		}
+		mask &= ~domain->grp_mask;
 	}
+
+	for_each_set_bit(i, (unsigned long *)&mask, sizeof(mask) * 8) {
+		if (atomic_read(&octtx_sso_reset[i]))
+			atomic_set(&octtx_sso_reset[i], 0);
+	}
+
+	/*make sure the other end receives it*/
+	mb();
+
 	spin_unlock(&octeontx_domains_lock);
 	queue_delayed_work(reset_domain, &dwork_reset, 10);
 }
@@ -884,6 +909,7 @@ static unsigned long __install_el3_inthandler(unsigned long gpio_num,
 	struct arm_smccc_res res;
 
 	arm_smccc_smc(THUNDERX_INSTALL_GPIO_INT, gpio_num, sp, cpu, ttbr0,
+		      0, 0, 0, &res);
 		      0, 0, 0, &res);
 	return res.a0;
 }
@@ -915,6 +941,7 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	else if (_IOC_TYPE(cmd) & _IOC_WRITE)
 		err = !access_ok(VERIFY_READ, (void __user *)arg,
 				 _IOC_SIZE(cmd));
+
 	if (err)
 		return -EFAULT;
 
@@ -930,8 +957,8 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		gpio.sp = gpio_usr.sp;
 		gpio.cpu = gpio_usr.cpu;
 		gpio.gpio_num = gpio_usr.gpio_num;
-		ret = __install_el3_inthandler(gpio.gpio_num, gpio.sp, gpio.cpu,
-					       gpio.isr_base);
+		ret = __install_el3_inthandler(gpio.gpio_num, gpio.sp,
+					       gpio.cpu, gpio.isr_base);
 //		printk("%s::%d ttbr:%llx sp:%llx isr_base:%llx\n",
 //		       __FILE__, __LINE__, gpio.ttbr, gpio.sp, gpio.isr_base);
 		break;

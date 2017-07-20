@@ -286,6 +286,9 @@
 
 #define PKI_STRM_CFG_GMID_MASK		0xFFFFULL
 
+#define PKI_VF_SIZE			0x10000
+#define PKI_VF_BASE(x)			(0x01e00000ULL | (PKI_VF_SIZE * (x)))
+
 enum PKI_LTYPE_E {
 	PKI_LTYPE_E_NONE	= 0,
 	PKI_LTYPE_E_ENET	= 1,
