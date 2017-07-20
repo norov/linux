@@ -476,7 +476,7 @@ static int lbk_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	/* Setup LBK Port */
 	if (lbk->iconn == LBK_CONNECT_E_PKI &&
-			lbk->oconn == LBK_CONNECT_E_PKO) {
+	    lbk->oconn == LBK_CONNECT_E_PKO) {
 		port = &octeontx_lbk_ports[0];
 		port->ilbk = lbk_index_from_id(lbk->id);
 		port->olbk = lbk_index_from_id(lbk->id);
