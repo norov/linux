@@ -38,7 +38,8 @@ static struct device *octtx_device;
 static struct class *octtx_class;
 static dev_t octtx_dev;
 
-static atomic_t gbl_domain_id = ATOMIC_INIT(4);
+#define	MIN_DOMAIN_ID	4
+static atomic_t gbl_domain_id = ATOMIC_INIT(MIN_DOMAIN_ID);
 
 static struct bgx_com_s *bgx;
 static struct lbk_com_s *lbk;
@@ -134,6 +135,8 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 		goto error;
 
 	name = strsep(&start, ":");
+	if (!strcmp(name, ""))
+		goto error;
 	if (!start)
 		type = APP_NET;
 	else if (kstrtol(start, 10, &type))
@@ -348,20 +351,32 @@ int octeontx_create_domain(const char *name, int type,
 		int bgx_count, int lbk_count, const long int *bgx_port,
 		const long int *lbk_port)
 {
-	int node = 0;
+	void *ssow_ram_mbox_addr = NULL;
 	struct octtx_domain *domain;
 	u16 domain_id;
 	int ret = -EINVAL;
+	int node = 0;
+	bool found = false;
 	int i;
-	void *ssow_ram_mbox_addr = NULL;
 
 	list_for_each_entry(domain, &octeontx_domains, list) {
 		if (!strcmp(name, domain->name))
 			return -EEXIST;
 	}
 	/*get DOMAIN ID */
-	domain_id = atomic_add_return(1, &gbl_domain_id);
-	domain_id -= 1;
+	while (!found) {
+		domain_id = atomic_add_return(1, &gbl_domain_id);
+		domain_id -= 1;
+		if (domain_id < MIN_DOMAIN_ID)
+			continue;
+		found = true;
+		list_for_each_entry(domain, &octeontx_domains, list) {
+			if (domain->domain_id == domain_id) {
+				found = false;
+				break;
+			}
+		}
+	}
 
 	domain = kzalloc(sizeof(*domain), GFP_KERNEL);
 	if (!domain)
