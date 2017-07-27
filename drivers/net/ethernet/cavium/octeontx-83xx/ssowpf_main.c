@@ -66,7 +66,7 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id,
 							     name);
 			dev_info(&ssow->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, ssow->vf[i].domain.domain_id, vf_idx);
+				 i, ssow->vf[i].domain.domain_id, vf_idx++);
 			/* sso: clear hws's gmctl register */
 			reg = 0;
 			reg = SSO_MAP_GMID(1); /* write reset value '1'*/
@@ -75,7 +75,7 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id,
 				ret = -EIO;
 				goto unlock;
 			}
-			vf_idx++;	/* HWS cnt */
+
 			identify(&ssow->vf[i], 0x0, 0x0);
 			iounmap(ssow->vf[i].domain.reg_base);
 			ssow->vf[i].domain.in_use = false;
@@ -84,9 +84,7 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id,
 
 unlock:
 	ssow->vfs_in_use -= vf_idx;
-
 	spin_unlock(&octeontx_ssow_devices_lock);
-
 	return ret;
 }
 
@@ -506,6 +504,8 @@ static int ssow_sriov_configure(struct pci_dev *pdev, int numvfs)
 			ret = numvfs;
 		}
 	}
+
+	dev_notice(&ssow->pdev->dev, "VFs enabled: %d\n", ret);
 	return ret;
 }
 

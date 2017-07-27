@@ -293,6 +293,7 @@ static int pko_pf_destroy_domain(u32 id, u16 domain_id,
 		}
 	}
 
+	pko->vfs_in_use -= vf_idx;
 	spin_unlock(&octeontx_pko_devices_lock);
 
 	return 0;
@@ -906,6 +907,26 @@ static int pko_enable(struct pkopf *pko)
 	return 0;
 }
 
+static int pko_disable(struct pkopf *pko)
+{
+	u64 reg;
+	int retry = 0;
+
+	pko_reg_write(pko, PKO_PF_ENABLE, 0x0);
+
+	while (true) {
+		reg = pko_reg_read(pko, PKO_PF_STATUS);
+		if ((reg & 0x100) == 0)
+			break;
+		usleep_range(10000, 20000);
+		retry++;
+		if (retry > 10)
+			return -ENODEV;
+	}
+
+	return 0;
+}
+
 static int setup_dpfi(struct pkopf *pko)
 {
 	int err;
@@ -961,6 +982,37 @@ static int setup_dpfi(struct pkopf *pko)
 		if (retry > 10)
 			return -ENODEV;
 	}
+	return 0;
+}
+
+static int teardown_dpfi(struct pkopf *pko)
+{
+	int retry = 0;
+	u64 reg;
+
+	pko_reg_write(pko, PKO_PF_DPFI_FLUSH, 1);
+
+	while (true) {
+		reg = pko_reg_read(pko, PKO_PF_DPFI_STATUS);
+		if ((reg & 0x1) == 0x1)
+			break;
+		usleep_range(10000, 20000);
+		retry++;
+		if (retry > 10) {
+			dev_err(&pko->pdev->dev, "Failed to flush DPFI.\n");
+			return -ENODEV;
+		}
+	}
+	if ((reg >> 32) > 0)
+		dev_err(&pko->pdev->dev,
+			"DPFI cache not empty after flush, left %lld\n",
+			reg >> 32);
+	pko_reg_write(pko, PKO_PF_DPFI_GMCTL, 0);
+	pko_reg_write(pko, PKO_PF_DPFI_ENA, 0);
+
+	fpavf->teardown(fpa);
+	fpapf->destroy_domain(pko->id, FPA_PKO_DPFI_GMID, NULL, NULL);
+
 	return 0;
 }
 
@@ -1045,6 +1097,8 @@ static int pko_sriov_configure(struct pci_dev *pdev, int numvfs)
 			ret = numvfs;
 		}
 	}
+
+	dev_notice(&pko->pdev->dev, "VFs enabled: %d\n", ret);
 	return ret;
 }
 
@@ -1129,6 +1183,10 @@ static void pko_remove(struct pci_dev *pdev)
 	if (!pko)
 		return;
 
+	pko_disable(pko);
+	teardown_dpfi(pko);
+	symbol_put(fpavf_com);
+	symbol_put(fpapf_com);
 	pko_irq_free(pko);
 	pko_sriov_configure(pdev, 0);
 }

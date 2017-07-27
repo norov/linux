@@ -304,6 +304,8 @@ static int pki_destroy_domain(u32 id, u16 domain_id,
 			identify(&pki->vf[i], 0x0, 0x0);
 		}
 	}
+
+	pki->vfs_in_use -= vf_idx;
 	spin_unlock(&octeontx_pki_devices_lock);
 	return 0;
 }
@@ -317,7 +319,7 @@ static int pki_create_domain(u32 id, u16 domain_id,
 	resource_size_t vf_start;
 	struct pci_dev *virtfn;
 	struct pki_t *curr;
-	bool found = false;
+	int vf_idx = 0;
 	int i, ret = 0;
 	u8 stream;
 	u64 cfg;
@@ -378,16 +380,17 @@ static int pki_create_domain(u32 id, u16 domain_id,
 
 			identify(&pki->vf[i], pki->vf[i].domain.domain_id,
 				 pki->vf[i].domain.subdomain_id);
-			found = true;
+			vf_idx++;
 			break;
 		}
 	}
 
-	if (!found) {
+	if (!vf_idx) {
 		ret = -ENODEV;
 		goto err_unlock;
 	}
 
+	pki->vfs_in_use += vf_idx;
 	spin_unlock(&octeontx_pki_devices_lock);
 	return ret;
 
@@ -667,6 +670,8 @@ static int pki_sriov_configure(struct pci_dev *pdev, int numvfs)
 			ret = numvfs;
 		}
 	}
+
+	dev_notice(&pki->pdev->dev, "VFs enabled: %d\n", ret);
 	return ret;
 }
 
@@ -741,6 +746,7 @@ static void pki_remove(struct pci_dev *pdev)
 	}
 	spin_unlock(&octeontx_pki_devices_lock);
 
+	pki_sriov_configure(pdev, 0);
 	pki_irq_free(pki);
 }
 

@@ -251,7 +251,7 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id,
 	struct fpapf *fpa = NULL;
 	struct pci_dev *virtfn;
 	struct fpapf *curr;
-	int i, vf_idx = 0;
+	int i, j, vf_idx = 0;
 	u64 reg;
 
 	spin_lock(&octeontx_fpa_devices_lock);
@@ -270,14 +270,22 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id,
 	for (i = 0; i < fpa->total_vfs; i++) {
 		if (fpa->vf[i].domain.in_use &&
 		    fpa->vf[i].domain.domain_id == domain_id) {
+			reg = 0x1 << 7;
 			writeq_relaxed(0x0, fpa->vf[i].domain.reg_base +
 					FPA_VF_VHPOOL_START_ADDR(0));
 			reg = -1;
+			writeq_relaxed(reg, fpa->vf[i].domain.reg_base +
+					FPA_VF_VHPOOL_END_ADDR(0));
+
 			writeq_relaxed(reg, fpa->vf[i].domain.reg_base +
 				       FPA_VF_VHAURA_CNT_THRESHOLD(0));
 
 			writeq_relaxed(reg, fpa->vf[i].domain.reg_base +
 					FPA_VF_VHPOOL_THRESHOLD(0));
+
+			for (j = 0; j < FPA_AURA_SET_SIZE; j++)
+				writeq_relaxed(0x0, fpa->vf[i].domain.reg_base
+					       + FPA_VF_VHAURA_CNT(j));
 
 			iounmap(fpa->vf[i].domain.reg_base);
 
@@ -292,15 +300,12 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id,
 
 			dev_info(&fpa->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, fpa->vf[i].domain.domain_id, vf_idx);
+				 i, fpa->vf[i].domain.domain_id, vf_idx++);
 			memset(&fpa->vf[i], 0, sizeof(struct octeontx_pf_vf));
 			reg = FPA_MAP_VALID(0) | FPA_MAP_VHAURASET(i)
 				| FPA_MAP_GAURASET(0)
 				| FPA_MAP_GMID(fpa->vf[i].domain.gmid);
 			fpa_reg_write(fpa, FPA_PF_MAPX(i), reg);
-
-			vf_idx++;
-			fpa->vf[i].domain.in_use = false;
 		}
 	}
 
@@ -783,7 +788,8 @@ static int fpa_sriov_configure(struct pci_dev *pdev, int numvfs)
 			ret = numvfs;
 		}
 	}
-	dev_notice(&fpa->pdev->dev, " Pools Enabled: %d\n", ret);
+
+	dev_notice(&fpa->pdev->dev, "VFs enabled: %d\n", ret);
 	return ret;
 }
 

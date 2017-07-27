@@ -1277,6 +1277,7 @@ static void __exit octeontx_cleanup_module(void)
 	symbol_put(pkopf_com);
 	symbol_put(timpf_com);
 	symbol_put(lbk_com);
+	symbol_put(thunder_bgx_com);
 }
 
 module_init(octeontx_init_module);
