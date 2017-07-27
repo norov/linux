@@ -11,6 +11,7 @@
 #include <linux/pci.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/iommu.h>
 
 #include "fpa.h"
 
@@ -59,6 +60,14 @@ static u64 fpa_vf_alloc(struct fpavf *fpa, u32 aura)
 	return addr;
 }
 
+static inline u64 fpa_vf_iova_to_phys(struct fpavf *fpa, dma_addr_t dma_addr)
+{
+	/* Translation is installed only when IOMMU is present */
+	if (fpa->iommu_domain)
+		return iommu_iova_to_phys(fpa->iommu_domain, dma_addr);
+	return dma_addr;
+}
+
 static int fpa_vf_do_test(struct fpavf *fpa, u64 num_buffers)
 {
 	u64 *buf;
@@ -98,7 +107,7 @@ static int fpa_vf_do_test(struct fpavf *fpa, u64 num_buffers)
 
 static int fpa_vf_addbuffers(struct fpavf *fpa, u64 num_buffers, u32 buf_len)
 {
-	dma_addr_t iova;
+	dma_addr_t iova, first_addr = -1, last_addr = 0;
 	void *addr;
 	struct page *p;
 
@@ -114,8 +123,14 @@ static int fpa_vf_addbuffers(struct fpavf *fpa, u64 num_buffers, u32 buf_len)
 				      DMA_BIDIRECTIONAL);
 		fpa_vf_free(fpa, 0, iova, 0);
 		num_buffers--;
+		if (iova > last_addr)
+			last_addr = iova;
+		if (iova < first_addr)
+			first_addr = iova;
 	}
-
+	fpavf_reg_write(fpa, FPA_VF_VHPOOL_START_ADDR(0), first_addr);
+	fpavf_reg_write(fpa, FPA_VF_VHPOOL_END_ADDR(0),
+			last_addr + PAGE_SIZE - 1);
 	return 0;
 }
 
@@ -133,6 +148,10 @@ static int fpa_vf_addmemory(struct fpavf *fpa, u64 num_buffers, u32 buf_len)
 		return -ENOMEM;
 	}
 
+	fpavf_reg_write(fpa, FPA_VF_VHPOOL_START_ADDR(0), fpa->vhpool_iova);
+	fpavf_reg_write(fpa, FPA_VF_VHPOOL_END_ADDR(0),
+			fpa->vhpool_iova + fpa->vhpool_size - 1);
+
 	iova = fpa->vhpool_iova;
 	while (num_buffers) {
 		fpa_vf_free(fpa, 0, iova, 0);
@@ -146,16 +165,16 @@ static int fpa_vf_addmemory(struct fpavf *fpa, u64 num_buffers, u32 buf_len)
 static int fpa_vf_setup(struct fpavf *fpa, u64 num_buffers, u32 buf_len,
 			u32 flags)
 {
-	u64 reg;
+	struct mbox_fpa_cfg cfg;
 	struct mbox_hdr hdr;
 	union mbox_data req;
 	union mbox_data resp;
-	struct mbox_fpa_cfg cfg;
+	u64 reg;
 	int ret;
 
 	buf_len = round_up(buf_len, FPA_LN_SIZE);
-	num_buffers = round_up(num_buffers, FPA_LN_SIZE);
-	fpa->pool_size = num_buffers * FPA_LN_SIZE;
+	fpa->pool_size = (num_buffers + fpa->stack_ln_ptrs - 1)
+			  / fpa->stack_ln_ptrs * FPA_LN_SIZE;
 
 	fpa->pool_addr = dma_zalloc_coherent(&fpa->pdev->dev, fpa->pool_size,
 			&fpa->pool_iova, GFP_KERNEL);
@@ -169,6 +188,7 @@ static int fpa_vf_setup(struct fpavf *fpa, u64 num_buffers, u32 buf_len,
 	fpa->alloc_count = ((atomic_t) { (0) });
 	fpa->alloc_thold = (num_buffers * 10) / 100;
 	fpa->buf_len = buf_len;
+	fpa->flags = flags;
 
 	req.data = 0;
 	hdr.coproc = FPA_COPROC;
@@ -190,10 +210,6 @@ static int fpa_vf_setup(struct fpavf *fpa, u64 num_buffers, u32 buf_len,
 	if (ret || hdr.res_code)
 		return -EINVAL;
 
-	/*disable buffer check*/
-	fpavf_reg_write(fpa, FPA_VF_VHPOOL_START_ADDR(0), 0ULL);
-	fpavf_reg_write(fpa, FPA_VF_VHPOOL_END_ADDR(0), 0xffffffffffffffffULL);
-
 	if (flags & FPA_VF_FLAG_CONT_MEM)
 		fpa_vf_addmemory(fpa, num_buffers, buf_len);
 	else
@@ -213,8 +229,78 @@ static int fpa_vf_setup(struct fpavf *fpa, u64 num_buffers, u32 buf_len,
 
 	/*Setup THRESHOLD*/
 	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_THRESHOLD(0), num_buffers / 2);
-	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_LIMIT(0), num_buffers - 110);
 
+	return 0;
+}
+
+static int fpa_vf_teardown(struct fpavf *fpa)
+{
+	union mbox_data resp;
+	struct mbox_hdr hdr;
+	union mbox_data req;
+	u64 avail, iova;
+	u64 *buf;
+	int ret;
+
+	if (!fpa)
+		return -ENODEV;
+
+	req.data = 0;
+	hdr.coproc = FPA_COPROC;
+	hdr.msg = FPA_STOP_COUNT;
+	hdr.vfid = fpa->subdomain_id;
+	ret = fpa->master->send_message(&hdr, &req, &resp, fpa->master_data,
+					NULL);
+	if (ret || hdr.res_code)
+		return -EINVAL;
+
+	/* Remove limits on the aura */
+	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_THRESHOLD(0), -1);
+	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_LIMIT(0), -1);
+	/* There can be two types of memory allocation for FPA VF:
+	 * contiguous (FPA_VF_FLAG_CONT_MEM) or not (FPA_VF_FLAG_DISC_MEM).
+	 * If contiguous memory was requested, then a segment of memory was
+	 * allocated at address fpa->vhpool_addr of size fpa->vhpool_size.
+	 * For each address from that region taken out of the pool, do not
+	 * free it, instead free the whole segment at the end.
+	 * In other case (or if fpa->refill() was called) each buffer is a
+	 * single page. For that case, free each buffer as it's taken out of the
+	 * pool.
+	 */
+	avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
+	while (avail) {
+		iova = fpa_vf_alloc(fpa, 0);
+		if (iova >= fpa->vhpool_iova &&
+		    iova < fpa->vhpool_iova + fpa->vhpool_size &&
+		    fpa->flags & FPA_VF_FLAG_CONT_MEM) {
+			avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
+			continue;
+		}
+		/* If there is a NAT_ALIGN bug here, it means that we'll get a
+		 * different address from FPA than the beginning of the page.
+		 * Therefore we're aligning the address to page size.
+		 */
+		if (iova == 0) {
+			dev_err(&fpa->pdev->dev,
+				"NULL buffer in pool %d of domain %d\n",
+				fpa->subdomain_id, fpa->domain_id);
+			avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
+			continue;
+		}
+		iova = PAGE_ALIGN(iova);
+		dma_unmap_single(&fpa->pdev->dev, iova, PAGE_SIZE,
+				 DMA_BIDIRECTIONAL);
+		buf = phys_to_virt(fpa_vf_iova_to_phys(fpa, iova));
+		free_page((u64)buf);
+		avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
+	}
+	/* If allocation was contiguous, free that region */
+	if (fpa->flags & FPA_VF_FLAG_CONT_MEM)
+		dma_free_coherent(&fpa->pdev->dev, fpa->vhpool_size,
+				  fpa->vhpool_addr, fpa->vhpool_iova);
+	/* Finally free the stack */
+	dma_free_coherent(&fpa->pdev->dev, fpa->pool_size,
+			  fpa->pool_addr, fpa->pool_iova);
 	return 0;
 }
 
@@ -313,6 +399,7 @@ struct fpavf_com_s fpavf_com = {
 	.alloc = fpa_vf_alloc,
 	.refill = fpa_vf_refill,
 	.add_alloc = fpa_vf_add_alloc,
+	.teardown = fpa_vf_teardown,
 };
 EXPORT_SYMBOL(fpavf_com);
 
@@ -432,6 +519,9 @@ static int fpavf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		err = -EINVAL;
 		return err;
 	}
+
+	/* Get iommu domain for iova to physical addr conversion */
+	fpa->iommu_domain = iommu_get_domain_for_dev(&pdev->dev);
 
 	INIT_LIST_HEAD(&fpa->list);
 	spin_lock(&octeontx_fpavf_devices_lock);
