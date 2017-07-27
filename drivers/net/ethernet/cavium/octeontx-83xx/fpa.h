@@ -208,6 +208,7 @@ struct fpavf {
 	u64			num_buffers;
 	u64			alloc_thold;
 
+	/* VA of pool memory start in contiguous allocation */
 	void			*vhpool_addr;
 	dma_addr_t		vhpool_iova;
 	u64			vhpool_size;
@@ -220,6 +221,7 @@ struct fpavf {
 #define FPA_VF_FLAG_CONT_MEM	0x1
 #define FPA_VF_FLAG_DISC_MEM	0x2
 	u32			flags;
+	struct iommu_domain	*iommu_domain;
 
 	struct octeontx_master_com_t *master;
 	void			*master_data;
@@ -232,6 +234,7 @@ struct fpavf_com_s {
 	u64 (*alloc)(struct fpavf*, u32);
 	int (*refill)(struct fpavf *fpa);
 	void (*add_alloc)(struct fpavf *fpa, int count);
+	int (*teardown)(struct fpavf *fpa);
 };
 
 extern struct fpavf_com_s fpavf_com;
