@@ -253,7 +253,7 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id,
 
 			dev_info(&sso->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, sso->vf[i].domain.domain_id, vf_idx);
+				 i, sso->vf[i].domain.domain_id, vf_idx++);
 
 			/* Unmap groups */
 			reg = SSO_MAP_VALID(0) | SSO_MAP_VHGRP(i) |
@@ -261,7 +261,6 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id,
 				SSO_MAP_GMID(sso->vf[i].domain.gmid);
 			sso_reg_write(sso, SSO_PF_MAPX(i), reg);
 
-			vf_idx++;
 			identify(&sso->vf[i], 0xFFFF, 0xFFFF);
 			iounmap(sso->vf[i].domain.reg_base);
 		}
@@ -1224,6 +1223,8 @@ static int sso_sriov_configure(struct pci_dev *pdev, int numvfs)
 			ret = numvfs;
 		}
 	}
+
+	dev_notice(&sso->pdev->dev, "VFs enabled: %d\n", ret);
 	return ret;
 }
 
@@ -1316,15 +1317,31 @@ static void sso_remove(struct pci_dev *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct ssopf *sso = pci_get_drvdata(pdev);
+	u64 sso_reg, addr;
+	u16 nr_grps;
+	int i;
 
 	if (!sso)
 		return;
 
 	flush_scheduled_work();
+	/* Make sure the SSO is disabled */
+	sso_reg = sso_reg_read(sso, SSO_PF_AW_CFG);
+	sso_reg &= (~1ULL);
+	sso_reg_write(sso, SSO_PF_AW_CFG, sso_reg);
 	kfree(ram_mbox_buf);
+	sso_reg = sso_reg_read(sso, SSO_PF_CONST);
+	nr_grps = (sso_reg >> SSO_CONST_GRP_SHIFT) & SSO_CONST_GRP_MASK;
+	for (i = 0; i < nr_grps; i++) {
+		addr = sso_reg_read(sso, SSO_PF_XAQX_HEAD_PTR(i));
+		if (addr)
+			fpavf->free(fpa, FPA_SSO_XAQ_AURA, addr, 0);
+	}
+	fpavf->teardown(fpa);
 	fpapf->destroy_domain(sso->id, FPA_SSO_XAQ_GMID, NULL, NULL);
 	symbol_put(fpapf_com);
 	symbol_put(fpavf_com);
+	symbol_put(rst_com);
 	sso_irq_free(sso);
 	sso_sriov_configure(pdev, 0);
 	sso_fini(sso);
