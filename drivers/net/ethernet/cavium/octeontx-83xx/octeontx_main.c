@@ -95,6 +95,7 @@ struct octtx_domain {
 };
 
 struct octtx_gpio gpio;
+int gpio_installed[MAX_GPIO];
 
 static DEFINE_SPINLOCK(octeontx_domains_lock);
 static LIST_HEAD(octeontx_domains);
@@ -948,6 +949,10 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	case OCTTX_IOC_SET_GPIO_HANDLER: /*Install GPIO ISR handler*/
 		ret = copy_from_user(&gpio_usr, (void *)arg, _IOC_SIZE(cmd));
+		if (gpio_usr.gpio_num >= MAX_GPIO)
+			return -EINVAL;
+		if (gpio_installed[gpio_usr.gpio_num] != 0)
+			return -EEXIST;
 		if (ret)
 			return -EFAULT;
 		gpio.ttbr = 0;
@@ -959,13 +964,18 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		gpio.gpio_num = gpio_usr.gpio_num;
 		ret = __install_el3_inthandler(gpio.gpio_num, gpio.sp,
 					       gpio.cpu, gpio.isr_base);
-//		printk("%s::%d ttbr:%llx sp:%llx isr_base:%llx\n",
-//		       __FILE__, __LINE__, gpio.ttbr, gpio.sp, gpio.isr_base);
+		if (ret == 0)
+			gpio_installed[gpio_usr.gpio_num] = 1;
 		break;
 	case OCTTX_IOC_CLR_GPIO_HANDLER: /*Clear GPIO ISR handler*/
 		ret = copy_from_user(&gpio_usr, (void *)arg, _IOC_SIZE(cmd));
 		if (ret)
 			return -EFAULT;
+		gpio_usr.gpio_num = arg;
+		if (gpio_usr.gpio_num >= MAX_GPIO)
+			return -EINVAL;
+		if (gpio_installed[gpio_usr.gpio_num] == 0)
+			return -ENOENT;
 		__remove_el3_inthandler(gpio_usr.gpio_num);
 		break;
 	default:
@@ -985,12 +995,20 @@ static int octtx_dev_open(struct inode *inode, struct file *fp)
 
 static int octtx_dev_release(struct inode *inode, struct file *fp)
 {
+	int i;
+
 	if (gpio.in_use == 0)
 		return -EINVAL;
 
 	if (gpio.gpio_num)
 		__remove_el3_inthandler(gpio.gpio_num);
 
+	for (i = 0; i < MAX_GPIO; i++) {
+		if (gpio_installed[i] != 0) {
+			__remove_el3_inthandler(i);
+			gpio_installed[i] = 0;
+		}
+	}
 	gpio.in_use = 0;
 	return 0;
 }
