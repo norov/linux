@@ -1119,23 +1119,9 @@ static int sso_init(struct ssopf *sso)
 
 	sso->xaq_buf_size = xaq_buf_size;
 
-	rst = try_then_request_module(symbol_get(rst_com), "rst");
-	if (!rst)
-		return -ENODEV;
-
-	fpapf = try_then_request_module(symbol_get(fpapf_com), "fpapf");
-	if (!fpapf)
-		return -ENODEV;
-
 	err = fpapf->create_domain(sso->id, FPA_SSO_XAQ_GMID, 1, NULL, NULL);
 	if (!err) {
 		dev_err(&sso->pdev->dev, "failed to create SSO_XAQ_DOMAIN\n");
-		symbol_put(fpapf_com);
-		return -ENODEV;
-	}
-
-	fpavf = try_then_request_module(symbol_get(fpavf_com), "fpavf");
-	if (!fpavf) {
 		symbol_put(fpapf_com);
 		return -ENODEV;
 	}
@@ -1339,9 +1325,6 @@ static void sso_remove(struct pci_dev *pdev)
 	}
 	fpavf->teardown(fpa);
 	fpapf->destroy_domain(sso->id, FPA_SSO_XAQ_GMID, NULL, NULL);
-	symbol_put(fpapf_com);
-	symbol_put(fpavf_com);
-	symbol_put(rst_com);
 	sso_irq_free(sso);
 	sso_sriov_configure(pdev, 0);
 	sso_fini(sso);
@@ -1379,6 +1362,22 @@ MODULE_DEVICE_TABLE(pci, sso_id_table);
 static int __init sso_init_module(void)
 {
 	pr_info("%s, ver %s\n", DRV_NAME, DRV_VERSION);
+	rst = try_then_request_module(symbol_get(rst_com), "rst");
+	if (!rst)
+		return -ENODEV;
+
+	fpapf = try_then_request_module(symbol_get(fpapf_com), "fpapf");
+	if (!fpapf) {
+		symbol_put(rst);
+		return -ENODEV;
+	}
+
+	fpavf = try_then_request_module(symbol_get(fpavf_com), "fpavf");
+	if (!fpavf) {
+		symbol_put(rst);
+		symbol_put(fpapf_com);
+		return -ENODEV;
+	}
 
 	return pci_register_driver(&sso_driver);
 }
@@ -1386,6 +1385,9 @@ static int __init sso_init_module(void)
 static void __exit sso_cleanup_module(void)
 {
 	pci_unregister_driver(&sso_driver);
+	symbol_put(rst_com);
+	symbol_put(fpapf_com);
+	symbol_put(fpavf_com);
 }
 
 module_init(sso_init_module);

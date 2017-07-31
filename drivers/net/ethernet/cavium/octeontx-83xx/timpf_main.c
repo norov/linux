@@ -625,10 +625,6 @@ static int tim_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct timpf *tim;
 	int err = -ENOMEM;
 
-	rst = try_then_request_module(symbol_get(rst_com), "rst");
-	if (!rst)
-		return -ENODEV;
-
 	tim = devm_kzalloc(dev, sizeof(*tim), GFP_KERNEL);
 	if (!tim)
 		return -ENOMEM;
@@ -689,7 +685,6 @@ static void tim_remove(struct pci_dev *pdev)
 	}
 	spin_unlock(&octeontx_tim_dev_lock);
 
-	symbol_put(rst_com);
 	tim_irq_free(tim);
 	tim_sriov_configure(pdev, 0);
 }
@@ -716,6 +711,9 @@ MODULE_DEVICE_TABLE(pci, tim_id_table);
 static int __init tim_init_module(void)
 {
 	pr_info("%s, ver %s\n", DRV_NAME, DRV_VERSION);
+	rst = try_then_request_module(symbol_get(rst_com), "rst");
+	if (!rst)
+		return -ENODEV;
 
 	return pci_register_driver(&tim_driver);
 }
@@ -723,6 +721,7 @@ static int __init tim_init_module(void)
 static void __exit tim_cleanup_module(void)
 {
 	pci_unregister_driver(&tim_driver);
+	symbol_put(rst_com);
 }
 
 module_init(tim_init_module);
