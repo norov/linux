@@ -433,13 +433,6 @@ static int lbk_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	u64 ioaddr;
 	int err, node;
 
-	/* Setup interface with NIC driver */
-	thlbk = try_then_request_module(symbol_get(thunder_lbk_com), "nicpf");
-	if (!thlbk) {
-		dev_err(dev, "Error thunder_lbk_com symbol not found");
-		return -ENODEV;
-	}
-
 	/* Setup LBK Device */
 	lbk = devm_kzalloc(dev, sizeof(*lbk), GFP_KERNEL);
 	if (!lbk)
@@ -522,7 +515,6 @@ static void lbk_remove(struct pci_dev *pdev)
 		}
 	}
 	spin_unlock(&octeontx_lbk_lock);
-	symbol_put(thunder_lbk_com);
 }
 
 static const struct pci_device_id lbk_id_table[] = {
@@ -546,6 +538,9 @@ MODULE_DEVICE_TABLE(pci, lbk_id_table);
 static int __init lbk_init_module(void)
 {
 	pr_info("%s, ver %s\n", DRV_NAME, DRV_VERSION);
+	thlbk = try_then_request_module(symbol_get(thunder_lbk_com), "nicpf");
+	if (!thlbk)
+		return -ENODEV;
 
 	return pci_register_driver(&lbk_driver);
 }
@@ -553,6 +548,7 @@ static int __init lbk_init_module(void)
 static void __exit lbk_cleanup_module(void)
 {
 	pci_unregister_driver(&lbk_driver);
+	symbol_put(thunder_lbk_com);
 }
 
 module_init(lbk_init_module);
