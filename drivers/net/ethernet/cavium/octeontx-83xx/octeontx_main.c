@@ -153,6 +153,7 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	long int tim_count = 0;
 	long int bgx_count = 0;
 	long int lbk_count = 0;
+	long int pki_count = 0;
 	long int lbk_port[OCTTX_MAX_LBK_PORTS];
 	long int bgx_port[OCTTX_MAX_BGX_PORTS];
 
@@ -205,7 +206,11 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 			if (kstrtol(strim(start), 10, &pko_count))
 				goto error;
 		} else if (!strncmp(strim(start), "pki", sizeof("pki") - 1)) {
-			continue;
+			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
+			if (kstrtol(strim(start), 10, &pki_count))
+				goto error;
 		} else if (!strncmp(strim(start), "tim", sizeof("tim") - 1)) {
 			temp = strsep(&start, ":");
 			if (!start)
@@ -232,8 +237,8 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	}
 
 	ret = octeontx_create_domain(name, type, sso_count, fpa_count,
-				     ssow_count, pko_count, 1, tim_count,
-				     bgx_count, lbk_count,
+				     ssow_count, pko_count, pki_count,
+				     tim_count, bgx_count, lbk_count,
 				     (const long int *)bgx_port,
 				     (const long int *)lbk_port);
 	if (ret)
@@ -505,6 +510,28 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		}
 	}
 
+	if (!sso_count) {
+		dev_err(octtx_device, "Domain has to include at least 1 SSO\n");
+		return -EINVAL;
+	}
+
+	if (!ssow_count) {
+		dev_err(octtx_device,
+			"Domain has to include at least 1 SSOW\n");
+		return -EINVAL;
+	}
+
+	if (!pki_count) {
+		dev_err(octtx_device, "Domain has to include exactly 1 PKI\n");
+		return -EINVAL;
+	}
+
+	if (pko_count != bgx_count + lbk_count) {
+		dev_err(octtx_device,
+			"Domain has to include as many PKOs as there are BGX and LBK ports\n");
+		return -EINVAL;
+	}
+
 	/*get DOMAIN ID */
 	while (!found) {
 		domain_id = atomic_add_return(1, &gbl_domain_id);
@@ -539,21 +566,23 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	domain->sysfs_group_created = true;
 
 	domain->fpa_vf_count = fpa_count;
-	domain->aura_set = fpapf->create_domain(node, domain_id,
-						domain->fpa_vf_count,
-						&octtx_device->kobj,
-						domain->name);
-	if (!domain->aura_set) {
-		dev_err(octtx_device, "Failed to create FPA domain\n");
-		ret = -ENODEV;
-		goto error;
+	if (domain->fpa_vf_count) {
+		domain->aura_set = fpapf->create_domain(node, domain_id,
+							domain->fpa_vf_count,
+							&octtx_device->kobj,
+							domain->name);
+		if (!domain->aura_set) {
+			dev_err(octtx_device, "Failed to create FPA domain\n");
+			ret = -ENODEV;
+			goto error;
+		}
+		domain->fpa_domain_created = true;
 	}
-	domain->fpa_domain_created = true;
 
 	domain->ssow_vf_count = ssow_count;
 	ret = ssowpf->create_domain(node, domain_id, domain->ssow_vf_count,
-				&octtx_master_com, domain,
-				&octtx_device->kobj, domain->name);
+				    &octtx_master_com, domain,
+				    &octtx_device->kobj, domain->name);
 	if (ret) {
 		dev_err(octtx_device, "Failed to create SSOW domain\n");
 		goto error;
@@ -585,7 +614,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	}
 
 	ret = pki->create_domain(node, domain_id, &octtx_master_com, domain,
-			&octtx_device->kobj, domain->name);
+				 &octtx_device->kobj, domain->name);
 	if (ret) {
 		dev_err(octtx_device, "Failed to create PKI domain\n");
 		goto error;
@@ -619,13 +648,16 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 			goto error;
 		}
 	}
-	ret = lbk->create_domain(node, domain_id, domain->lbk_port, i,
-			&octtx_master_com, domain);
-	if (ret) {
-		dev_err(octtx_device, "Failed to create LBK domain\n");
-		goto error;
+
+	if (domain->lbk_count) {
+		ret = lbk->create_domain(node, domain_id, domain->lbk_port, i,
+					 &octtx_master_com, domain);
+		if (ret) {
+			dev_err(octtx_device, "Failed to create LBK domain\n");
+			goto error;
+		}
+		domain->lbk_domain_created = true;
 	}
-	domain->lbk_domain_created = true;
 
 	/* There is a global list of all network (BGX-based) ports
 	 * detected by the thunder driver and provided to this driver.
@@ -640,18 +672,20 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	 * Linux, hosting the dataplane application, control.
 	 */
 	domain->bgx_count = bgx_count;
-	for (i = 0; i < domain->bgx_count; i++) {
-		domain->bgx_port[i].domain_id = domain_id;
-		domain->bgx_port[i].dom_port_idx = i;
-		domain->bgx_port[i].glb_port_idx = bgx_port[i];
+	if (domain->bgx_count) {
+		for (i = 0; i < domain->bgx_count; i++) {
+			domain->bgx_port[i].domain_id = domain_id;
+			domain->bgx_port[i].dom_port_idx = i;
+			domain->bgx_port[i].glb_port_idx = bgx_port[i];
+		}
+		ret = bgx->create_domain(node, domain_id, domain->bgx_port, i,
+				&octtx_master_com, domain);
+		if (ret) {
+			dev_err(octtx_device, "Failed to create BGX domain\n");
+			goto error;
+		}
+		domain->bgx_domain_created = true;
 	}
-	ret = bgx->create_domain(node, domain_id, domain->bgx_port, i,
-			&octtx_master_com, domain);
-	if (ret) {
-		dev_err(octtx_device, "Failed to create BGX domain\n");
-		goto error;
-	}
-	domain->bgx_domain_created = true;
 
 	/* Now that we know which exact ports we have, set pkinds for them. */
 	for (i = 0; i < domain->bgx_count; i++) {
@@ -675,31 +709,25 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 			goto error;
 		}
 	}
-	if (ret) {
-		dev_err(octtx_device, "Failed to create BGX domain\n");
-		goto error;
-	}
+
 	/* remove this once PKO init extends for LBK. */
 	domain->pko_vf_count = bgx_count + lbk_count;
-	if (domain->pko_vf_count != pko_count) {
-		dev_err(octtx_device,
-			"requested %d pko vfs, the proper values is: %d\n",
-			pko_count, domain->pko_vf_count);
-		dev_err(octtx_device, " proceeding with proper value..\n");
+	if (domain->pko_vf_count) {
+		ret = pkopf->create_domain(node, domain_id,
+					domain->pko_vf_count,
+					domain->bgx_port, domain->bgx_count,
+					domain->lbk_port, domain->lbk_count,
+					&octtx_master_com, domain,
+					&octtx_device->kobj, domain->name);
+		if (ret) {
+			dev_err(octtx_device, "Failed to create PKO domain\n");
+			goto error;
+		}
+		domain->pko_domain_created = true;
 	}
-	ret = pkopf->create_domain(node, domain_id, domain->pko_vf_count,
-				domain->bgx_port, domain->bgx_count,
-				domain->lbk_port, domain->lbk_count,
-				&octtx_master_com, domain,
-				&octtx_device->kobj, domain->name);
-	if (ret) {
-		dev_err(octtx_device, "Failed to create PKO domain\n");
-		goto error;
-	}
-	domain->pko_domain_created = true;
 
 	domain->tim_vf_count = tim_count;
-	if (domain->tim_vf_count > 0) {
+	if (domain->tim_vf_count) {
 		ret = timpf->create_domain(node, domain_id,
 			domain->tim_vf_count, &octtx_master_com, domain,
 			&octtx_device->kobj, domain->name);
