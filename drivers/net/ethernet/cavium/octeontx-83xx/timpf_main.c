@@ -169,7 +169,7 @@ static struct timpf *tim_dev_from_ringid(int id, int domain_id,
 			if (vf->domain.domain_id == domain_id &&
 			    vf->domain.subdomain_id == ringid) {
 				spin_unlock(&octeontx_tim_dev_lock);
-				*ring = ring_from_ringid(ringid);
+				*ring = i;
 				return tim;
 			}
 		}
