@@ -89,6 +89,49 @@ void flush_dcache_page(struct page *page)
 EXPORT_SYMBOL(flush_dcache_page);
 
 /*
+ * Flush Cavium CN8xxx L2C
+ */
+void flush_l2c(void)
+{
+#define SYS_CVMCACHE_WBI_L2_INDEXED "#0,c11,c0,#5"
+#define CVM_CACHE_WBI_L2I(enc) { asm volatile \
+		("sys "SYS_CVMCACHE_WBI_L2_INDEXED", %0" : : "r" (enc)); }
+
+	u32 num_sets, num_ways;
+	u32 set, way, is_rtg;
+	u64 cssidr, enc;
+
+	WARN_ON(preemptible());
+
+	/* Select L2 cache */
+	write_sysreg(0x2, csselr_el1);
+	isb();
+	cssidr = read_sysreg(ccsidr_el1);
+
+	num_sets = CACHE_NUMSETS(cssidr);
+	num_ways = CACHE_ASSOCIATIVITY(cssidr);
+
+	/* Clear remote tags */
+	is_rtg = 1;
+	for (way = 0; way < num_ways; way++) {
+		for (set = 0; set < num_sets; set++) {
+			enc = 128 * (set + num_sets * (way + (is_rtg * 16)));
+			CVM_CACHE_WBI_L2I(enc);
+		}
+	}
+
+	/* Clear local tags */
+	is_rtg = 0;
+	for (way = 0; way < num_ways; way++) {
+		for (set = 0; set < num_sets; set++) {
+			enc = 128 * (set + num_sets * (way + (is_rtg * 16)));
+			CVM_CACHE_WBI_L2I(enc);
+		}
+	}
+}
+EXPORT_SYMBOL(flush_l2c);
+/*
  * Additional functions defined in assembly.
  */
 EXPORT_SYMBOL(flush_icache_range);
+EXPORT_SYMBOL(flush_cache_all);
