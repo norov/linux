@@ -50,6 +50,7 @@
  */
 
 #include <linux/io.h>
+#include <linux/kernel.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -109,7 +110,7 @@ MODULE_PARM_DESC(timeout,
  * 1 = panic
  * defaults to skip (0)
  */
-static int action;
+static int action = 1;
 module_param(action, int, 0);
 MODULE_PARM_DESC(action, "after watchdog gets WS0 interrupt, do: "
 		 "0 = skip(*)  1 = panic");
@@ -127,11 +128,12 @@ static int sbsa_gwdt_set_timeout(struct watchdog_device *wdd,
 				 unsigned int timeout)
 {
 	struct sbsa_gwdt *gwdt = watchdog_get_drvdata(wdd);
+	u32 actual;
 
-	wdd->timeout = timeout;
+	actual = min(timeout, wdd->max_hw_heartbeat_ms / 1000);
 
 	if (action)
-		writel(gwdt->clk * timeout,
+		writel(gwdt->clk * actual,
 		       gwdt->control_base + SBSA_GWDT_WOR);
 	else
 		/*
@@ -139,7 +141,7 @@ static int sbsa_gwdt_set_timeout(struct watchdog_device *wdd,
 		 * the timeout is (WOR * 2), so the WOR should be configured
 		 * to half value of timeout.
 		 */
-		writel(gwdt->clk / 2 * timeout,
+		writel(gwdt->clk / 2 * actual,
 		       gwdt->control_base + SBSA_GWDT_WOR);
 
 	return 0;
