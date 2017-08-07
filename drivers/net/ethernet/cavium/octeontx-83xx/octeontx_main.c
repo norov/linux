@@ -521,8 +521,8 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		return -EINVAL;
 	}
 
-	if (!pki_count) {
-		dev_err(octtx_device, "Domain has to include exactly 1 PKI\n");
+	if ((bgx_count + lbk_count) != 0 && pki_count != 1) {
+		dev_err(octtx_device, "Domain has to include exactly 1 PKI if there are BGX or LBK ports\n");
 		return -EINVAL;
 	}
 
