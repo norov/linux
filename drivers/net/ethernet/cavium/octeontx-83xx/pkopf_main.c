@@ -707,13 +707,8 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 
 static int pko_pq_init(struct pkopf *pko, int vf, int mac_num, u32 max_frame)
 {
-	u64 reg;
-	int l1_sq;
 	u64 queue_base = vf * 8;
-
-	l1_sq = pko_reg_read(pko, PKO_PF_L1_CONST);
-
-	l1_sq = l1_sq & 0xffff;
+	u64 reg;
 
 	/* If single child PRIORITY must be 0xF */
 	reg = (mac_num << 16) |
@@ -730,21 +725,6 @@ static int pko_pq_init(struct pkopf *pko, int vf, int mac_num, u32 max_frame)
 	reg = (mac_num | 0ULL) << 44;
 	pko_reg_write(pko, PKO_PF_L1_SQX_LINK(mac_num), reg);
 
-	return 0;
-}
-
-static u64 pko_lX_get_queue(struct pkopf *pko, int level)
-{
-	switch (level) {
-	case 2:
-		return pko_reg_read(pko, PKO_PF_L2_CONST);
-	case 3:
-		return pko_reg_read(pko, PKO_PF_L3_CONST);
-	case 4:
-		return pko_reg_read(pko, PKO_PF_L4_CONST);
-	case 5:
-		return pko_reg_read(pko, PKO_PF_L5_CONST);
-	}
 	return 0;
 }
 
@@ -794,7 +774,7 @@ static void pko_lX_set_shape(struct pkopf *pko, int level, int q, u64 reg)
 		pko_reg_write(pko, PKO_PF_L2_SQX_SHAPE(q), reg);
 		break;
 	case 3:
-		pko_reg_write(pko, PKO_PF_L2_SQX_SHAPE(q), reg);
+		pko_reg_write(pko, PKO_PF_L3_SQX_SHAPE(q), reg);
 		break;
 	case 4:
 	case 5:
@@ -805,12 +785,10 @@ static void pko_lX_set_shape(struct pkopf *pko, int level, int q, u64 reg)
 static int pko_sq_init(struct pkopf *pko, int vf, int level, u32 channel,
 		       int mac_num, u32 max_frame, int parent_sq)
 {
-	int queue;
 	int channel_level;
 	int queue_base;
 	u64 reg;
 
-	queue = pko_lX_get_queue(pko, level);
 	channel_level = pko_reg_read(pko, PKO_PF_CHANNEL_LEVEL);
 	channel_level += 2;
 
@@ -896,7 +874,7 @@ static int pko_enable(struct pkopf *pko)
 
 	while (true) {
 		reg = pko_reg_read(pko, PKO_PF_STATUS);
-		if (reg & 0x100)
+		if ((reg & 0x1FF) == 0x1FF)
 			break;
 		usleep_range(10000, 20000);
 		retry++;
@@ -1023,7 +1001,7 @@ static int pko_init(struct pkopf *pko)
 
 	while (true) {
 		reg = pko_reg_read(pko, PKO_PF_STATUS);
-		if (reg & 0x7f)
+		if ((reg & 0xFF) == 0xFB)
 			break;
 		usleep_range(10000, 20000);
 		retry++;
@@ -1040,9 +1018,9 @@ static int pko_init(struct pkopf *pko)
 	/*use L3 SQs */
 	pko_reg_write(pko, PKO_PF_CHANNEL_LEVEL, 0x1);
 
-	n = pko_reg_read(pko, PKO_PF_L2_CONST);
+	n = pko_reg_read(pko, PKO_PF_L1_CONST);
 	for (i = 0; i < n; i++)
-		pko_reg_write(pko, PKO_PF_L2_SQX_TOPOLOGY(i), 19 << 16);
+		pko_reg_write(pko, PKO_PF_L1_SQX_TOPOLOGY(i), 19 << 16);
 
 	for (i = 0; i < pko->max_formats; i++)
 		pko_reg_write(pko, PKO_PF_FORMATX_CTL(i), 0x0);
