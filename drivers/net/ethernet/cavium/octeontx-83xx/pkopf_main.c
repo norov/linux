@@ -22,6 +22,8 @@
 #define PKO_MAC_BGX	1
 #define PKO_MAC_DPI	2
 
+#define PKO_CHAN_NULL	0xFFF
+
 #define LBK_CHAN_BASE	0x0
 #define LBK_CHAN_RANGE	BIT(8)
 
@@ -37,6 +39,8 @@ static struct fpavf_com_s *fpavf;
 static struct fpavf *fpa;
 static int pko_pstree_setup(struct pkopf *pko, int vf, u32 max_frame,
 			    int mac_num, int mac_mode, int channel);
+static void pko_pstree_teardown(struct pkopf *pko, int vf, int mac_num,
+				int channel);
 
 /* In Cavium OcteonTX SoCs, all accesses to the device registers are
  * implicitly strongly ordered.
@@ -281,6 +285,9 @@ static int pko_pf_destroy_domain(u32 id, u16 domain_id,
 		if (pko->vf[i].domain.in_use &&
 		    pko->vf[i].domain.domain_id == domain_id) {
 			pko->vf[i].domain.in_use = false;
+			pko_pstree_teardown(pko, i, pko->vf[i].mac_num,
+					    pko->vf[i].chan);
+
 			identify(&pko->vf[i], 0x0, 0x0);
 			iounmap(pko->vf[i].domain.reg_base);
 
@@ -411,10 +418,12 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 			} else {
 				break;
 			}
+			pko->vf[i].mac_num = mac_num;
+			pko->vf[i].chan = chan;
+
 			pko_pstree_setup(pko, i, max_frame,
 					 mac_num, mac_mode, chan);
 			vf_idx++;
-			pko->vf[i].mac_num = mac_num;
 			if (vf_idx == pko_vf_count) {
 				pko->vfs_in_use += pko_vf_count;
 				break;
@@ -802,7 +811,6 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 		reg, mac_num);
 	pko_reg_write(pko, PKO_PF_MCI1_MAX_CREDX(mac_num), reg);
 
-	reg = pko_reg_read(pko, PKO_PF_PTGFX_CFG(ptgf));
 	reg = (rate << 3) | size;
 	pko_reg_write(pko, PKO_PF_PTGFX_CFG(ptgf), reg);
 
@@ -815,7 +823,13 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 	return 0;
 }
 
-static int pko_pq_init(struct pkopf *pko, int vf, int mac_num, u32 max_frame)
+static void pko_mac_teardown(struct pkopf *pko, int mac_num)
+{
+	pko_reg_write(pko, PKO_PF_MACX_CFG(mac_num), 0x1F);
+	pko_reg_write(pko, PKO_PF_MCI1_MAX_CREDX(mac_num), 0x0);
+}
+
+static void pko_pq_init(struct pkopf *pko, int vf, int mac_num, u32 max_frame)
 {
 	u64 queue_base = vf * 8;
 	u64 reg;
@@ -834,8 +848,17 @@ static int pko_pq_init(struct pkopf *pko, int vf, int mac_num, u32 max_frame)
 
 	reg = (mac_num | 0ULL) << 44;
 	pko_reg_write(pko, PKO_PF_L1_SQX_LINK(mac_num), reg);
+}
 
-	return 0;
+static void pko_pq_teardown(struct pkopf *pko, int mac_num)
+{
+	u64 reg;
+
+	reg = 0x13 << 16;
+	pko_reg_write(pko, PKO_PF_L1_SQX_TOPOLOGY(mac_num), reg);
+	pko_reg_write(pko, PKO_PF_L1_SQX_SHAPE(mac_num), 0x0);
+	pko_reg_write(pko, PKO_PF_L1_SQX_SCHEDULE(mac_num), 0x0);
+	pko_reg_write(pko, PKO_PF_L1_SQX_LINK(mac_num), 0x0);
 }
 
 static void pko_lX_set_schedule(struct pkopf *pko, int level, int q, u64 reg)
@@ -928,13 +951,34 @@ static int pko_sq_init(struct pkopf *pko, int vf, int level, u32 channel,
 	return queue_base;
 }
 
-static int pko_dq_init(struct pkopf *pko, int vf)
+static void pko_sq_teardown(struct pkopf *pko, int vf, int level, u32 channel,
+			    int mac_num)
+{
+	int channel_level;
+	int queue_base;
+
+	channel_level = pko_reg_read(pko, PKO_PF_CHANNEL_LEVEL);
+	channel_level += 2;
+
+	queue_base = (vf * 8);
+
+	pko_lX_set_schedule(pko, level, queue_base, 0x0);
+	pko_lX_set_shape(pko, level, queue_base, 0x0);
+	pko_lX_set_topology(pko, level, queue_base, 0x0);
+
+	if (level == channel_level) {
+		pko_reg_write(pko, PKO_PF_L3_L2_SQX_CHANNEL(queue_base),
+			      PKO_CHAN_NULL << 32);
+		pko_reg_write(pko, PKO_PF_LUTX(channel), 0x0);
+	}
+}
+
+static void pko_dq_init(struct pkopf *pko, int vf)
 {
 	int queue_base, i;
 	u64 reg;
 
 	queue_base = vf * 8;
-
 	reg = queue_base << 16;
 	for (i = 0; i < 8; i++) {
 		pko_reg_write(pko, PKO_PF_DQX_TOPOLOGY(queue_base + i), reg);
@@ -946,7 +990,19 @@ static int pko_dq_init(struct pkopf *pko, int vf)
 		pko_reg_write(pko, PKO_PF_DQX_SHAPE(queue_base + i), 0x0);
 		pko_reg_write(pko, PKO_PF_PDM_DQX_MINPAD(queue_base + i), 0x1);
 	}
-	return 0;
+}
+
+static void pko_dq_teardown(struct pkopf *pko, int vf)
+{
+	int queue_base, i;
+
+	queue_base = vf * 8;
+	for (i = 0; i < 8; i++) {
+		pko_reg_write(pko, PKO_PF_DQX_TOPOLOGY(queue_base + i), 0x0);
+		pko_reg_write(pko, PKO_PF_DQX_SCHEDULE(queue_base + i), 0x0);
+		pko_reg_write(pko, PKO_PF_DQX_SHAPE(queue_base + i), 0x0);
+		pko_reg_write(pko, PKO_PF_PDM_DQX_MINPAD(queue_base + i), 0x0);
+	}
 }
 
 static int pko_pstree_setup(struct pkopf *pko, int vf, u32 max_frame,
@@ -959,20 +1015,29 @@ static int pko_pstree_setup(struct pkopf *pko, int vf, u32 max_frame,
 	if (err)
 		return -ENODEV;
 
-	err = pko_pq_init(pko, vf, mac_num, max_frame);
-	if (err)
-		return -ENODEV;
+	pko_pq_init(pko, vf, mac_num, max_frame);
 
 	err = mac_num;
 	for (lvl = 2; lvl <= pko->max_levels; lvl++)
 		err = pko_sq_init(pko, vf, lvl, channel, mac_num,
 				  max_frame, err);
 
-	err = pko_dq_init(pko, vf);
-	if (err)
-		return -ENODEV;
+	pko_dq_init(pko, vf);
 
 	return 0;
+}
+
+static void pko_pstree_teardown(struct pkopf *pko, int vf, int mac_num,
+				int channel)
+{
+	int lvl;
+
+	pko_dq_teardown(pko, vf);
+	for (lvl = pko->max_levels; lvl > 1; lvl--)
+		pko_sq_teardown(pko, vf, lvl, channel, mac_num);
+
+	pko_pq_teardown(pko, mac_num);
+	pko_mac_teardown(pko, mac_num);
 }
 
 static int pko_enable(struct pkopf *pko)
