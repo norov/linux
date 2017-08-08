@@ -141,16 +141,22 @@ static irqreturn_t pko_pq_drain_intr_handler(int irq, void *pko_irq)
 static irqreturn_t pko_pdm_sts_intr_handler(int irq, void *pko_irq)
 {
 	struct pkopf *pko = (struct pkopf *)pko_irq;
-	u64 reg;
+	u64 reg1, reg2, val;
 
-	dev_err(&pko->pdev->dev, "pdm sts received\n");
-	reg = pko_reg_read(pko, PKO_PF_PDM_STS_INFO);
-	dev_err(&pko->pdev->dev, "sts info: %llx\n", reg);
+	reg1 = pko_reg_read(pko, PKO_PF_PDM_STS_INFO);
+	reg2 = pko_reg_read(pko, PKO_PF_PDM_STS_W1C);
 
-	reg = pko_reg_read(pko, PKO_PF_PDM_STS_W1C);
-	dev_err(&pko->pdev->dev, "sts w1c: %llx\n", reg);
-	pko_reg_write(pko, PKO_PF_PDM_STS_W1C, reg);
+	/* Ignore DQ not created error as it can happen when we query
+	 * DQ status during domain reset
+	 */
+	val = ((reg2 >> 25) & 0x1) && (((reg1 >> 26) & 0xF) == 0xD);
+	if (!val) {
+		dev_err(&pko->pdev->dev, "pdm sts received\n");
+		dev_err(&pko->pdev->dev, "sts info: %llx\n", reg1);
+		dev_err(&pko->pdev->dev, "sts w1c: %llx\n", reg2);
+	}
 
+	pko_reg_write(pko, PKO_PF_PDM_STS_W1C, reg2);
 	return IRQ_HANDLED;
 }
 
@@ -408,6 +414,7 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 			pko_pstree_setup(pko, i, max_frame,
 					 mac_num, mac_mode, chan);
 			vf_idx++;
+			pko->vf[i].mac_num = mac_num;
 			if (vf_idx == pko_vf_count) {
 				pko->vfs_in_use += pko_vf_count;
 				break;
@@ -519,11 +526,30 @@ static int pko_pf_get_vf_count(u32 id)
 	return pko->total_vfs;
 }
 
+static inline void set_field(u64 *ptr, u64 field_mask, u8 field_shift, u64 val)
+{
+	*ptr &= ~(field_mask << field_shift);
+	*ptr |= (val & field_mask) << field_shift;
+}
+
+static inline uint64_t reg_ldadd_u64(void *addr, int64_t off)
+{
+	u64 old_val;
+
+	__asm__ volatile(
+		"  .cpu		generic+lse\n"
+		"  ldadd	%1, %0, [%2]\n"
+		: "=r" (old_val) : "r" (off), "r" (addr) : "memory");
+	return old_val;
+}
+
 int pko_reset_domain(u32 id, u16 domain_id)
 {
 	struct pkopf *pko = NULL;
 	struct pkopf *curr;
-	int i;
+	u64 reg;
+	int retry, queue_base;
+	int i, j, mac_num;
 
 	spin_lock(&octeontx_pko_devices_lock);
 	list_for_each_entry(curr, &octeontx_pko_devices, list) {
@@ -541,7 +567,91 @@ int pko_reset_domain(u32 id, u16 domain_id)
 	for (i = 0; i < pko->total_vfs; i++) {
 		if (pko->vf[i].domain.in_use &&
 		    pko->vf[i].domain.domain_id == domain_id) {
-			/* TODO: Stop the actual device */
+			/* TODO When traffic manager work is completed channel
+			 * credits have to be preserved during domain reset
+			 */
+
+			mac_num = pko->vf[i].mac_num;
+			queue_base = i * DQS_PER_VF;
+
+			/* change link to NULL_FIFO */
+			pko_reg_write(pko, PKO_PF_L1_SQX_SW_XOFF(mac_num),
+				      0x1);
+			reg = pko_reg_read(pko,
+					   PKO_PF_L1_SQX_TOPOLOGY(mac_num));
+			set_field(&reg, PKO_PF_TOPOLOGY_LINK_MASK,
+				  PKO_PF_TOPOLOGY_LINK_SHIFT, NULL_FIFO);
+			pko_reg_write(pko, PKO_PF_L1_SQX_TOPOLOGY(mac_num),
+				      reg);
+
+			/* clear XOFF bit at each level starting from DQs */
+			for (j = 0; j < DQS_PER_VF; j++) {
+				writeq_relaxed(0x0,
+					       pko->vf[i].domain.reg_base +
+					       PKO_VF_DQX_SW_XOFF(j));
+			}
+			pko_reg_write(pko, PKO_PF_L3_SQX_SW_XOFF(queue_base),
+				      0x0);
+			pko_reg_write(pko, PKO_PF_L2_SQX_SW_XOFF(queue_base),
+				      0x0);
+			pko_reg_write(pko, PKO_PF_L1_SQX_SW_XOFF(mac_num),
+				      0x0);
+
+			/* wait for DQs to clear */
+			j = 0;
+			retry = 0;
+			while (j < DQS_PER_VF) {
+				reg = readq_relaxed(pko->vf[i].domain.reg_base +
+						    PKO_VF_DQX_WM_CNT(j));
+				if (!reg)
+					j++;
+				mdelay(10);
+				if (retry++ > 10) {
+					dev_err(&pko->pdev->dev, "Failed to clear DQ domain_id:%d, vf_id:%d, dq_id:%d\n",
+						pko->vf[i].domain.domain_id,
+						i, j);
+					break;
+				}
+			}
+
+			/* wait for L1 SQ node to clear from meta */
+			retry = 0;
+			while (true) {
+				reg = pko_reg_read(pko,
+						   PKO_PF_L1_SQX_PICK(mac_num));
+				reg = (reg >> PKO_PF_PICK_ADJUST_SHIFT) &
+				       PKO_PF_PICK_ADJUST_MASK;
+
+				if (reg != PKO_PF_VALID_META)
+					break;
+				mdelay(10);
+				if (retry++ > 10) {
+					dev_err(&pko->pdev->dev, "Failed to clear L1 SQ node domain_id:%d, vf_id:%d\n",
+						pko->vf[i].domain.domain_id, i);
+					break;
+				}
+			}
+
+			/* try to close DQs if they are open */
+			for (j = 0; j < DQS_PER_VF; j++) {
+				reg = readq_relaxed(pko->vf[i].domain.reg_base
+						    + PKO_VF_DQX_OP_QUERY(j));
+				reg = (reg >> PKO_VF_DQ_OP_DQSTATUS_SHIFT) &
+				       PKO_VF_DQ_OP_DQSTATUS_MASK;
+				if (!reg)
+					reg_ldadd_u64(pko->vf[i].domain.reg_base
+						      + PKO_VF_DQX_OP_CLOSE(j),
+						      0x0);
+			}
+
+			/* change link back to original value */
+			reg = pko_reg_read(pko,
+					   PKO_PF_L1_SQX_TOPOLOGY(mac_num));
+			set_field(&reg, PKO_PF_TOPOLOGY_LINK_MASK,
+				  PKO_PF_TOPOLOGY_LINK_SHIFT, mac_num);
+			pko_reg_write(pko, PKO_PF_L1_SQX_TOPOLOGY(mac_num),
+				      reg);
+
 			identify(&pko->vf[i], domain_id,
 				 pko->vf[i].domain.subdomain_id);
 		}
