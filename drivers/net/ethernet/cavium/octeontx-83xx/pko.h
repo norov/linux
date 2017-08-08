@@ -278,8 +278,23 @@
 #define PKO_PF_VFX_GMCTL_GMID(x)		(((x) & 0xFFFF))
 #define PKO_PF_VFX_GMCTL_STRM(x)		(((x) & 0xFF) << 16)
 
+#define PKO_PF_TOPOLOGY_LINK_MASK		0x1F
+#define PKO_PF_TOPOLOGY_LINK_SHIFT		16
+
+#define PKO_PF_PICK_ADJUST_MASK			0x1FF
+#define PKO_PF_PICK_ADJUST_SHIFT		20
+#define PKO_PF_VALID_META			0x100
+
+#define PKO_VF_DQ_OP_DQSTATUS_MASK              0xF
+#define PKO_VF_DQ_OP_DQSTATUS_SHIFT             60
+#define PKO_VF_DQ_STATUS_OK			0x0
+
+#define NULL_FIFO				0x13
+#define DQS_PER_VF				0x08
+
 struct pkopf_vf {
 	struct octeontx_pf_vf	domain;
+	int			mac_num;
 };
 
 struct pkopf {
