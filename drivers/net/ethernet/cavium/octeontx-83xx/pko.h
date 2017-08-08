@@ -294,6 +294,7 @@
 
 struct pkopf_vf {
 	struct octeontx_pf_vf	domain;
+	int			chan;
 	int			mac_num;
 };
 
