@@ -15,6 +15,25 @@
 #include "../thunder/nic.h"
 #include "bgx.h"
 
+static int bgx_port_open(struct octtx_bgx_port *port);
+static int bgx_port_close(struct octtx_bgx_port *port);
+static int bgx_port_start(struct octtx_bgx_port *port);
+static int bgx_port_stop(struct octtx_bgx_port *port);
+static int bgx_port_config(struct octtx_bgx_port *port,
+			   mbox_bgx_port_conf_t *conf);
+static int bgx_port_status(struct octtx_bgx_port *port,
+			   mbox_bgx_port_status_t *stat);
+static int bgx_port_stats_get(struct octtx_bgx_port *port,
+			      mbox_bgx_port_stats_t *stat);
+static int bgx_port_stats_clr(struct octtx_bgx_port *port);
+static int bgx_port_link_status(struct octtx_bgx_port *port, u8 *up);
+static int bgx_port_promisc_set(struct octtx_bgx_port *port, u8 on);
+static int bgx_port_macaddr_set(struct octtx_bgx_port *port, u8 macaddr[]);
+static int bgx_port_bp_set(struct octtx_bgx_port *port, u8 on);
+static int bgx_port_bcast_set(struct octtx_bgx_port *port, u8 on);
+static int bgx_port_mcast_set(struct octtx_bgx_port *port, u8 on);
+static int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu);
+
 #define BGX_LMAC_NUM_CHANS 16
 #define BGX_LMAC_BASE_CHAN(__bgx, __lmac) \
 	(0x800 | ((__bgx) << 8) | ((__lmac) << 4)) /* PKI_CHAN_E */
@@ -49,6 +68,24 @@ struct bgxpf {
 	int bgx_idx; /* CPU-local BGX device index.*/
 	int lmac_count;
 };
+
+struct lmac_cfg {
+	u64	bgx_cmr_config;
+	u64	bgx_cmrx_rx_id_map;
+	u64	bgx_cmr_rx_ovr_bp;
+	u64	bgx_cmr_tx_ovr_bp;
+	u64	bgx_cmr_tx_channel;
+	u64	bgx_smux_cbfc_ctl;
+	u64	bgx_smu_hg2_control;
+	u64	bgx_cmr_rx_bp_on;
+	u64	bgx_smux_tx_thresh;
+	u64	bgx_gmp_gmi_rxx_jabber;
+	u64	bgx_smux_rx_jabber;
+	u64	bgx_cmrx_rx_dmac_ctl;
+	u8	mac[ETH_ALEN];
+};
+
+static struct lmac_cfg lmac_saved_cfg[MAX_BGX_PER_CN83XX * MAX_LMAC_PER_BGX];
 
 /* Global lists of LBK devices and ports */
 static DEFINE_SPINLOCK(octeontx_bgx_lock);
@@ -141,27 +178,182 @@ static struct octtx_bgx_port *bgx_get_port_by_chan(int node, u16 domain_id,
 	return NULL;
 }
 
+static int bgx_set_ieee802_fc(struct bgxpf *bgx, int lmac, int lmac_type)
+{
+	u64 reg;
+
+	switch (lmac_type) {
+	case OCTTX_BGX_LMAC_TYPE_XAUI:
+	case OCTTX_BGX_LMAC_TYPE_RXAUI:
+	case OCTTX_BGX_LMAC_TYPE_10GR:
+	case OCTTX_BGX_LMAC_TYPE_40GR:
+		/* Power-on values for all of the following registers.*/
+		bgx_reg_write(bgx, 0, BGX_CMR_RX_OVR_BP, 0);
+		bgx_reg_write(bgx, lmac, BGX_CMR_TX_OVR_BP, 0);
+		bgx_reg_write(bgx, lmac, BGX_CMR_TX_CHANNEL, 0);
+		reg = (0xFFull << 48) | (0xFFull << 32);
+		bgx_reg_write(bgx, lmac, BGX_SMUX_CBFC_CTL, reg);
+		reg = (0x1ull << 16) | 0xFFFFull;
+		bgx_reg_write(bgx, lmac, BGX_SMU_HG2_CONTROL, reg);
+		break;
+	}
+	return 0;
+}
+
+static int bgx_port_initial_config(struct octtx_bgx_port *port)
+{
+	struct bgxpf *bgx;
+	u64 reg, thr;
+
+	bgx = get_bgx_dev(port->node, port->bgx);
+	if (!bgx)
+		return -ENODEV;
+
+	/* Stop the port first */
+	bgx_port_stop(port);
+
+	/* Adjust TX FIFO and BP thresholds to LMAC type */
+	if (port->lmac_type == OCTTX_BGX_LMAC_TYPE_40GR) {
+		reg = 0x400;
+		thr = 0x100;
+	} else {
+		reg = 0x100;
+		thr = 0x20;
+	}
+	bgx_reg_write(bgx, port->lmac, BGX_CMR_RX_BP_ON, reg);
+	bgx_reg_write(bgx, port->lmac, BGX_SMUX_TX_THRESH, thr);
+
+	/* Enable IEEE-802.3 PAUSE flow-control */
+	bgx_set_ieee802_fc(bgx, port->lmac, port->lmac_type);
+
+	/* Route packet data to/from PKI/PKO */
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMR_CONFIG);
+	reg |= CMR_X2P_SELECT_PKI | CMR_P2X_SELECT_PKO;
+	bgx_reg_write(bgx, port->lmac, BGX_CMR_CONFIG, reg);
+	bgx_reg_write(bgx, port->lmac, BGX_CMRX_RX_ID_MAP, 0);
+
+	return 0;
+}
+
+static int save_lmac_cfg(struct octtx_bgx_port *port)
+{
+	struct lmac_cfg *cfg;
+	const u8 *mac_addr;
+	struct bgxpf *bgx;
+	int lmac_idx, idx;
+
+	if (!port)
+		return -EINVAL;
+
+	if (port->bgx >= MAX_BGX_PER_CN83XX ||
+	    port->lmac >= MAX_LMAC_PER_BGX)
+		return -EINVAL;
+
+	bgx = get_bgx_dev(port->node, port->bgx);
+	if (!bgx)
+		return -ENODEV;
+
+	idx = port->bgx * MAX_LMAC_PER_BGX + port->lmac;
+	lmac_idx = port->lmac;
+	cfg = &lmac_saved_cfg[idx];
+
+	/* Save register configuration, the list below consists of registers
+	 * which are currently being modified in bgx.c code. If new register
+	 * is modified it should be saved here and restored in restore_lmac_cfg
+	 * function.
+	 */
+	cfg->bgx_cmr_config =
+		bgx_reg_read(bgx, lmac_idx, BGX_CMR_CONFIG);
+	cfg->bgx_cmrx_rx_id_map =
+		bgx_reg_read(bgx, lmac_idx, BGX_CMRX_RX_ID_MAP);
+	cfg->bgx_cmr_rx_ovr_bp =
+		bgx_reg_read(bgx, 0, BGX_CMR_RX_OVR_BP);
+	cfg->bgx_cmr_tx_ovr_bp =
+		bgx_reg_read(bgx, lmac_idx, BGX_CMR_TX_OVR_BP);
+	cfg->bgx_cmr_tx_channel =
+		bgx_reg_read(bgx, lmac_idx, BGX_CMR_TX_CHANNEL);
+	cfg->bgx_smux_cbfc_ctl =
+		bgx_reg_read(bgx, lmac_idx, BGX_SMUX_CBFC_CTL);
+	cfg->bgx_smu_hg2_control =
+		bgx_reg_read(bgx, lmac_idx, BGX_SMU_HG2_CONTROL);
+	cfg->bgx_cmr_rx_bp_on =
+		bgx_reg_read(bgx, lmac_idx, BGX_CMR_RX_BP_ON);
+	cfg->bgx_smux_tx_thresh =
+		bgx_reg_read(bgx, lmac_idx, BGX_SMUX_TX_THRESH);
+	cfg->bgx_gmp_gmi_rxx_jabber =
+		bgx_reg_read(bgx, lmac_idx, BGX_GMP_GMI_RXX_JABBER);
+	cfg->bgx_smux_rx_jabber =
+		bgx_reg_read(bgx, lmac_idx, BGX_SMUX_RX_JABBER);
+	cfg->bgx_cmrx_rx_dmac_ctl =
+		bgx_reg_read(bgx, lmac_idx, BGX_CMRX_RX_DMAC_CTL);
+
+	/* Save mac address */
+	mac_addr = thbgx->get_mac_addr(port->node, port->bgx, port->lmac);
+	memcpy(cfg->mac, mac_addr, ETH_ALEN);
+
+	return 0;
+}
+
+static int restore_lmac_cfg(struct octtx_bgx_port *port)
+{
+	struct lmac_cfg *cfg;
+	struct bgxpf *bgx;
+	int lmac_idx, idx;
+
+	if (!port)
+		return -EINVAL;
+
+	if (port->bgx >= MAX_BGX_PER_CN83XX ||
+	    port->lmac >= MAX_LMAC_PER_BGX)
+		return -EINVAL;
+
+	bgx = get_bgx_dev(port->node, port->bgx);
+	if (!bgx)
+		return -ENODEV;
+
+	bgx = get_bgx_dev(port->node, port->bgx);
+		if (!bgx)
+			return -ENODEV;
+
+	idx = port->bgx * MAX_LMAC_PER_BGX + port->lmac;
+	lmac_idx = port->lmac;
+	cfg = &lmac_saved_cfg[idx];
+
+	/* Restore register configuration */
+	bgx_reg_write(bgx, lmac_idx, BGX_CMR_CONFIG,
+		      cfg->bgx_cmr_config);
+	bgx_reg_write(bgx, lmac_idx, BGX_CMRX_RX_ID_MAP,
+		      cfg->bgx_cmrx_rx_id_map);
+	bgx_reg_write(bgx, 0, BGX_CMR_RX_OVR_BP,
+		      cfg->bgx_cmr_rx_ovr_bp);
+	bgx_reg_write(bgx, lmac_idx, BGX_CMR_TX_OVR_BP,
+		      cfg->bgx_cmr_tx_ovr_bp);
+	bgx_reg_write(bgx, lmac_idx, BGX_CMR_TX_CHANNEL,
+		      cfg->bgx_cmr_tx_channel);
+	bgx_reg_write(bgx, lmac_idx, BGX_SMUX_CBFC_CTL,
+		      cfg->bgx_smux_cbfc_ctl);
+	bgx_reg_write(bgx, lmac_idx, BGX_SMU_HG2_CONTROL,
+		      cfg->bgx_smu_hg2_control);
+	bgx_reg_write(bgx, lmac_idx, BGX_CMR_RX_BP_ON,
+		      cfg->bgx_cmr_rx_bp_on);
+	bgx_reg_write(bgx, lmac_idx, BGX_SMUX_TX_THRESH,
+		      cfg->bgx_smux_tx_thresh);
+	bgx_reg_write(bgx, lmac_idx, BGX_GMP_GMI_RXX_JABBER,
+		      cfg->bgx_gmp_gmi_rxx_jabber);
+	bgx_reg_write(bgx, lmac_idx, BGX_SMUX_RX_JABBER,
+		      cfg->bgx_smux_rx_jabber);
+	bgx_reg_write(bgx, lmac_idx, BGX_CMRX_RX_DMAC_CTL,
+		      cfg->bgx_cmrx_rx_dmac_ctl);
+
+	/* Restore mac address */
+	thbgx->set_mac_addr(port->node, port->bgx, port->lmac, cfg->mac);
+
+	bgx_port_stats_clr(port);
+	return 0;
+}
+
 /* Main MBOX message processing function.
  */
-static int bgx_port_open(struct octtx_bgx_port *port);
-static int bgx_port_close(struct octtx_bgx_port *port);
-static int bgx_port_start(struct octtx_bgx_port *port);
-static int bgx_port_stop(struct octtx_bgx_port *port);
-static int bgx_port_config(struct octtx_bgx_port *port,
-			   mbox_bgx_port_conf_t *conf);
-static int bgx_port_status(struct octtx_bgx_port *port,
-			   mbox_bgx_port_status_t *stat);
-static int bgx_port_stats_get(struct octtx_bgx_port *port,
-			      mbox_bgx_port_stats_t *stat);
-static int bgx_port_stats_clr(struct octtx_bgx_port *port);
-static int bgx_port_link_status(struct octtx_bgx_port *port, u8 *up);
-static int bgx_port_promisc_set(struct octtx_bgx_port *port, u8 on);
-static int bgx_port_macaddr_set(struct octtx_bgx_port *port, u8 macaddr[]);
-static int bgx_port_bp_set(struct octtx_bgx_port *port, u8 on);
-static int bgx_port_bcast_set(struct octtx_bgx_port *port, u8 on);
-static int bgx_port_mcast_set(struct octtx_bgx_port *port, u8 on);
-static int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu);
-
 static int bgx_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 			       union mbox_data *req,
 			       union mbox_data *resp, void *mdata)
@@ -250,19 +442,10 @@ static int bgx_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 int bgx_port_open(struct octtx_bgx_port *port)
 {
 	struct bgxpf *bgx;
-	u64 reg;
 
 	bgx = get_bgx_dev(port->node, port->bgx);
 	if (!bgx)
 		return -EINVAL;
-
-	/* Stop the port first:*/
-	bgx_port_stop(port);
-
-	/* Route packet data to/from PKI/PKO: */
-	reg = bgx_reg_read(bgx, port->lmac, BGX_CMR_CONFIG);
-	reg |= CMR_X2P_SELECT_PKI | CMR_P2X_SELECT_PKO;
-	bgx_reg_write(bgx, port->lmac, BGX_CMR_CONFIG, reg);
 
 	/* Setup PKI port (pkind): */
 	bgx_reg_write(bgx, port->lmac, BGX_CMRX_RX_ID_MAP, port->pkind);
@@ -578,16 +761,14 @@ int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu)
 static int bgx_destroy_domain(u32 id, u16 domain_id)
 {
 	struct octtx_bgx_port *port;
-	struct bgxpf *bgx;
 
 	spin_lock(&octeontx_bgx_lock);
 	list_for_each_entry(port, &octeontx_bgx_ports, list) {
 		if (port->node == id && port->domain_id == domain_id) {
+			restore_lmac_cfg(port);
+			bgx_port_start(port);
 			port->domain_id = BGX_INVALID_ID;
 			port->dom_port_idx = BGX_INVALID_ID;
-
-			bgx = get_bgx_dev(port->node, port->bgx);
-			bgx_reg_write(bgx, port->lmac, BGX_CMRX_RX_ID_MAP, 0);
 		}
 	}
 	spin_unlock(&octeontx_bgx_lock);
@@ -633,8 +814,21 @@ static int bgx_create_domain(u32 id, u16 domain_id,
 			gport->dom_port_idx = port_idx;
 			/* Hardware: */
 			bgx = get_bgx_dev(port->node, port->bgx);
-			bgx_reg_write(bgx, port->lmac,
-				      BGX_CMRX_RX_ID_MAP, 0);
+			if (!bgx) {
+				ret = -ENODEV;
+				goto err_unlock;
+			}
+			/* Call this function to save lmac configuration and do
+			 * it before any modification to BGX registers are done
+			 * We restore lmac configuration when we destroy domain
+			 */
+			ret = save_lmac_cfg(port);
+			if (ret)
+				goto err_unlock;
+
+			ret = bgx_port_initial_config(port);
+			if (ret)
+				goto err_unlock;
 		}
 	}
 
@@ -691,28 +885,6 @@ struct bgx_com_s bgx_com  = {
 };
 EXPORT_SYMBOL(bgx_com);
 
-static int bgx_set_ieee802_fc(struct bgxpf *bgx, int lmac, int lmac_type)
-{
-	u64 reg;
-
-	switch (lmac_type) {
-	case OCTTX_BGX_LMAC_TYPE_XAUI:
-	case OCTTX_BGX_LMAC_TYPE_RXAUI:
-	case OCTTX_BGX_LMAC_TYPE_10GR:
-	case OCTTX_BGX_LMAC_TYPE_40GR:
-		/* Power-on values for all of the following registers.*/
-		bgx_reg_write(bgx, lmac, BGX_CMR_RX_OVR_BP, 0);
-		bgx_reg_write(bgx, lmac, BGX_CMR_TX_OVR_BP, 0);
-		bgx_reg_write(bgx, lmac, BGX_CMR_TX_CHANNEL, 0);
-		reg = (0xFFull << 48) | (0xFFull << 32);
-		bgx_reg_write(bgx, lmac, BGX_SMUX_CBFC_CTL, reg);
-		reg = (0x1ull << 16) | 0xFFFFull;
-		bgx_reg_write(bgx, lmac, BGX_SMU_HG2_CONTROL, reg);
-		break;
-	}
-	return 0;
-}
-
 /* BGX "octeontx" driver specific initialization.
  * NOTE: The primiary BGX driver startup and initialization is performed
  * in the "thunder" driver.
@@ -726,7 +898,7 @@ struct bgx_com_s *bgx_octeontx_init(void)
 	int lmac_idx;
 	int port_count = 0;
 	int node = 0;
-	u64 iobase, iosize, reg, thr;
+	u64 iobase, iosize, reg;
 
 	thbgx = try_then_request_module(symbol_get(thunder_bgx_com),
 					"thunder_bgx");
@@ -769,20 +941,6 @@ struct bgx_com_s *bgx_octeontx_init(void)
 			port->dom_port_idx = BGX_INVALID_ID;
 			reg = bgx_reg_read(bgx, lmac_idx, BGX_CMR_CONFIG);
 			port->lmac_type = (reg >> 8) & 0x7; /* LMAC_TYPE */
-
-			/* Adjust TX FIFO and BP thresholds to LMAC type.*/
-			if (port->lmac_type == OCTTX_BGX_LMAC_TYPE_40GR) {
-				reg = 0x400;
-				thr = 0x100;
-			} else {
-				reg = 0x100;
-				thr = 0x20;
-			}
-			bgx_reg_write(bgx, lmac_idx, BGX_CMR_RX_BP_ON, reg);
-			bgx_reg_write(bgx, lmac_idx, BGX_SMUX_TX_THRESH, thr);
-
-			/* Enable IEEE-802.3 PAUSE flow-control.*/
-			bgx_set_ieee802_fc(bgx, port->lmac, port->lmac_type);
 
 			INIT_LIST_HEAD(&port->list);
 			list_add(&port->list, &octeontx_bgx_ports);
