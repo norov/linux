@@ -485,6 +485,8 @@ struct mbox_sso_get_dump {
 #define MBOX_TIM_RING_INFO_GET   2
 /* Write ring configuration */
 #define MBOX_TIM_RING_CONFIG_SET 3
+/* Read ring start cycle */
+#define MBOX_TIM_RING_START_CYC_GET 4
 
 /* TIM device configuration and status parameters: */
 struct __attribute__((__packed__)) mbox_tim_dev_info {
