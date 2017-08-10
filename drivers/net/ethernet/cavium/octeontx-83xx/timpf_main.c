@@ -60,6 +60,7 @@
 struct timpf_vf {
 	struct octeontx_pf_vf domain;
 	int vf_id;
+	u64 start_cyc;
 };
 
 struct timpf {
@@ -178,6 +179,14 @@ static struct timpf *tim_dev_from_ringid(int id, int domain_id,
 	return NULL;
 }
 
+static inline u64 rdtsc(void)
+{
+	u64 tsc;
+
+	asm volatile("mrs %0, cntvct_el0" : "=r" (tsc));
+	return tsc;
+}
+
 /* Main MBOX message processing function.
  */
 static int tim_pf_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
@@ -236,7 +245,22 @@ static int tim_pf_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 		tim_reg_write(tim, TIM_RING_CTL2(ring), conf->ctl2);
 		tim_reg_write(tim, TIM_RING_CTL0(ring), conf->ctl0);
 		tim_reg_write(tim, TIM_RING_CTL1(ring), conf->ctl1);
+		tim->vf[ring].start_cyc = rdtsc();
 		resp->data = 0;
+		break;
+	}
+	case MBOX_TIM_RING_START_CYC_GET: {
+		u64 *ret = mdata;
+
+		tim = tim_dev_from_ringid(id, domain_id, hdr->vfid, &ring);
+		if (!tim) {
+			rc = -EINVAL;
+			break;
+		}
+		*ret = tim->vf[ring].start_cyc;
+		resp->data = sizeof(uint64_t);
+		/*make sure the writes are comitted*/
+		wmb();
 		break;
 	}
 	default:
