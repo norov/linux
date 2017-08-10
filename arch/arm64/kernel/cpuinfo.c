@@ -19,6 +19,7 @@
 #include <asm/cpu.h>
 #include <asm/cputype.h>
 #include <asm/cpufeature.h>
+#include <asm/io.h>
 
 #include <linux/bitops.h>
 #include <linux/bug.h>
@@ -41,6 +42,11 @@
  */
 DEFINE_PER_CPU(struct cpuinfo_arm64, cpu_data);
 static struct cpuinfo_arm64 boot_cpu_data;
+
+#define REF_CLK 50
+#define CAVM_RST_BAR_E_RST_PF_BAR0 (0x87e006000000ll)
+#define CAVM_RST_BAR_E_RST_PF_BAR0_SIZE 0x800000ull
+#define CAVM_RST_BOOT (0x1600)
 
 static char *icache_policy_str[] = {
 	[ICACHE_POLICY_RESERVED] = "RESERVED/UNKNOWN",
@@ -102,6 +108,20 @@ static const char *const compat_hwcap2_str[] = {
 	NULL
 };
 #endif /* CONFIG_COMPAT */
+int get_cpu_frequency(void)
+{
+	void __iomem *freq = NULL;
+	uint64_t cpu_frq = 0;
+	uint64_t c_mul_mask = 0x7f;
+
+	freq = ioremap(CAVM_RST_BAR_E_RST_PF_BAR0,
+			CAVM_RST_BAR_E_RST_PF_BAR0_SIZE);
+	if (freq)
+		cpu_frq = (readq_relaxed(freq+CAVM_RST_BOOT))
+			&(c_mul_mask<<40);
+	iounmap(freq);
+	return REF_CLK*((cpu_frq)>>40);
+}
 
 static int c_show(struct seq_file *m, void *v)
 {
@@ -121,7 +141,7 @@ static int c_show(struct seq_file *m, void *v)
 		if (compat)
 			seq_printf(m, "model name\t: ARMv8 Processor rev %d (%s)\n",
 				   MIDR_REVISION(midr), COMPAT_ELF_PLATFORM);
-
+		seq_printf(m, "cpu MHz\t\t: %d\n", get_cpu_frequency());
 		seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
 			   loops_per_jiffy / (500000UL/HZ),
 			   loops_per_jiffy / (5000UL/HZ) % 100);
