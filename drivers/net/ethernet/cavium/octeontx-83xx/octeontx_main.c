@@ -39,6 +39,12 @@ static struct device *octtx_device;
 static struct class *octtx_class;
 static dev_t octtx_dev;
 
+/* Number of milliseconds we wait since last domain reset before we allow
+ * domain to be destroyed, this is to account for a time between application
+ * opens devices and a time it actually sends RM_START_DOMAIN message over
+ * mailbox
+ */
+#define DESTROY_DELAY_IN_MS	1000
 #define	MIN_DOMAIN_ID	4
 static atomic_t gbl_domain_id = ATOMIC_INIT(MIN_DOMAIN_ID);
 
@@ -66,6 +72,8 @@ struct octtx_domain {
 	int setup;
 	int type;
 	char name[1024];
+	bool in_use;
+	ulong last_reset_jiffies;
 
 	int pko_vf_count;
 	int fpa_vf_count;
@@ -349,6 +357,16 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 		dpipf->receive_message(0, domain->domain_id, hdr,
 				       req, resp, add_data);
 		break;
+	case NO_COPROC:
+		if (hdr->msg == RM_START_DOMAIN) {
+			domain->in_use = true;
+			/* make sure it is flushed to memory because threads
+			 * using it might be running on different cores
+			 */
+			mb();
+			hdr->res_code = MBOX_RET_SUCCESS;
+			break;
+		}
 	case SSOW_COPROC:
 	default:
 		dev_err(octtx_device, "invalid mbox message\n");
@@ -376,6 +394,15 @@ void octeontx_destroy_domain(const char *domain_name)
 	}
 
 	if (domain) {
+		if (domain->in_use ||
+		    time_before(jiffies, domain->last_reset_jiffies +
+		    msecs_to_jiffies(DESTROY_DELAY_IN_MS))) {
+			dev_err(octtx_device,
+				"Error domain %d on node %d is in use.\n",
+				domain->domain_id, domain->node);
+			goto err_unlock;
+		}
+
 		octeontx_reset_domain(domain);
 		do_destroy_domain(domain);
 		list_del(&domain->list);
@@ -383,6 +410,7 @@ void octeontx_destroy_domain(const char *domain_name)
 		kfree(domain);
 	}
 
+err_unlock:
 	spin_unlock(&octeontx_domains_lock);
 }
 
@@ -898,6 +926,9 @@ static int octeontx_reset_domain(void *master_data)
 			node, domain->domain_id);
 		return ret;
 	}
+
+	domain->in_use = false;
+	domain->last_reset_jiffies = jiffies;
 
 	return 0;
 }

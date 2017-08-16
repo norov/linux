@@ -49,6 +49,8 @@ enum coproc_t {
 #define DPI_REG_DUMP	0x3
 #define DPI_GET_REG_CFG 0x4
 
+#define RM_START_DOMAIN		0x1
+
 /*resp messages*/
 #define MBOX_RET_SUCCESS	0x0
 #define MBOX_RET_INVALID	0x1
