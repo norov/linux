@@ -171,10 +171,21 @@ config OCTEONTX_PKI
 	  Select this option to enable PKI.
           PKI parses input packets and create work.
 
+config OCTEONTX_DPI
+	tristate "OcteonTX DMA Packet Interface(DPI)"
+	depends on 64BIT
+	default y
+	help
+	  Select this option to enable DPI.
+	  DPI (DMA packet interface) provides DMA support for MAC.
+	  It transfers data between onchip IO bus and SLI.
+	  SLI interfaces PEM(PCIe) blocks.
+
 config OCTEONTX
 	tristate "OcteonTX coprocessor maintanier"
 	depends on THUNDER_NIC_BGX && OCTEONTX_FPA_PF && OCTEONTX_SSO_PF
 	depends on OCTEONTX_PKO_PF
+	depends on OCTEONTX_DPI
 	default y
 	help
 	  Select this option to enable Octeon coprocessor management.
