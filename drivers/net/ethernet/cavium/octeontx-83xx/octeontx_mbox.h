@@ -18,7 +18,8 @@ enum coproc_t {
 	PKI_COPROC = 5,
 	BGX_COPROC = 6,
 	LBK_COPROC = 7,
-	TIM_COPROC = 8
+	TIM_COPROC = 8,
+	DPI_COPROC = 9
 };
 
 /*req messages*/
@@ -42,6 +43,11 @@ enum coproc_t {
 #define SSO_GRP_GET_PRIORITY	0x7
 #define SSO_GRP_SET_PRIORITY	0x8
 #define SSO_GET_DUMP		0x9
+
+#define DPI_QUEUE_OPEN	0x1
+#define DPI_QUEUE_CLOSE	0x2
+#define DPI_REG_DUMP	0x3
+#define DPI_GET_REG_CFG 0x4
 
 /*resp messages*/
 #define MBOX_RET_SUCCESS	0x0
@@ -229,6 +235,17 @@ struct mbox_fpa_lvls {
 	u64	pool_levels;
 	u64	cnt_levels;
 	u16	gaura;
+};
+
+struct mbox_dpi_cfg {
+	u16	inst_aura;
+	int	buf_size;
+};
+
+struct mbox_dpi_reg_cfg {
+	u64	dpi_dma_ctl;
+	u64	dpi_sli_prt_cfg;
+	u64	dpi_req_err_rsp_en;
 };
 
 /* SSOW */
