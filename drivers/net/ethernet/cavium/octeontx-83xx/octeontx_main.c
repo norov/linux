@@ -27,6 +27,7 @@
 #include "lbk.h"
 #include "tim.h"
 #include "pki.h"
+#include "dpi.h"
 
 #define DRV_NAME "octeontx"
 #define DRV_VERSION "0.1"
@@ -49,6 +50,7 @@ static struct pkopf_com_s *pkopf;
 static struct timpf_com_s *timpf;
 static struct ssowpf_com_s *ssowpf;
 static struct pki_com_s *pki;
+static struct dpipf_com_s *dpipf;
 
 struct delayed_work dwork;
 struct delayed_work dwork_reset;
@@ -70,6 +72,7 @@ struct octtx_domain {
 	int sso_vf_count;
 	int ssow_vf_count;
 	int tim_vf_count;
+	int dpi_vf_count;
 
 	u64 aura_set;
 	u64 grp_mask;
@@ -92,6 +95,7 @@ struct octtx_domain {
 	bool bgx_domain_created;
 	bool pko_domain_created;
 	bool tim_domain_created;
+	bool dpi_domain_created;
 };
 
 struct octtx_gpio gpio;
@@ -108,7 +112,8 @@ MODULE_VERSION(DRV_VERSION);
 static int octeontx_create_domain(const char *name, int type, int sso_count,
 				  int fpa_count, int ssow_count, int pko_count,
 				  int pki_count, int tim_count, int bgx_count,
-				  int lbk_count, const long int *bgx_port,
+				  int lbk_count, int dpi_count,
+				  const long int *bgx_port,
 				  const long int *lbk_port);
 
 static void octeontx_remove_domain(const char *domain_name);
@@ -153,6 +158,7 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	long int tim_count = 0;
 	long int bgx_count = 0;
 	long int lbk_count = 0;
+	long int dpi_count = 0;
 	long int pki_count = 0;
 	long int lbk_port[OCTTX_MAX_LBK_PORTS];
 	long int bgx_port[OCTTX_MAX_BGX_PORTS];
@@ -231,6 +237,12 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 			if (kstrtol(strim(start), 10, &lbk_port[lbk_count]))
 				goto error;
 			lbk_count++;
+		} else if (!strncmp(start, "dpi", sizeof("dpi") - 1)) {
+			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
+			if (kstrtol(start, 10, &dpi_count))
+				goto error;
 		} else {
 			goto error;
 		}
@@ -239,7 +251,7 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	ret = octeontx_create_domain(name, type, sso_count, fpa_count,
 				     ssow_count, pko_count, pki_count,
 				     tim_count, bgx_count, lbk_count,
-				     (const long int *)bgx_port,
+				     dpi_count, (const long int *)bgx_port,
 				     (const long int *)lbk_port);
 	if (ret)
 		goto error;
@@ -337,6 +349,10 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 			hdr->res_code = MBOX_RET_SUCCESS;
 			break;
 		}
+	case DPI_COPROC:
+		dpipf->receive_message(0, domain->domain_id, hdr,
+				       req, resp, add_data);
+		break;
 	case SSOW_COPROC:
 	default:
 		dev_err(octtx_device, "invalid mbox message\n");
@@ -468,6 +484,17 @@ static void do_remove_domain(struct octtx_domain *domain)
 		}
 	}
 
+	if (domain->dpi_domain_created) {
+		ret = dpipf->destroy_domain(node, domain_id,
+					    &octtx_device->kobj,
+					    domain->name);
+		if (ret) {
+			dev_err(octtx_device,
+				"Failed to remove dpi of domain %d on node %d.\n",
+				domain->domain_id, node);
+		}
+	}
+
 	if (domain->sysfs_domain_id_created)
 		sysfs_remove_file_from_group(&octtx_device->kobj,
 					     &domain->sysfs_domain_id.attr,
@@ -491,7 +518,8 @@ static ssize_t octtx_domain_id_show(struct device *dev,
 int octeontx_create_domain(const char *name, int type, int sso_count,
 			   int fpa_count, int ssow_count, int pko_count,
 			   int pki_count, int tim_count, int bgx_count,
-			   int lbk_count, const long int *bgx_port,
+			   int lbk_count, int dpi_count,
+			   const long int *bgx_port,
 			   const long int *lbk_port)
 {
 	void *ssow_ram_mbox_addr = NULL;
@@ -692,9 +720,9 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		ret = pki->add_bgx_port(node, domain_id, &domain->bgx_port[i]);
 		if (ret < 0) {
 			dev_err(octtx_device,
-			    "BGX failed to allocate PKIND for port l%d(g%d)\n",
-			    domain->bgx_port[i].dom_port_idx,
-			    domain->bgx_port[i].glb_port_idx);
+				"BGX failed to allocate PKIND for port l%d(g%d)\n",
+				domain->bgx_port[i].dom_port_idx,
+				domain->bgx_port[i].glb_port_idx);
 			goto error;
 		}
 		domain->bgx_port[i].pkind = ret;
@@ -737,6 +765,19 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		}
 	}
 	domain->tim_domain_created = true;
+
+	domain->dpi_vf_count = dpi_count;
+	if (domain->dpi_vf_count > 0) {
+		ret = dpipf->create_domain(node, domain_id,
+					   domain->dpi_vf_count,
+					   &octtx_master_com, domain,
+					   &octtx_device->kobj, domain->name);
+		if (ret) {
+			dev_err(octtx_device, "Failed to create DPI domain\n");
+			goto error;
+		}
+	}
+	domain->dpi_domain_created = true;
 
 	domain->sysfs_domain_id.show = octtx_domain_id_show;
 	domain->sysfs_domain_id.attr.name = "domain_id";
@@ -845,6 +886,15 @@ static int octeontx_reset_domain(void *master_data)
 		}
 	}
 
+	if (domain->dpi_domain_created) {
+		ret = dpipf->reset_domain(node, domain->domain_id);
+		if (ret) {
+			dev_err(octtx_device,
+				"Failed to reset DPI of domain %d on node %d.\n",
+				domain->domain_id, node);
+		}
+	}
+
 	/* Reset mailbox */
 	ret = ssowpf->get_ram_mbox_addr(node, domain->domain_id,
 					&ssow_ram_mbox_addr);
@@ -938,7 +988,6 @@ static unsigned long __install_el3_inthandler(unsigned long gpio_num,
 	struct arm_smccc_res res;
 
 	arm_smccc_smc(THUNDERX_INSTALL_GPIO_INT, gpio_num, sp, cpu, ttbr0,
-		      0, 0, 0, &res);
 		      0, 0, 0, &res);
 	return res.a0;
 }
@@ -1085,6 +1134,13 @@ static int __init octeontx_init_module(void)
 		ret = -ENODEV;
 		goto pkopf_err;
 	}
+
+	dpipf = try_then_request_module(symbol_get(dpipf_com), "dpipf");
+	if (!dpipf) {
+		ret = -ENODEV;
+		goto dpipf_err;
+	}
+
 	timpf = try_then_request_module(symbol_get(timpf_com), "timpf");
 	if (!timpf) {
 		ret = -ENODEV;
@@ -1174,6 +1230,9 @@ wq_err:
 	symbol_put(timpf_com);
 
 timpf_err:
+	symbol_put(dpipf_com);
+
+dpipf_err:
 	symbol_put(pkopf_com);
 
 pkopf_err:
