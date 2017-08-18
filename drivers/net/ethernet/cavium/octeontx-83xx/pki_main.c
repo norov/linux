@@ -221,6 +221,132 @@ static int load_ucode(struct pki_t *pki)
 	return 0;
 }
 
+static inline void write_pcam(struct pki_t *pki, int bank, int index,
+			      int enable, u8 style, u8 style_mask, u8 term,
+			      u8 term_mask, u32 match, u32 match_mask,
+			      u8 advance, u8 setty, u8 pf, u8 style_add,
+			      u8 pmc)
+{
+	int i;
+	u64 term_reg = 0;
+	u64 match_reg = 0;
+	u64 action_reg = 0;
+
+	/* Format TERM */
+	set_field(&term_reg,
+		  PKI_PCAM_TERM_STYLE0_MASK, PKI_PCAM_TERM_STYLE0_SHIFT,
+		  (u8)((~style) & style_mask));
+	set_field(&term_reg,
+		  PKI_PCAM_TERM_STYLE1_MASK, PKI_PCAM_TERM_STYLE1_SHIFT,
+		  (u8)((style) & style_mask));
+	set_field(&term_reg,
+		  PKI_PCAM_TERM_TERM0_MASK, PKI_PCAM_TERM_TERM0_SHIFT,
+		  (u8)((~term) & term_mask));
+	set_field(&term_reg,
+		  PKI_PCAM_TERM_TERM1_MASK, PKI_PCAM_TERM_TERM1_SHIFT,
+		  (u8)((term) & term_mask));
+	set_field(&term_reg,
+		  PKI_PCAM_TERM_VALID_MASK, PKI_PCAM_TERM_VALID_SHIFT,
+		  enable);
+	/* Format MATCH */
+	set_field(&match_reg,
+		  PKI_PCAM_MATCH_DATA0_MASK, PKI_PCAM_MATCH_DATA0_SHIFT,
+		  (u32)((~match) & match_mask));
+	set_field(&match_reg,
+		  PKI_PCAM_MATCH_DATA1_MASK, PKI_PCAM_MATCH_DATA1_SHIFT,
+		  (u32)((match) & match_mask));
+	/* Format ACTION */
+	set_field(&action_reg,
+		  PKI_PCAM_ACTION_ADV_MASK, PKI_PCAM_ACTION_ADV_SHIFT,
+		  advance);
+	set_field(&action_reg,
+		  PKI_PCAM_ACTION_SETTY_MASK, PKI_PCAM_ACTION_SETTY_SHIFT,
+		  setty);
+	set_field(&action_reg,
+		  PKI_PCAM_ACTION_PF_MASK, PKI_PCAM_ACTION_PF_SHIFT,
+		  pf);
+	set_field(&action_reg,
+		  PKI_PCAM_ACTION_STYLEADD_MASK, PKI_PCAM_ACTION_STYLEADD_SHIFT,
+		  style_add);
+	set_field(&action_reg,
+		  PKI_PCAM_ACTION_PMC_MASK, PKI_PCAM_ACTION_PMC_SHIFT,
+		  pmc);
+
+	for (i = 0; i < pki->max_cls; i++) {
+		pki_reg_write(pki,
+			      PKI_CLX_PCAMX_ACTIONX(i, bank, index),
+			      action_reg);
+		pki_reg_write(pki,
+			      PKI_CLX_PCAMX_MATCHX(i, bank, index),
+			      match_reg);
+		pki_reg_write(pki,
+			      PKI_CLX_PCAMX_TERMX(i, bank, index),
+			      term_reg);
+	}
+}
+
+/* Hardware (PKI) is not hardwired to recognize any 802.1Q VLAN
+ * Ethertypes so add PCAM entries to detect such frames.
+ */
+static void install_default_vlan(struct pki_t *pki)
+{
+	int index;
+	int bank;
+	u8 field;
+
+	/* For each TERM_ETHTYPE configure 4 VLAN ethertype PCAM rules to
+	 * detect VLAN frames and proceed with VLAN detection.
+	 *
+	 * The code below should detect any combination of 4 consecutive
+	 * VLAN headers (as long as ethertype is as specified below).
+	 *
+	 * Each loop will setup PCAM entries for a pair of ETHTYPE TERMs:
+	 * ETHTYPE0 + ETHTYPE2, ETHTYPE1 + ETHTYPE3
+	 */
+	for (field = PKI_PCAM_TERM_ETHTYPE0; field <= PKI_PCAM_TERM_ETHTYPE1;
+	     field++) {
+		index = 0;
+		bank = field & 0x01;
+
+		/* For all styles match Ethertype 0x8100 */
+		write_pcam(pki, bank, index, 1,
+			   0, 0, /* For each style */
+			   field, 0xfd, /* Match 2 ETHERTYPE fields */
+			   0x81000000, 0xffff0000, /* with value 0x8100 */
+			   4, /* advance 4 bytes */
+			   PKI_LTYPE_E_VLAN, /* Identify VLAN presence */
+			   0, /* Don't set parse flags */
+			   0, /* Don't change style */
+			   0); /* Don't change parsing mode */
+
+		index++;
+		/* For all styles match Ethertype 0x88a8 */
+		write_pcam(pki, bank, index, 1,
+			   0, 0, /* For each style */
+			   field, 0xfd, /* Match 2 ETHERTYPE fields */
+			   0x88a80000, 0xffff0000, /* with value 0x88a8 */
+			   4, /* advance 4 bytes */
+			   PKI_LTYPE_E_VLAN, /* Identify VLAN presence */
+			   0, /* Don't set parse flags */
+			   0, /* Don't change style */
+			   0); /* Don't change parsing mode */
+
+		index++;
+		/* For all styles match Ethertype 0x9200 */
+		write_pcam(pki, bank, index, 1,
+			   0, 0, /* For each style */
+			   field, 0xfd, /* Match 2 ETHERTYPE fields */
+			   0x92000000, 0xffff0000, /* with value 0x9200 */
+			   4, /* advance 4 bytes */
+			   PKI_LTYPE_E_VLAN, /* Identify VLAN presence */
+			   0, /* Don't set parse flags */
+			   0, /* Don't change style */
+			   0); /* Don't change parsing mode */
+		index++;
+	}
+	/* In total we use 3 PCAM entries per one PCAM bank */
+}
+
 /*locks should be used by caller
  */
 static struct pkipf_vf *pki_get_vf(u32 id, u16 domain_id)
@@ -637,6 +763,7 @@ static void pki_init(struct pki_t *pki)
 
 	setup_ltype_map(pki);
 	init_styles(pki);
+	install_default_vlan(pki);
 	/*enable PKI*/
 	reg = pki_reg_read(pki, PKI_BUF_CTL);
 	reg |= 0x1;
