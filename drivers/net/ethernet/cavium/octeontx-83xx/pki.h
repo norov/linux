@@ -229,6 +229,30 @@
 #define PKI_PCAM_TERM_STYLE0_SHIFT	0
 #define PKI_PCAM_TERM_STYLE1_MASK	0xffULL
 #define PKI_PCAM_TERM_STYLE1_SHIFT	32
+#define PKI_PCAM_TERM_TERM0_MASK	0xffULL
+#define PKI_PCAM_TERM_TERM0_SHIFT	8
+#define PKI_PCAM_TERM_TERM1_MASK	0xffULL
+#define PKI_PCAM_TERM_TERM1_SHIFT	40
+#define PKI_PCAM_TERM_VALID_MASK	0x1ULL
+#define PKI_PCAM_TERM_VALID_SHIFT	63
+
+#define PKI_PCAM_MATCH_DATA0_MASK	0xffffffffULL
+#define PKI_PCAM_MATCH_DATA0_SHIFT	0
+#define PKI_PCAM_MATCH_DATA1_MASK	0xffffffffULL
+#define PKI_PCAM_MATCH_DATA1_SHIFT	32
+
+#define PKI_PCAM_ACTION_ADV_MASK	0xffULL
+#define PKI_PCAM_ACTION_ADV_SHIFT	0
+#define PKI_PCAM_ACTION_SETTY_MASK	0x1fULL
+#define PKI_PCAM_ACTION_SETTY_SHIFT	8
+#define PKI_PCAM_ACTION_PF_MASK		0x7ULL
+#define PKI_PCAM_ACTION_PF_SHIFT	13
+#define PKI_PCAM_ACTION_STYLEADD_MASK	0xffULL
+#define PKI_PCAM_ACTION_STYLEADD_SHIFT	16
+#define PKI_PCAM_ACTION_ADV_MASK	0xffULL
+#define PKI_PCAM_ACTION_ADV_SHIFT	0
+#define PKI_PCAM_ACTION_PMC_MASK	0x7fULL
+#define PKI_PCAM_ACTION_PMC_SHIFT	24
 
 #define PKI_STYLEX_BUF_MB_SIZE_SHIFT	0
 #define PKI_STYLEX_BUF_MB_SIZE_MASK	0x1fff
@@ -326,6 +350,39 @@ enum PKI_BELTYPE_E {
 	PKI_BLTYPE_E_UDP	= 5,
 	PKI_BLTYPE_E_SCTP	= 6,
 	PKI_BLTYPE_E_SNAP	= 7
+};
+
+enum PKI_PCAM_TERM_E {
+	PKI_PCAM_TERM		= 0,
+	PKI_PCAM_TERM_L2_CUSTOM	= 2,
+	PKI_PCAM_TERM_HIGIGD	= 4,
+	PKI_PCAM_TERM_HIGIG	= 5,
+	PKI_PCAM_TERM_SMACH	= 8,
+	PKI_PCAM_TERM_SMACL	= 9,
+	PKI_PCAM_TERM_DMACH	= 0xa,
+	PKI_PCAM_TERM_DMACL	= 0xb,
+	PKI_PCAM_TERM_GLORT	= 0x12,
+	PKI_PCAM_TERM_DSA	= 0x13,
+	PKI_PCAM_TERM_ETHTYPE0	= 0x18,
+	PKI_PCAM_TERM_ETHTYPE1	= 0x19,
+	PKI_PCAM_TERM_ETHTYPE2	= 0x1a,
+	PKI_PCAM_TERM_ETHTYPE3	= 0x1b,
+	PKI_PCAM_TERM_MPLS0	= 0x1e,
+	PKI_PCAM_TERM_L3_SIPHH	= 0x1f,
+	PKI_PCAM_TERM_L3_SIPMH	= 0x20,
+	PKI_PCAM_TERM_L3_SIPML	= 0x21,
+	PKI_PCAM_TERM_L3_SIPLL	= 0x22,
+	PKI_PCAM_TERM_L3_FLAGS	= 0x23,
+	PKI_PCAM_TERM_L3_DIPHH	= 0x24,
+	PKI_PCAM_TERM_L3_DIPMH	= 0x25,
+	PKI_PCAM_TERM_L3_DIPML	= 0x26,
+	PKI_PCAM_TERM_L3_DIPLL	= 0x27,
+	PKI_PCAM_TERM_LD_VNI	= 0x28,
+	PKI_PCAM_TERM_IL3_FLAGS	= 0x2b,
+	PKI_PCAM_TERM_LF_SPI	= 0x2e,
+	PKI_PCAM_TERM_L4_SPORT	= 0x2f,
+	PKI_PCAM_TERM_L4_PORT	= 0x30,
+	PKI_PCAM_TERM_LG_CUSTOM	= 0x39
 };
 
 #define MAX_PKI_PORTS	64
@@ -441,6 +498,20 @@ static inline void pki_reg_write(struct pki_t *pki, u64 offset, u64 val)
 static inline u64 pki_reg_read(struct pki_t *pki, u64 offset)
 {
 	return readq_relaxed(pki->reg_base + offset);
+}
+
+static inline void set_clear_bit(u64 *value, bool flag, u64 bit_num)
+{
+	if (flag)
+		*value |= (0x1ULL << bit_num);
+	else
+		*value &= ~(0x1Ull << bit_num);
+}
+
+static inline void set_field(u64 *ptr, u64 field_mask, u8 field_shift, u64 val)
+{
+	*ptr &= ~(field_mask << field_shift);
+	*ptr |= (val & field_mask) << field_shift;
 }
 
 int assign_pkind_bgx(struct pkipf_vf *vf, struct octtx_bgx_port *port);
