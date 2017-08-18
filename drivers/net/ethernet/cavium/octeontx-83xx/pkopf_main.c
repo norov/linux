@@ -968,7 +968,7 @@ static void pko_sq_teardown(struct pkopf *pko, int vf, int level, u32 channel,
 
 	if (level == channel_level) {
 		pko_reg_write(pko, PKO_PF_L3_L2_SQX_CHANNEL(queue_base),
-			      PKO_CHAN_NULL << 32);
+			      (u64)PKO_CHAN_NULL << 32);
 		pko_reg_write(pko, PKO_PF_LUTX(channel), 0x0);
 	}
 }
