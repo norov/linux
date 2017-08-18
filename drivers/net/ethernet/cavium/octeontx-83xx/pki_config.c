@@ -25,19 +25,6 @@ enum PKI_PORT_STATE {
 	PKI_PORT_STOP	 = 3
 };
 
-static void set_clear_bit(u64 *value, bool flag, u64 bit_num)
-{
-	if (flag)
-		*value |= (0x1ULL << bit_num);
-	else
-		*value &= ~(0x1Ull << bit_num);
-}
-
-static inline void set_field(u64 *ptr, u64 field_mask, u8 field_shift, u64 val)
-{
-	*ptr &= ~(field_mask << field_shift);
-	*ptr |= (val & field_mask) << field_shift;
-}
 
 static int pki_frmlen_reg(struct pki_t *pki, u16 maxlen, u16 minlen)
 {
