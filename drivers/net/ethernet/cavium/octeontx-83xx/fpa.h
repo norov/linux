@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Cavium, Inc.
+ * Copyright (C) 2017 Cavium, Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License
@@ -195,6 +195,13 @@ struct fpapf_com_s {
 
 extern struct fpapf_com_s fpapf_com;
 
+struct memvec {
+	void			*addr;
+	dma_addr_t		iova;
+	u32			size;
+	bool			in_use;
+};
+
 struct fpavf {
 	struct pci_dev		*pdev;
 	void __iomem		*reg_base;
@@ -207,10 +214,9 @@ struct fpavf {
 	u64			num_buffers;
 	u64			alloc_thold;
 
-	/* VA of pool memory start in contiguous allocation */
-	void			*vhpool_addr;
-	dma_addr_t		vhpool_iova;
-	u64			vhpool_size;
+	/* VA of pool memory */
+	u64                     vhpool_memvec_size;
+	struct memvec           *vhpool_memvec;
 	atomic_t		alloc_count;
 	u32			stack_ln_ptrs;
 	void			*pool_addr;

@@ -136,30 +136,79 @@ static int fpa_vf_addbuffers(struct fpavf *fpa, u64 num_buffers, u32 buf_len)
 
 static int fpa_vf_addmemory(struct fpavf *fpa, u64 num_buffers, u32 buf_len)
 {
-	dma_addr_t iova;
+	dma_addr_t iova,  first_addr = -1, last_addr = 0;
+	u32 buffs_per_chunk, chunk_size;
+	u32 i, j, ret = 0;
 
-	fpa->vhpool_size = num_buffers * buf_len;
-	fpa->vhpool_addr = dma_zalloc_coherent(&fpa->pdev->dev,
-			fpa->vhpool_size, &fpa->vhpool_iova, GFP_KERNEL);
-	if (!fpa->vhpool_addr) {
-		dev_err(&fpa->pdev->dev, "failed to allocate vhpool memory\n");
-		dma_free_coherent(&fpa->pdev->dev, fpa->pool_size,
-				  fpa->pool_addr, fpa->pool_iova);
-		return -ENOMEM;
+	chunk_size = MAX_ORDER_NR_PAGES * PAGE_SIZE;
+	buffs_per_chunk = chunk_size / buf_len;
+	fpa->vhpool_memvec_size = (num_buffers + buffs_per_chunk - 1) /
+				   buffs_per_chunk;
+	if (fpa->vhpool_memvec_size > (PAGE_SIZE / sizeof(struct memvec *))) {
+		dev_err(&fpa->pdev->dev,
+			"unable to allocate memory for pointers\n");
+		goto err_unlock;
 	}
 
-	fpavf_reg_write(fpa, FPA_VF_VHPOOL_START_ADDR(0), fpa->vhpool_iova);
-	fpavf_reg_write(fpa, FPA_VF_VHPOOL_END_ADDR(0),
-			fpa->vhpool_iova + fpa->vhpool_size - 1);
+	fpa->vhpool_memvec = (struct memvec *)__get_free_page(GFP_KERNEL |
+							      __GFP_NOWARN);
+	if (!fpa->vhpool_memvec) {
+		dev_err(&fpa->pdev->dev, "failed to allocate page\n");
+		return -ENOMEM;
+	}
+	memset(fpa->vhpool_memvec, 0, PAGE_SIZE);
 
-	iova = fpa->vhpool_iova;
-	while (num_buffers) {
-		fpa_vf_free(fpa, 0, iova, 0);
-		iova += buf_len;
-		num_buffers--;
+	for (i = 0; i < fpa->vhpool_memvec_size; i++) {
+		fpa->vhpool_memvec[i].size = chunk_size;
+		fpa->vhpool_memvec[i].addr =
+			dma_zalloc_coherent(&fpa->pdev->dev,
+					    fpa->vhpool_memvec[i].size,
+					    &fpa->vhpool_memvec[i].iova,
+					    GFP_KERNEL);
+		if (!fpa->vhpool_memvec[i].addr) {
+			dev_err(&fpa->pdev->dev,
+				"failed to allocate vhpool memory\n");
+			ret = -ENOMEM;
+			goto err_unlock;
+		}
+
+		fpa->vhpool_memvec[i].in_use = true;
+		if (fpa->vhpool_memvec[i].iova > last_addr)
+			last_addr = fpa->vhpool_memvec[i].iova;
+		if (fpa->vhpool_memvec[i].iova < first_addr)
+			first_addr = fpa->vhpool_memvec[i].iova;
+	}
+
+	fpavf_reg_write(fpa, FPA_VF_VHPOOL_START_ADDR(0), first_addr);
+	fpavf_reg_write(fpa, FPA_VF_VHPOOL_END_ADDR(0),
+			last_addr + chunk_size - 1);
+
+	for (i = 0; i < fpa->vhpool_memvec_size && num_buffers > 0; i++) {
+		iova = fpa->vhpool_memvec[i].iova;
+		for (j = 0; j < buffs_per_chunk; j++) {
+			fpa_vf_free(fpa, 0, iova, 0);
+			iova += buf_len;
+			num_buffers--;
+			if (num_buffers == 0)
+				break;
+		}
 	}
 
 	return 0;
+
+err_unlock:
+
+	for (i = 0; i < fpa->vhpool_memvec_size; i++)
+		if (fpa->vhpool_memvec[i].in_use) {
+			dma_free_coherent(&fpa->pdev->dev,
+					  fpa->vhpool_memvec[i].size,
+					  fpa->vhpool_memvec[i].addr,
+					  fpa->vhpool_memvec[i].iova);
+			fpa->vhpool_memvec[i].in_use = false;
+		}
+
+	fpa->vhpool_memvec_size = 0x0;
+	return ret;
 }
 
 static int fpa_vf_setup(struct fpavf *fpa, u64 num_buffers, u32 buf_len,
@@ -238,9 +287,10 @@ static int fpa_vf_teardown(struct fpavf *fpa)
 	union mbox_data resp;
 	struct mbox_hdr hdr;
 	union mbox_data req;
-	u64 avail, iova;
-	u64 *buf;
-	int ret;
+	struct memvec *memvec;
+	u64 av, iova, *buf;
+	int ret, i;
+	bool found;
 
 	if (!fpa)
 		return -ENODEV;
@@ -267,15 +317,25 @@ static int fpa_vf_teardown(struct fpavf *fpa)
 	 * single page. For that case, free each buffer as it's taken out of the
 	 * pool.
 	 */
-	avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
-	while (avail) {
+	av = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
+	while (av) {
+		found = false;
 		iova = fpa_vf_alloc(fpa, 0);
-		if (iova >= fpa->vhpool_iova &&
-		    iova < fpa->vhpool_iova + fpa->vhpool_size &&
-		    fpa->flags & FPA_VF_FLAG_CONT_MEM) {
-			avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
-			continue;
+		for (i = 0; i < fpa->vhpool_memvec_size; i++) {
+			memvec = &fpa->vhpool_memvec[i];
+			if (iova >= memvec->iova &&
+			    iova < memvec->iova + memvec->size &&
+			    fpa->flags & FPA_VF_FLAG_CONT_MEM) {
+				av = fpavf_reg_read(fpa,
+						    FPA_VF_VHPOOL_AVAILABLE(0));
+				found = true;
+				break;
+			}
 		}
+
+		if (found)
+			continue;
+
 		/* If there is a NAT_ALIGN bug here, it means that we'll get a
 		 * different address from FPA than the beginning of the page.
 		 * Therefore we're aligning the address to page size.
@@ -284,7 +344,7 @@ static int fpa_vf_teardown(struct fpavf *fpa)
 			dev_err(&fpa->pdev->dev,
 				"NULL buffer in pool %d of domain %d\n",
 				fpa->subdomain_id, fpa->domain_id);
-			avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
+			av = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
 			continue;
 		}
 		iova = PAGE_ALIGN(iova);
@@ -292,12 +352,25 @@ static int fpa_vf_teardown(struct fpavf *fpa)
 				 DMA_BIDIRECTIONAL);
 		buf = phys_to_virt(fpa_vf_iova_to_phys(fpa, iova));
 		free_page((u64)buf);
-		avail = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
+		av = fpavf_reg_read(fpa, FPA_VF_VHPOOL_AVAILABLE(0));
 	}
+
 	/* If allocation was contiguous, free that region */
-	if (fpa->flags & FPA_VF_FLAG_CONT_MEM)
-		dma_free_coherent(&fpa->pdev->dev, fpa->vhpool_size,
-				  fpa->vhpool_addr, fpa->vhpool_iova);
+	if (fpa->flags & FPA_VF_FLAG_CONT_MEM) {
+		for (i = 0; i < fpa->vhpool_memvec_size; i++) {
+			if (fpa->vhpool_memvec[i].in_use) {
+				dma_free_coherent(&fpa->pdev->dev,
+						  fpa->vhpool_memvec[i].size,
+						  fpa->vhpool_memvec[i].addr,
+						  fpa->vhpool_memvec[i].iova);
+				fpa->vhpool_memvec[i].in_use = false;
+			}
+
+			fpa->vhpool_memvec_size = 0x0;
+			free_page((unsigned long)fpa->vhpool_memvec);
+		}
+	}
+
 	/* Finally free the stack */
 	dma_free_coherent(&fpa->pdev->dev, fpa->pool_size,
 			  fpa->pool_addr, fpa->pool_iova);
