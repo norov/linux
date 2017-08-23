@@ -63,8 +63,7 @@ static void identify(struct dpipf_vf *vf, u16 domain_id,
 	writeq_relaxed(reg, vf->domain.reg_base + DPI_VDMA_SADDR);
 }
 
-static int dpi_pf_destroy_domain(u32 id, u16 domain_id,
-				 struct kobject *kobj, char *g_name)
+static int dpi_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct dpipf *dpi = NULL;
 	struct dpipf *curr;
@@ -99,13 +98,13 @@ static int dpi_pf_destroy_domain(u32 id, u16 domain_id,
 					pci_iov_virtfn_bus(dpi->pdev, i),
 					pci_iov_virtfn_devfn(dpi->pdev, i));
 
-			if (virtfn && kobj && g_name)
-				sysfs_remove_link_from_group
-				(kobj, g_name, virtfn->dev.kobj.name);
+			if (virtfn && kobj)
+				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
 
 			dev_info(&dpi->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, dpi->vf[i].domain.domain_id, vf_idx++);
+				 i, dpi->vf[i].domain.domain_id, vf_idx);
+			vf_idx++;
 		}
 	}
 
@@ -116,7 +115,7 @@ static int dpi_pf_destroy_domain(u32 id, u16 domain_id,
 
 static int dpi_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 				void *master, void *master_data,
-				struct kobject *kobj, char *g_name)
+				struct kobject *kobj)
 {
 	struct dpipf *dpi = NULL;
 	struct dpipf *curr;
@@ -125,7 +124,7 @@ static int dpi_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 	resource_size_t vf_start;
 	struct pci_dev *virtfn;
 
-	if (!kobj || !g_name)
+	if (!kobj)
 		return -EINVAL;
 
 	spin_lock(&octeontx_dpi_devices_lock);
@@ -151,9 +150,11 @@ static int dpi_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 					pci_iov_virtfn_devfn(dpi->pdev, i));
 			if (!virtfn)
 				break;
-			sysfs_add_link_to_group(kobj, g_name,
-						&virtfn->dev.kobj,
-				virtfn->dev.kobj.name);
+
+			ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
+						virtfn->dev.kobj.name);
+			if (ret < 0)
+				goto err_unlock;
 
 			dpi->vf[i].domain.domain_id = domain_id;
 			dpi->vf[i].domain.subdomain_id = vf_idx;
@@ -207,7 +208,7 @@ static int dpi_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 
 	if (vf_idx != num_vfs) {
 		ret = -ENODEV;
-		dpi_pf_destroy_domain(id, domain_id, kobj, g_name);
+		dpi_pf_destroy_domain(id, domain_id, kobj);
 	}
 	return ret;
 
