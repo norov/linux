@@ -245,8 +245,62 @@ static int fpa_pf_receive_message(u32 id, u16 domain_id,
 	return 0;
 }
 
-static int fpa_pf_destroy_domain(u32 id, u16 domain_id,
-				 struct kobject *kobj, char *g_name)
+static ssize_t pool_maxcnt_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct fpapf *curr, *fpa = NULL;
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	int vfid = pdev->devfn;
+	u64 cnt;
+
+	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
+		if (curr->pdev == pdev->physfn) {
+			fpa = curr;
+			break;
+		}
+	}
+	if (!fpa)
+		return 0;
+	cnt = readq_relaxed(fpa->vf[vfid].domain.reg_base +
+			    FPA_VF_VHAURA_CNT_LIMIT(0));
+	return snprintf(buf, PAGE_SIZE, "%lld\n", cnt);
+}
+
+static struct device_attribute pool_maxcnt_attr = {
+	.attr = {.name = "pool_maxcnt",  .mode = 0444},
+	.show = pool_maxcnt_show,
+	.store = NULL
+};
+
+static ssize_t pool_curcnt_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct fpapf *curr, *fpa = NULL;
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	int vfid = pdev->devfn;
+	u64 cnt;
+
+	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
+		if (curr->pdev == pdev->physfn) {
+			fpa = curr;
+			break;
+		}
+	}
+	if (!fpa)
+		return 0;
+
+	cnt = readq_relaxed(fpa->vf[vfid].domain.reg_base +
+			    FPA_VF_VHAURA_CNT(0));
+	return snprintf(buf, PAGE_SIZE, "%lld\n", cnt);
+}
+
+static struct device_attribute pool_curcnt_attr = {
+	.attr = {.name = "pool_curcnt",  .mode = 0444},
+	.show = pool_curcnt_show,
+	.store = NULL
+};
+
+static int fpa_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct fpapf *fpa = NULL;
 	struct pci_dev *virtfn;
@@ -293,19 +347,22 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id,
 					pci_domain_nr(fpa->pdev->bus),
 					pci_iov_virtfn_bus(fpa->pdev, i),
 					pci_iov_virtfn_devfn(fpa->pdev, i));
-			if (virtfn && kobj && g_name)
-				sysfs_remove_link_from_group(kobj, g_name,
-							     virtfn->dev.kobj.
-							     name);
-
+			if (virtfn && kobj) {
+				sysfs_remove_file(&virtfn->dev.kobj,
+						  &pool_maxcnt_attr.attr);
+				sysfs_remove_file(&virtfn->dev.kobj,
+						  &pool_curcnt_attr.attr);
+				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
+			}
 			dev_info(&fpa->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, fpa->vf[i].domain.domain_id, vf_idx++);
+				 i, fpa->vf[i].domain.domain_id, vf_idx);
 			memset(&fpa->vf[i], 0, sizeof(struct octeontx_pf_vf));
 			reg = FPA_MAP_VALID(0) | FPA_MAP_VHAURASET(i)
 				| FPA_MAP_GAURASET(0)
 				| FPA_MAP_GMID(fpa->vf[i].domain.gmid);
 			fpa_reg_write(fpa, FPA_PF_MAPX(i), reg);
+			vf_idx++;
 		}
 	}
 
@@ -326,7 +383,7 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id,
  * Created domain also does the mappings for AURASET to GARUARASET
  */
 static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
-				u32 num_vfs, struct kobject *kobj, char *g_name)
+				u32 num_vfs, struct kobject *kobj)
 {
 	int i, j, aura, vf_idx = 0;
 	struct fpapf *fpa = NULL;
@@ -355,16 +412,25 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 		if (fpa->vf[i].domain.in_use) {
 			continue;
 		} else {
-			if (kobj && g_name) {
+			if (kobj) {
 				virtfn = pci_get_domain_bus_and_slot(
 					   pci_domain_nr(fpa->pdev->bus),
 					   pci_iov_virtfn_bus(fpa->pdev, i),
 					   pci_iov_virtfn_devfn(fpa->pdev, i));
 				if (!virtfn)
 					break;
-				sysfs_add_link_to_group(kobj, g_name,
-							&virtfn->dev.kobj,
+				ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
 							virtfn->dev.kobj.name);
+				if (ret < 0)
+					goto err_unlock;
+				ret = sysfs_create_file(&virtfn->dev.kobj,
+							&pool_maxcnt_attr.attr);
+				if (ret < 0)
+					goto err_unlock;
+				ret = sysfs_create_file(&virtfn->dev.kobj,
+							&pool_curcnt_attr.attr);
+				if (ret < 0)
+					goto err_unlock;
 			}
 
 			fpa->vf[i].domain.domain_id = domain_id;
@@ -428,7 +494,7 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 
 err_unlock:
 	spin_unlock(&octeontx_fpa_devices_lock);
-	fpa_pf_destroy_domain(id, domain_id, kobj, g_name);
+	fpa_pf_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
 

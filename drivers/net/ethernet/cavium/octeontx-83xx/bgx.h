@@ -16,12 +16,13 @@
 struct bgx_com_s {
 	int (*create_domain)(u32 id, u16 domain_id,
 			     struct octtx_bgx_port *port_tbl, int ports,
-			struct octeontx_master_com_t *com, void *domain);
-	int (*destroy_domain)(u32 id, u16 domain_id);
+			     struct octeontx_master_com_t *com, void *domain,
+			     struct kobject *kobj);
+	int (*destroy_domain)(u32 id, u16 domain_id, struct kobject *kobj);
 	int (*reset_domain)(u32 id, u16 domain_id);
 	int (*receive_message)(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 			       union mbox_data *req, union mbox_data *resp,
-				void *mdata);
+			       void *mdata);
 	int (*get_num_ports)(int node);
 	int (*get_link_status)(int node, int bgx, int lmac);
 	struct octtx_bgx_port* (*get_port_by_chan)(int node, u16 domain_id,
