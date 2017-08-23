@@ -104,6 +104,7 @@ enum domain_type {
 
 struct octtx_bgx_port {
 	struct list_head list;
+	struct kobject kobj;
 	int	domain_id;
 	int	dom_port_idx; /* Domain-local index of BGX port */
 	int	glb_port_idx; /* System global index of BGX port */
@@ -122,6 +123,7 @@ struct octtx_bgx_port {
 
 struct octtx_lbk_port {
 	struct list_head list;
+	struct kobject kobj;
 	int	domain_id;
 	int	dom_port_idx; /* Domain-local index of LBK port */
 	int	glb_port_idx; /* System global index of LBK port */

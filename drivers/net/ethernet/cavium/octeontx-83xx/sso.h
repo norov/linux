@@ -252,9 +252,8 @@ struct ssopf {
 
 struct ssopf_com_s {
 	u64 (*create_domain)(u32, u16, u32, void *, void *,
-			     struct kobject *kobj, char *g_name);
-	int (*destroy_domain)(u32, u16,
-			      struct kobject *kobj, char *g_name);
+			     struct kobject *kobj);
+	int (*destroy_domain)(u32, u16, struct kobject *kobj);
 	int (*reset_domain)(u32, u16);
 	int (*send_message)(u32, u16, struct mbox_hdr *hdr,
 			    union mbox_data *, union mbox_data *);
@@ -286,9 +285,8 @@ struct ssowpf {
 
 struct ssowpf_com_s {
 	int (*create_domain)(u32, u16, u32, void *, void *,
-			     struct kobject *kobj, char *g_name);
-	int (*destroy_domain)(u32, u16,
-			      struct kobject *kobj, char *g_name);
+			     struct kobject *kobj);
+	int (*destroy_domain)(u32, u16, struct kobject *kobj);
 	int (*reset_domain)(u32, u16, u64);
 	int (*receive_message)(u32 id, u16 domain_id,
 			       struct mbox_hdr *hdr,

@@ -18,8 +18,7 @@ static atomic_t ssow_count = ATOMIC_INIT(0);
 static DEFINE_SPINLOCK(octeontx_ssow_devices_lock);
 static LIST_HEAD(octeontx_ssow_devices);
 
-static void identify(struct ssowpf_vf *vf, u16 domain_id,
-		     u16 subdomain_id)
+static void identify(struct ssowpf_vf *vf, u16 domain_id, u16 subdomain_id)
 {
 	struct mbox_ssow_identify *ident;
 
@@ -28,8 +27,7 @@ static void identify(struct ssowpf_vf *vf, u16 domain_id,
 	ident->subdomain_id = subdomain_id;
 }
 
-static int ssow_pf_destroy_domain(u32 id, u16 domain_id,
-				  struct kobject *kobj, char *g_name)
+static int ssow_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	int i, vf_idx = 0, ret = 0;
 	struct ssowpf *ssow = NULL;
@@ -60,13 +58,12 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id,
 					pci_domain_nr(ssow->pdev->bus),
 					pci_iov_virtfn_bus(ssow->pdev, i),
 					pci_iov_virtfn_devfn(ssow->pdev, i));
-			if (virtfn && kobj && g_name)
-				sysfs_remove_link_from_group(kobj, g_name,
-							     virtfn->dev.kobj.
-							     name);
+			if (virtfn && kobj)
+				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
+
 			dev_info(&ssow->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, ssow->vf[i].domain.domain_id, vf_idx++);
+				 i, ssow->vf[i].domain.domain_id, vf_idx);
 			/* sso: clear hws's gmctl register */
 			reg = 0;
 			reg = SSO_MAP_GMID(1); /* write reset value '1'*/
@@ -79,6 +76,7 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id,
 			identify(&ssow->vf[i], 0x0, 0x0);
 			iounmap(ssow->vf[i].domain.reg_base);
 			ssow->vf[i].domain.in_use = false;
+			vf_idx++;
 		}
 	}
 
@@ -90,7 +88,7 @@ unlock:
 
 static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 				 void *master, void *master_data,
-				 struct kobject *kobj, char *g_name)
+				 struct kobject *kobj)
 {
 	struct ssowpf *ssow = NULL;
 	struct ssowpf *curr;
@@ -99,7 +97,7 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 	u64 i, reg = 0;
 	int vf_idx = 0, ret = 0;
 
-	if (!kobj || !g_name)
+	if (!kobj)
 		return -EINVAL;
 
 	spin_lock(&octeontx_ssow_devices_lock);
@@ -125,9 +123,10 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 					pci_iov_virtfn_devfn(ssow->pdev, i));
 			if (!virtfn)
 				break;
-			sysfs_add_link_to_group(kobj, g_name,
-						&virtfn->dev.kobj,
+			ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
 						virtfn->dev.kobj.name);
+			if (ret < 0)
+				goto err_unlock;
 
 			ssow->vf[i].domain.domain_id = domain_id;
 			ssow->vf[i].domain.subdomain_id = vf_idx;
@@ -194,7 +193,7 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 
 err_unlock:
 	spin_unlock(&octeontx_ssow_devices_lock);
-	ssow_pf_destroy_domain(id, domain_id, kobj, g_name);
+	ssow_pf_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
 

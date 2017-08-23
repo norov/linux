@@ -385,8 +385,7 @@ static void identify(struct pkipf_vf *vf, u16 domain_id, u16 subdomain_id)
 	writeq_relaxed(reg, vf->domain.reg_base);
 }
 
-static int pki_destroy_domain(u32 id, u16 domain_id,
-			      struct kobject *kobj, char *g_name)
+static int pki_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct pki_t *pki = NULL;
 	struct pci_dev *virtfn;
@@ -414,20 +413,19 @@ static int pki_destroy_domain(u32 id, u16 domain_id,
 					pci_domain_nr(pki->pdev->bus),
 					pci_iov_virtfn_bus(pki->pdev, i),
 					pci_iov_virtfn_devfn(pki->pdev, i));
-			if (virtfn && kobj && g_name)
-				sysfs_remove_link_from_group(kobj, g_name,
-							     virtfn->dev.kobj.
-							     name);
+			if (virtfn && kobj)
+				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
 
 			dev_info(&pki->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, pki->vf[i].domain.domain_id, vf_idx++);
+				 i, pki->vf[i].domain.domain_id, vf_idx);
 
 			for (port = 0; port < MAX_PKI_PORTS; port++) {
 				pki->vf[i].bgx_port[port].valid = false;
 				pki->vf[i].lbk_port[port].valid = false;
 			}
 			identify(&pki->vf[i], 0x0, 0x0);
+			vf_idx++;
 		}
 	}
 
@@ -438,19 +436,17 @@ static int pki_destroy_domain(u32 id, u16 domain_id,
 
 static int pki_create_domain(u32 id, u16 domain_id,
 			     struct octeontx_master_com_t *master_com,
-			     void *data,
-		struct kobject *kobj, char *g_name)
+			     void *data, struct kobject *kobj)
 {
 	struct pki_t *pki = NULL;
 	resource_size_t vf_start;
 	struct pci_dev *virtfn;
 	struct pki_t *curr;
-	int vf_idx = 0;
-	int i, ret = 0;
+	int i, ret = 0, vf_idx = 0;
 	u8 stream;
 	u64 cfg;
 
-	if (!kobj || !g_name)
+	if (!kobj)
 		return -EINVAL;
 
 	spin_lock(&octeontx_pki_devices_lock);
@@ -477,9 +473,10 @@ static int pki_create_domain(u32 id, u16 domain_id,
 					pci_iov_virtfn_devfn(pki->pdev, i));
 			if (!virtfn)
 				break;
-			sysfs_add_link_to_group(kobj, g_name,
-						&virtfn->dev.kobj,
+			ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
 						virtfn->dev.kobj.name);
+			if (ret < 0)
+				goto err_unlock;
 
 			pki->vf[i].domain.domain_id = domain_id;
 			pki->vf[i].domain.subdomain_id = 0;
@@ -522,7 +519,8 @@ static int pki_create_domain(u32 id, u16 domain_id,
 
 err_unlock:
 	spin_unlock(&octeontx_pki_devices_lock);
-	pki_destroy_domain(id, domain_id, kobj, g_name);
+	pki_destroy_domain(id, domain_id, kobj);
+	return ret;
 	return ret;
 }
 
