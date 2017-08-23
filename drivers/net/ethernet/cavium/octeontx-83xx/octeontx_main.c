@@ -82,9 +82,9 @@ struct octtx_domain {
 	struct octtx_bgx_port bgx_port[OCTTX_MAX_BGX_PORTS];
 	struct octtx_lbk_port lbk_port[OCTTX_MAX_LBK_PORTS];
 
-	struct attribute_group sysfs_group;
+	struct kobject *kobj;
+	struct kobject *ports_kobj;
 	struct device_attribute sysfs_domain_id;
-	bool sysfs_group_created;
 	bool sysfs_domain_id_created;
 
 	bool fpa_domain_created;
@@ -117,16 +117,15 @@ static int octeontx_create_domain(const char *name, int type, int sso_count,
 				  const long int *bgx_port,
 				  const long int *lbk_port);
 
-static void octeontx_remove_domain(const char *domain_name);
+static void octeontx_destroy_domain(const char *domain_name);
 
-static void do_remove_domain(struct octtx_domain *domain);
+static void do_destroy_domain(struct octtx_domain *domain);
 
 static int octeontx_reset_domain(void *master_data);
 
 static ssize_t octtx_destroy_domain_store(struct device *dev,
 					  struct device_attribute *attr,
-					  const char *buf,
-					  size_t count)
+					  const char *buf, size_t count)
 {
 	char tmp_buf[64];
 	char *tmp_ptr;
@@ -135,15 +134,14 @@ static ssize_t octtx_destroy_domain_store(struct device *dev,
 	strlcpy(tmp_buf, buf, 64);
 	used = strlen(tmp_buf);
 	tmp_ptr = strim(tmp_buf);
-	octeontx_remove_domain(tmp_ptr);
+	octeontx_destroy_domain(tmp_ptr);
 
 	return used;
 }
 
 static ssize_t octtx_create_domain_store(struct device *dev,
 					 struct device_attribute *attr,
-					const char *buf,
-					size_t count)
+					 const char *buf, size_t count)
 {
 	int ret = 0;
 	char *start;
@@ -163,6 +161,7 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	long int pki_count = 0;
 	long int lbk_port[OCTTX_MAX_LBK_PORTS];
 	long int bgx_port[OCTTX_MAX_BGX_PORTS];
+	char *errmsg = "Wrong domain specification format.";
 
 	end = kzalloc(PAGE_SIZE, GFP_KERNEL);
 	ptr = end;
@@ -252,28 +251,24 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	ret = octeontx_create_domain(name, type, sso_count, fpa_count,
 				     ssow_count, pko_count, pki_count,
 				     tim_count, bgx_count, lbk_count,
-				     dpi_count, (const long int *)bgx_port,
+				     dpi_count,
+				     (const long int *)bgx_port,
 				     (const long int *)lbk_port);
-	if (ret)
+	if (ret) {
+		errmsg = "Failed to create application domain.";
 		goto error;
+	}
 
 	kfree(ptr);
 	return count;
 error:
-	dev_err(dev, "Command failed..\n");
+	dev_err(dev, "%s\n", errmsg);
 	kfree(ptr);
 	return count;
 }
 
-static struct attribute *octtx_domain_attrs[] = {
-	NULL
-};
-
-static DEVICE_ATTR(create_domain, 0200, NULL,
-		   octtx_create_domain_store);
-
-static DEVICE_ATTR(destroy_domain, 0200, NULL,
-		   octtx_destroy_domain_store);
+static DEVICE_ATTR(create_domain, 0200, NULL, octtx_create_domain_store);
+static DEVICE_ATTR(destroy_domain, 0200, NULL, octtx_destroy_domain_store);
 
 static struct attribute *octtx_attrs[] = {
 	&dev_attr_create_domain.attr,
@@ -367,7 +362,7 @@ static struct octeontx_master_com_t octtx_master_com = {
 	.receive_message = octtx_master_receive_message,
 };
 
-void octeontx_remove_domain(const char *domain_name)
+void octeontx_destroy_domain(const char *domain_name)
 {
 	struct octtx_domain *domain = NULL;
 	struct octtx_domain *curr;
@@ -382,7 +377,7 @@ void octeontx_remove_domain(const char *domain_name)
 
 	if (domain) {
 		octeontx_reset_domain(domain);
-		do_remove_domain(domain);
+		do_destroy_domain(domain);
 		list_del(&domain->list);
 		module_put(THIS_MODULE);
 		kfree(domain);
@@ -391,7 +386,7 @@ void octeontx_remove_domain(const char *domain_name)
 	spin_unlock(&octeontx_domains_lock);
 }
 
-static void do_remove_domain(struct octtx_domain *domain)
+static void do_destroy_domain(struct octtx_domain *domain)
 {
 	u32 ret, node;
 	u16 domain_id;
@@ -403,7 +398,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	domain_id = domain->domain_id;
 
 	if (domain->bgx_domain_created) {
-		ret = bgx->destroy_domain(node, domain_id);
+		ret = bgx->destroy_domain(node, domain_id, domain->ports_kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove BGX of domain %d on node %d.\n",
@@ -412,7 +407,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	}
 
 	if (domain->lbk_domain_created) {
-		ret = lbk->destroy_domain(node, domain_id);
+		ret = lbk->destroy_domain(node, domain_id, domain->ports_kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove LBK of domain %d on node %d.\n",
@@ -421,9 +416,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	}
 
 	if (domain->pko_domain_created) {
-		ret = pkopf->destroy_domain(node, domain_id,
-					    &octtx_device->kobj,
-					    domain->name);
+		ret = pkopf->destroy_domain(node, domain_id, domain->kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove PKO of domain %d on node %d.\n",
@@ -432,8 +425,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	}
 
 	if (domain->pki_domain_created) {
-		ret = pki->destroy_domain(node, domain_id, &octtx_device->kobj,
-					  domain->name);
+		ret = pki->destroy_domain(node, domain_id, domain->kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove PKI of domain %d on node %d.\n",
@@ -442,9 +434,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	}
 
 	if (domain->sso_domain_created) {
-		ret = ssopf->destroy_domain(node, domain_id,
-					    &octtx_device->kobj,
-					    domain->name);
+		ret = ssopf->destroy_domain(node, domain_id, domain->kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove SSO of domain %d on node %d.\n",
@@ -453,9 +443,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	}
 
 	if (domain->ssow_domain_created) {
-		ret = ssowpf->destroy_domain(node, domain_id,
-					     &octtx_device->kobj,
-					     domain->name);
+		ret = ssowpf->destroy_domain(node, domain_id, domain->kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove SSOW of domain %d on node %d.\n",
@@ -464,9 +452,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	}
 
 	if (domain->tim_domain_created) {
-		ret = timpf->destroy_domain(node, domain_id,
-					    &octtx_device->kobj,
-					    domain->name);
+		ret = timpf->destroy_domain(node, domain_id, domain->kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove TIM of domain %d on node %d.\n",
@@ -475,9 +461,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	}
 
 	if (domain->fpa_domain_created) {
-		ret = fpapf->destroy_domain(node, domain_id,
-					    &octtx_device->kobj,
-					    domain->name);
+		ret = fpapf->destroy_domain(node, domain_id, domain->kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove FPA of domain %d on node %d.\n",
@@ -486,9 +470,7 @@ static void do_remove_domain(struct octtx_domain *domain)
 	}
 
 	if (domain->dpi_domain_created) {
-		ret = dpipf->destroy_domain(node, domain_id,
-					    &octtx_device->kobj,
-					    domain->name);
+		ret = dpipf->destroy_domain(node, domain_id, domain->kobj);
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to remove dpi of domain %d on node %d.\n",
@@ -496,13 +478,14 @@ static void do_remove_domain(struct octtx_domain *domain)
 		}
 	}
 
+	if (domain->ports_kobj)
+		kobject_del(domain->ports_kobj);
+
 	if (domain->sysfs_domain_id_created)
-		sysfs_remove_file_from_group(&octtx_device->kobj,
-					     &domain->sysfs_domain_id.attr,
-					     domain->name);
-	if (domain->sysfs_group_created)
-		sysfs_remove_group(&octtx_device->kobj,
-				   &domain->sysfs_group);
+		sysfs_remove_file(domain->kobj, &domain->sysfs_domain_id.attr);
+
+	if (domain->kobj)
+		kobject_del(domain->kobj);
 }
 
 static ssize_t octtx_domain_id_show(struct device *dev,
@@ -529,7 +512,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	int ret = -EINVAL;
 	int node = 0;
 	bool found = false;
-	int i;
+	int i, port_count = bgx_count + lbk_count;
 
 	list_for_each_entry(domain, &octeontx_domains, list) {
 		if (!strcmp(name, domain->name)) {
@@ -550,14 +533,13 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		return -EINVAL;
 	}
 
-	if ((bgx_count + lbk_count) != 0 && pki_count != 1) {
+	if (port_count != 0 && pki_count != 1) {
 		dev_err(octtx_device, "Domain has to include exactly 1 PKI if there are BGX or LBK ports\n");
 		return -EINVAL;
 	}
 
-	if (pko_count != bgx_count + lbk_count) {
-		dev_err(octtx_device,
-			"Domain has to include as many PKOs as there are BGX and LBK ports\n");
+	if (pko_count != port_count) {
+		dev_err(octtx_device, "Domain has to include as many PKOs as there are BGX and LBK ports\n");
 		return -EINVAL;
 	}
 
@@ -585,21 +567,26 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	memcpy(domain->name, name, strlen(name));
 	domain->type = type;
 
-	domain->sysfs_group.name = domain->name;
-	domain->sysfs_group.attrs = octtx_domain_attrs;
-	ret = sysfs_create_group(&octtx_device->kobj, &domain->sysfs_group);
-	if (ret < 0) {
-		dev_err(octtx_device, " create_domain sysfs failed\n");
+	domain->kobj = kobject_create_and_add(domain->name,
+					      &octtx_device->kobj);
+	if (!domain->kobj) {
+		ret = -ENOMEM;
 		goto error;
 	}
-	domain->sysfs_group_created = true;
+	if (port_count) {
+		domain->ports_kobj = kobject_create_and_add("ports",
+							    domain->kobj);
+		if (!domain->ports_kobj) {
+			ret = -ENOMEM;
+			goto error;
+		}
+	}
 
 	domain->fpa_vf_count = fpa_count;
 	if (domain->fpa_vf_count) {
 		domain->aura_set = fpapf->create_domain(node, domain_id,
 							domain->fpa_vf_count,
-							&octtx_device->kobj,
-							domain->name);
+							domain->kobj);
 		if (!domain->aura_set) {
 			dev_err(octtx_device, "Failed to create FPA domain\n");
 			ret = -ENODEV;
@@ -610,8 +597,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 
 	domain->ssow_vf_count = ssow_count;
 	ret = ssowpf->create_domain(node, domain_id, domain->ssow_vf_count,
-				    &octtx_master_com, domain,
-				    &octtx_device->kobj, domain->name);
+				    &octtx_master_com, domain, domain->kobj);
 	if (ret) {
 		dev_err(octtx_device, "Failed to create SSOW domain\n");
 		goto error;
@@ -621,8 +607,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	domain->sso_vf_count = sso_count;
 	domain->grp_mask = ssopf->create_domain(node, domain_id,
 				domain->sso_vf_count,
-				&octtx_master_com, domain,
-				&octtx_device->kobj, domain->name);
+				&octtx_master_com, domain, domain->kobj);
 	if (!domain->grp_mask) {
 		dev_err(octtx_device, "Failed to create SSO domain\n");
 		goto error;
@@ -643,7 +628,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	}
 
 	ret = pki->create_domain(node, domain_id, &octtx_master_com, domain,
-				 &octtx_device->kobj, domain->name);
+				 domain->kobj);
 	if (ret) {
 		dev_err(octtx_device, "Failed to create PKI domain\n");
 		goto error;
@@ -680,7 +665,8 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 
 	if (domain->lbk_count) {
 		ret = lbk->create_domain(node, domain_id, domain->lbk_port, i,
-					 &octtx_master_com, domain);
+					 &octtx_master_com, domain,
+					 domain->ports_kobj);
 		if (ret) {
 			dev_err(octtx_device, "Failed to create LBK domain\n");
 			goto error;
@@ -708,7 +694,8 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 			domain->bgx_port[i].glb_port_idx = bgx_port[i];
 		}
 		ret = bgx->create_domain(node, domain_id, domain->bgx_port, i,
-				&octtx_master_com, domain);
+					 &octtx_master_com, domain,
+					 domain->ports_kobj);
 		if (ret) {
 			dev_err(octtx_device, "Failed to create BGX domain\n");
 			goto error;
@@ -740,14 +727,14 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	}
 
 	/* remove this once PKO init extends for LBK. */
-	domain->pko_vf_count = bgx_count + lbk_count;
+	domain->pko_vf_count = port_count;
 	if (domain->pko_vf_count) {
 		ret = pkopf->create_domain(node, domain_id,
 					domain->pko_vf_count,
 					domain->bgx_port, domain->bgx_count,
 					domain->lbk_port, domain->lbk_count,
 					&octtx_master_com, domain,
-					&octtx_device->kobj, domain->name);
+					domain->kobj);
 		if (ret) {
 			dev_err(octtx_device, "Failed to create PKO domain\n");
 			goto error;
@@ -759,7 +746,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	if (domain->tim_vf_count) {
 		ret = timpf->create_domain(node, domain_id,
 			domain->tim_vf_count, &octtx_master_com, domain,
-			&octtx_device->kobj, domain->name);
+			domain->kobj);
 		if (ret) {
 			dev_err(octtx_device, "Failed to create TIM domain\n");
 			goto error;
@@ -772,7 +759,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		ret = dpipf->create_domain(node, domain_id,
 					   domain->dpi_vf_count,
 					   &octtx_master_com, domain,
-					   &octtx_device->kobj, domain->name);
+					   domain->kobj);
 		if (ret) {
 			dev_err(octtx_device, "Failed to create DPI domain\n");
 			goto error;
@@ -784,10 +771,8 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	domain->sysfs_domain_id.attr.name = "domain_id";
 	domain->sysfs_domain_id.attr.mode = 0444;
 	sysfs_attr_init(&domain->sysfs_domain_id.attr);
-	ret = sysfs_add_file_to_group(&octtx_device->kobj,
-				      &domain->sysfs_domain_id.attr,
-				      domain->name);
-	if (ret < 0) {
+	ret = sysfs_create_file(domain->kobj, &domain->sysfs_domain_id.attr);
+	if (ret) {
 		dev_err(octtx_device, " create_domain sysfs failed\n");
 		goto error;
 	}
@@ -800,7 +785,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	spin_unlock(&octeontx_domains_lock);
 	return 0;
 error:
-	do_remove_domain(domain);
+	do_destroy_domain(domain);
 	kfree(domain);
 	return ret;
 }

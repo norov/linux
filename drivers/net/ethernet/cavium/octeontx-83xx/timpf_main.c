@@ -285,8 +285,7 @@ void identify(struct timpf_vf *vf, u16 domain_id, u16 subdomain_id)
 
 /* Domain control functions.
  */
-static int tim_pf_destroy_domain(u32 id, u16 domain_id,
-				 struct kobject *kobj, char *g_name)
+static int tim_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct timpf *tim = NULL;
 	struct pci_dev *virtfn;
@@ -303,12 +302,10 @@ static int tim_pf_destroy_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
-
 	if (!tim) {
 		ret = -ENODEV;
 		goto err_unlock;
 	}
-
 	for (i = 0; i < tim->total_vfs; i++) {
 		vf = &tim->vf[i];
 		if (vf->domain.in_use &&
@@ -319,20 +316,19 @@ static int tim_pf_destroy_domain(u32 id, u16 domain_id,
 				   pci_domain_nr(tim->pdev->bus),
 				   pci_iov_virtfn_bus(tim->pdev, i),
 				   pci_iov_virtfn_devfn(tim->pdev, i));
-			if (virtfn && kobj && g_name)
-				sysfs_remove_link_from_group(kobj, g_name,
-							     virtfn->dev.kobj.
-							     name);
+			if (virtfn && kobj)
+				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
+
 			dev_info(&tim->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, vf->domain.domain_id,
-				 vf_idx++);
+				 i, vf->domain.domain_id, vf_idx);
 			/* Cleanup MMU info.*/
 			reg = tim_reg_read(tim, TIM_RING_GMCTL(i));
 			reg &= ~0xFFFFull; /*GMID*/
 			tim_reg_write(tim, TIM_RING_GMCTL(i), reg);
 			identify(vf, 0x0, 0x0);
 			iounmap(tim->vf[i].domain.reg_base);
+			vf_idx++;
 		}
 	}
 	tim->vfs_in_use -= vf_idx;
@@ -344,7 +340,7 @@ err_unlock:
 
 static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 				struct octeontx_master_com_t *com, void *domain,
-		struct kobject *kobj, char *g_name)
+				struct kobject *kobj)
 {
 	struct timpf *tim = NULL;
 	struct pci_dev *virtfn;
@@ -354,7 +350,7 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 	u64 reg = 0, gmid;
 	int i, vf_idx = 0, ret = 0;
 
-	if (!kobj || !g_name)
+	if (!kobj)
 		return -EINVAL;
 	gmid = get_gmid(domain_id);
 
@@ -365,12 +361,10 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 			break;
 		}
 	}
-
 	if (!tim) {
 		ret = -ENODEV;
 		goto err_unlock;
 	}
-
 	for (i = 0; i < tim->total_vfs; i++) {
 		vf = &tim->vf[i];
 		if (vf->domain.in_use)
@@ -382,9 +376,10 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 				pci_iov_virtfn_devfn(tim->pdev, i));
 		if (!virtfn)
 			break;
-		sysfs_add_link_to_group(kobj, g_name,
-					&virtfn->dev.kobj,
+		ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
 					virtfn->dev.kobj.name);
+		if (ret < 0)
+			goto err_unlock;
 
 		ba = pci_resource_start(tim->pdev, PCI_TIM_PF_CFG_BAR);
 		ba += TIM_VF_OFFSET(i);
@@ -406,18 +401,16 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 			break;
 		}
 	}
-
 	if (vf_idx != num_vfs) {
 		ret = -ENODEV;
 		goto err_unlock;
 	}
-
 	spin_unlock(&octeontx_tim_dev_lock);
 	return ret;
 
 err_unlock:
 	spin_unlock(&octeontx_tim_dev_lock);
-	tim_pf_destroy_domain(id, domain_id, kobj, g_name);
+	tim_pf_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
 

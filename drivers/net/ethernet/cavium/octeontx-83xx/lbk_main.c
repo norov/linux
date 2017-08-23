@@ -320,9 +320,21 @@ int lbk_port_status(struct octtx_lbk_port *port, mbox_lbk_port_status_t *stat)
 	return 0;
 }
 
+static ssize_t lbk_port_stats_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "Not available.\n");
+}
+
+static struct kobj_attribute lbk_port_stats_attr = {
+	.attr = {.name = "stats",  .mode = 0444},
+	.show = lbk_port_stats_show,
+	.store = NULL
+};
+
 /* Domain destroy function.
  */
-static int lbk_destroy_domain(u32 id, u16 domain_id)
+static int lbk_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct octtx_lbk_port *port;
 	int i;
@@ -332,6 +344,12 @@ static int lbk_destroy_domain(u32 id, u16 domain_id)
 		port = &octeontx_lbk_ports[i];
 		if (port->domain_id != domain_id)
 			continue;
+		/* sysfs entry: */
+		if (port->kobj.state_initialized) {
+			sysfs_remove_file(&port->kobj,
+					  &lbk_port_stats_attr.attr);
+			kobject_put(&port->kobj);
+		}
 		port->domain_id = LBK_INVALID_ID;
 	}
 	spin_unlock(&octeontx_lbk_lock);
@@ -342,10 +360,11 @@ static int lbk_destroy_domain(u32 id, u16 domain_id)
  */
 static int lbk_create_domain(u32 id, u16 domain_id,
 			     struct octtx_lbk_port *port_tbl, int port_count,
-			     struct octeontx_master_com_t *com, void *domain)
+			     struct octeontx_master_com_t *com, void *domain,
+			     struct kobject *kobj)
 {
 	struct octtx_lbk_port *port, *gport;
-	int i, j, rc = 0;
+	int i, j, ret = 0;
 
 	spin_lock(&octeontx_lbk_lock);
 	for (i = 0; i < port_count; i++) {
@@ -356,10 +375,10 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 				continue;
 			/* Check for conflicts with other domains. */
 			if (gport->domain_id != LBK_INVALID_ID) {
-				rc = -EINVAL;
-				goto err;
+				ret = -EINVAL;
+				goto err_unlock;
 			}
-
+			/* Sync up global and domain ports. */
 			port->node = gport->node;
 			port->ilbk = gport->ilbk;
 			port->olbk = gport->olbk;
@@ -367,19 +386,30 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 			port->ilbk_num_chans = gport->ilbk_num_chans;
 			port->olbk_base_chan = gport->olbk_base_chan;
 			port->olbk_num_chans = gport->olbk_num_chans;
+
 			gport->pkind = port->pkind;
 			gport->domain_id = domain_id;
 			gport->dom_port_idx = i;
+
+			/* sysfs entry: */
+			ret = kobject_init_and_add(&port->kobj, get_ktype(kobj),
+						   kobj, "virt%d", i);
+			if (ret)
+				goto err_unlock;
+			ret = sysfs_create_file(&port->kobj,
+						&lbk_port_stats_attr.attr);
+			if (ret < 0)
+				goto err_unlock;
 		}
 	}
 
 	spin_unlock(&octeontx_lbk_lock);
-	return rc;
+	return ret;
 
-err:
+err_unlock:
 	spin_unlock(&octeontx_lbk_lock);
-	lbk_destroy_domain(id, domain_id);
-	return rc;
+	lbk_destroy_domain(id, domain_id, kobj);
+	return ret;
 }
 
 /* Domain reset function.
