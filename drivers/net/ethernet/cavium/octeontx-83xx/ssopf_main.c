@@ -211,8 +211,7 @@ static struct octeontx_master_com_t sso_master_com = {
 	.send_message = ssopf_master_send_message,
 };
 
-static int sso_pf_destroy_domain(u32 id, u16 domain_id,
-				 struct kobject *kobj, char *g_name)
+static int sso_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct ssopf *sso = NULL;
 	struct pci_dev *virtfn;
@@ -246,14 +245,12 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id,
 					pci_domain_nr(sso->pdev->bus),
 					pci_iov_virtfn_bus(sso->pdev, i),
 					pci_iov_virtfn_devfn(sso->pdev, i));
-			if (virtfn && kobj && g_name)
-				sysfs_remove_link_from_group(kobj, g_name,
-							     virtfn->dev.kobj.
-							     name);
+			if (virtfn && kobj)
+				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
 
 			dev_info(&sso->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, sso->vf[i].domain.domain_id, vf_idx++);
+				 i, sso->vf[i].domain.domain_id, vf_idx);
 
 			/* Unmap groups */
 			reg = SSO_MAP_VALID(0) | SSO_MAP_VHGRP(i) |
@@ -263,6 +260,7 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id,
 
 			identify(&sso->vf[i], 0xFFFF, 0xFFFF);
 			iounmap(sso->vf[i].domain.reg_base);
+			vf_idx++;
 		}
 	}
 
@@ -273,7 +271,7 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id,
 
 static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 				u32 num_grps, void *master, void *master_data,
-				struct kobject *kobj, char *g_name)
+				struct kobject *kobj)
 {
 	struct ssopf *sso = NULL;
 	struct ssopf *curr;
@@ -281,9 +279,9 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 	resource_size_t vf_start;
 	u64 i, reg = 0;
 	unsigned long grp_mask = 0;
-	int vf_idx = 0;
+	int ret = 0, vf_idx = 0;
 
-	if (!kobj || !g_name)
+	if (!kobj)
 		return -EINVAL;
 
 	spin_lock(&octeontx_sso_devices_lock);
@@ -307,9 +305,10 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 					pci_iov_virtfn_devfn(sso->pdev, i));
 			if (!virtfn)
 				break;
-			sysfs_add_link_to_group(kobj, g_name,
-						&virtfn->dev.kobj,
+			ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
 						virtfn->dev.kobj.name);
+			if (ret < 0)
+				goto err_unlock;
 
 			sso->vf[i].domain.domain_id = domain_id;
 			sso->vf[i].domain.subdomain_id = vf_idx;
@@ -370,7 +369,7 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 
 err_unlock:
 	spin_unlock(&octeontx_sso_devices_lock);
-	sso_pf_destroy_domain(id, domain_id, kobj, g_name);
+	sso_pf_destroy_domain(id, domain_id, kobj);
 	return grp_mask;
 }
 
@@ -1119,7 +1118,7 @@ static int sso_init(struct ssopf *sso)
 
 	sso->xaq_buf_size = xaq_buf_size;
 
-	err = fpapf->create_domain(sso->id, FPA_SSO_XAQ_GMID, 1, NULL, NULL);
+	err = fpapf->create_domain(sso->id, FPA_SSO_XAQ_GMID, 1, NULL);
 	if (!err) {
 		dev_err(&sso->pdev->dev, "failed to create SSO_XAQ_DOMAIN\n");
 		symbol_put(fpapf_com);
@@ -1324,7 +1323,7 @@ static void sso_remove(struct pci_dev *pdev)
 			fpavf->free(fpa, FPA_SSO_XAQ_AURA, addr, 0);
 	}
 	fpavf->teardown(fpa);
-	fpapf->destroy_domain(sso->id, FPA_SSO_XAQ_GMID, NULL, NULL);
+	fpapf->destroy_domain(sso->id, FPA_SSO_XAQ_GMID, NULL);
 	sso_irq_free(sso);
 	sso_sriov_configure(pdev, 0);
 	sso_fini(sso);
