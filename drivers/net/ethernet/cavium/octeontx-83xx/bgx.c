@@ -359,6 +359,7 @@ static int bgx_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 			       union mbox_data *resp, void *mdata)
 {
 	struct octtx_bgx_port *port;
+	int ret = 0;
 
 	if (!mdata)
 		return -ENOMEM;
@@ -369,67 +370,73 @@ static int bgx_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 	}
 	switch (hdr->msg) {
 	case MBOX_BGX_PORT_OPEN:
-		bgx_port_open(port);
-		bgx_port_config(port, mdata);
+		ret = bgx_port_open(port);
+		if (ret < 0)
+			break;
+		ret = bgx_port_config(port, mdata);
 		resp->data = sizeof(mbox_bgx_port_conf_t);
 		break;
 	case MBOX_BGX_PORT_CLOSE:
-		bgx_port_close(port);
+		ret = bgx_port_close(port);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_START:
-		bgx_port_start(port);
+		ret = bgx_port_start(port);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_STOP:
-		bgx_port_stop(port);
+		ret = bgx_port_stop(port);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_GET_CONFIG:
-		bgx_port_config(port, mdata);
+		ret = bgx_port_config(port, mdata);
 		resp->data = sizeof(mbox_bgx_port_conf_t);
 		break;
 	case MBOX_BGX_PORT_GET_STATUS:
-		bgx_port_status(port, mdata);
+		ret = bgx_port_status(port, mdata);
 		resp->data = sizeof(mbox_bgx_port_status_t);
 		break;
 	case MBOX_BGX_PORT_GET_STATS:
-		bgx_port_stats_get(port, mdata);
+		ret = bgx_port_stats_get(port, mdata);
 		resp->data = sizeof(mbox_bgx_port_stats_t);
 		break;
 	case MBOX_BGX_PORT_CLR_STATS:
-		bgx_port_stats_clr(port);
+		ret = bgx_port_stats_clr(port);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_GET_LINK_STATUS:
-		bgx_port_link_status(port, mdata);
+		ret = bgx_port_link_status(port, mdata);
 		resp->data = sizeof(u8);
 		break;
 	case MBOX_BGX_PORT_SET_PROMISC:
-		bgx_port_promisc_set(port, *(u8 *)mdata);
+		ret = bgx_port_promisc_set(port, *(u8 *)mdata);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_SET_MACADDR:
-		bgx_port_macaddr_set(port, mdata);
+		ret = bgx_port_macaddr_set(port, mdata);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_SET_BP:
-		bgx_port_bp_set(port, *(u8 *)mdata);
+		ret = bgx_port_bp_set(port, *(u8 *)mdata);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_SET_BCAST:
-		bgx_port_bcast_set(port, *(u8 *)mdata);
+		ret = bgx_port_bcast_set(port, *(u8 *)mdata);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_SET_MCAST:
-		bgx_port_mcast_set(port, *(u8 *)mdata);
+		ret = bgx_port_mcast_set(port, *(u8 *)mdata);
 		resp->data = 0;
 		break;
 	case MBOX_BGX_PORT_SET_MTU:
-		bgx_port_mtu_set(port, *(u16 *)mdata);
+		ret = bgx_port_mtu_set(port, *(u16 *)mdata);
 		resp->data = 0;
 		break;
 	default:
+		ret = -EINVAL;
+		break;
+	}
+	if (ret) {
 		hdr->res_code = MBOX_RET_INVALID;
 		return -EINVAL;
 	}
@@ -485,6 +492,7 @@ int bgx_port_config(struct octtx_bgx_port *port, mbox_bgx_port_conf_t *conf)
 	bgx = get_bgx_dev(port->node, port->bgx);
 	if (!bgx)
 		return -EINVAL;
+
 	conf->node = port->node;
 	conf->bgx = port->bgx;
 	conf->lmac = port->lmac;
@@ -756,17 +764,59 @@ int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu)
 	return 0;
 }
 
+static ssize_t bgx_port_stats_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	struct octtx_bgx_port *port;
+	struct bgxpf *bgx;
+	u64 rxpkts, rxbytes, rxdrop, rxerr;
+	u64 txpkts, txbytes, txdrop, txerr;
+
+	port = container_of(kobj, struct octtx_bgx_port, kobj);
+
+	bgx = get_bgx_dev(port->node, port->bgx);
+	if (!bgx)
+		return 0;
+	rxpkts = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT0);
+	rxbytes = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT1);
+	rxdrop = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT6);
+	rxerr = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT8);
+
+	txpkts = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT5);
+	txbytes = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT4);
+	txdrop = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT0);
+	txerr = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT16);
+	return snprintf(buf, PAGE_SIZE,
+			"%lld %lld %lld %lld\n"
+			"%lld %lld %lld %lld\n",
+			rxpkts, rxbytes, rxdrop, rxerr,
+			txpkts, txbytes, txdrop, txerr);
+}
+
+static struct kobj_attribute bgx_port_stats_attr = {
+	.attr = {.name = "stats",  .mode = 0444},
+	.show = bgx_port_stats_show,
+	.store = NULL
+};
+
 /* Domain destroy function.
  */
-static int bgx_destroy_domain(u32 id, u16 domain_id)
+static int bgx_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct octtx_bgx_port *port;
 
 	spin_lock(&octeontx_bgx_lock);
 	list_for_each_entry(port, &octeontx_bgx_ports, list) {
 		if (port->node == id && port->domain_id == domain_id) {
+			/* Return port to Linux */
 			restore_lmac_cfg(port);
-			bgx_port_start(port);
+
+			/* sysfs entry: */
+			if (port->kobj.state_initialized) {
+				sysfs_remove_file(&port->kobj,
+						  &bgx_port_stats_attr.attr);
+				kobject_put(&port->kobj);
+			}
 			port->domain_id = BGX_INVALID_ID;
 			port->dom_port_idx = BGX_INVALID_ID;
 		}
@@ -779,10 +829,10 @@ static int bgx_destroy_domain(u32 id, u16 domain_id)
  */
 static int bgx_create_domain(u32 id, u16 domain_id,
 			     struct octtx_bgx_port *port_tbl, int ports,
-			     struct octeontx_master_com_t *com, void *domain)
+			     struct octeontx_master_com_t *com, void *domain,
+			     struct kobject *kobj)
 {
 	struct octtx_bgx_port *port, *gport;
-	struct bgxpf *bgx;
 	int port_idx, ret = 0;
 
 	/* For each domain port, find requested entry in the list of
@@ -802,22 +852,27 @@ static int bgx_create_domain(u32 id, u16 domain_id,
 				ret = -EINVAL;
 				goto err_unlock;
 			}
-			/* Domain port: */
+			/* Sync up global and domain ports. */
 			port->node = gport->node;
 			port->bgx = gport->bgx;
 			port->lmac = gport->lmac;
 			port->lmac_type = gport->lmac_type;
 			port->base_chan = gport->base_chan;
 			port->num_chans = gport->num_chans;
-			/* Global port: */
+
 			gport->domain_id = domain_id;
 			gport->dom_port_idx = port_idx;
-			/* Hardware: */
-			bgx = get_bgx_dev(port->node, port->bgx);
-			if (!bgx) {
-				ret = -ENODEV;
+
+			/* sysfs entry: */
+			ret = kobject_init_and_add(&port->kobj, get_ktype(kobj),
+						   kobj, "net%d", port_idx);
+			if (ret)
 				goto err_unlock;
-			}
+			ret = sysfs_create_file(&port->kobj,
+						&bgx_port_stats_attr.attr);
+			if (ret < 0)
+				goto err_unlock;
+
 			/* Call this function to save lmac configuration and do
 			 * it before any modification to BGX registers are done
 			 * We restore lmac configuration when we destroy domain
@@ -831,13 +886,12 @@ static int bgx_create_domain(u32 id, u16 domain_id,
 				goto err_unlock;
 		}
 	}
-
 	spin_unlock(&octeontx_bgx_lock);
 	return ret;
 
 err_unlock:
 	spin_unlock(&octeontx_bgx_lock);
-	bgx_destroy_domain(id, domain_id);
+	bgx_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
 

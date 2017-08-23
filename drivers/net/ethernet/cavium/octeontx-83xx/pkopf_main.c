@@ -260,8 +260,7 @@ static void identify(struct pkopf_vf *vf, u16 domain_id,
 	writeq_relaxed(reg, vf->domain.reg_base + PKO_VF_DQ_FC_CONFIG);
 }
 
-static int pko_pf_destroy_domain(u32 id, u16 domain_id,
-				 struct kobject *kobj, char *g_name)
+static int pko_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct pkopf *pko = NULL;
 	struct pci_dev *virtfn;
@@ -287,7 +286,6 @@ static int pko_pf_destroy_domain(u32 id, u16 domain_id,
 			pko->vf[i].domain.in_use = false;
 			pko_pstree_teardown(pko, i, pko->vf[i].mac_num,
 					    pko->vf[i].chan);
-
 			identify(&pko->vf[i], 0x0, 0x0);
 			iounmap(pko->vf[i].domain.reg_base);
 
@@ -295,14 +293,13 @@ static int pko_pf_destroy_domain(u32 id, u16 domain_id,
 					pci_domain_nr(pko->pdev->bus),
 					pci_iov_virtfn_bus(pko->pdev, i),
 					pci_iov_virtfn_devfn(pko->pdev, i));
-			if (virtfn && kobj && g_name)
-				sysfs_remove_link_from_group(kobj, g_name,
-							     virtfn->dev.kobj.
-							     name);
+			if (virtfn && kobj)
+				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
 
 			dev_info(&pko->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
-				 i, pko->vf[i].domain.domain_id, vf_idx++);
+				 i, pko->vf[i].domain.domain_id, vf_idx);
+			vf_idx++;
 		}
 	}
 
@@ -330,7 +327,7 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 				struct octtx_bgx_port *bgx_port, int bgx_count,
 				struct octtx_lbk_port *lbk_port, int lbk_count,
 				void *master, void *master_data,
-				struct kobject *kobj, char *g_name)
+				struct kobject *kobj)
 {
 	struct pkopf *pko = NULL;
 	struct pkopf *curr;
@@ -341,7 +338,7 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 	int mac_num, mac_mode, chan, ret = 0;
 	const u32 max_frame = 0xffff;
 
-	if (!kobj || !g_name)
+	if (!kobj)
 		return -EINVAL;
 
 	spin_lock(&octeontx_pko_devices_lock);
@@ -368,9 +365,10 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 			if (!virtfn)
 				break;
 
-			sysfs_add_link_to_group(kobj, g_name,
-						&virtfn->dev.kobj,
+			ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
 						virtfn->dev.kobj.name);
+			if (ret < 0)
+				goto err_unlock;
 
 			pko->vf[i].domain.domain_id = domain_id;
 			pko->vf[i].domain.subdomain_id = vf_idx;
@@ -441,7 +439,7 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 
 err_unlock:
 	spin_unlock(&octeontx_pko_devices_lock);
-	pko_pf_destroy_domain(id, domain_id, kobj, g_name);
+	pko_pf_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
 
@@ -1087,7 +1085,7 @@ static int setup_dpfi(struct pkopf *pko)
 	int retry = 0;
 	u64 reg;
 
-	err = fpapf->create_domain(pko->id, FPA_PKO_DPFI_GMID, 1, NULL, NULL);
+	err = fpapf->create_domain(pko->id, FPA_PKO_DPFI_GMID, 1, NULL);
 	if (!err) {
 		dev_err(&pko->pdev->dev, "failed to create PKO_DPFI_DOMAIN\n");
 		symbol_put(fpapf_com);
@@ -1154,7 +1152,7 @@ static int teardown_dpfi(struct pkopf *pko)
 	pko_reg_write(pko, PKO_PF_DPFI_ENA, 0);
 
 	fpavf->teardown(fpa);
-	fpapf->destroy_domain(pko->id, FPA_PKO_DPFI_GMID, NULL, NULL);
+	fpapf->destroy_domain(pko->id, FPA_PKO_DPFI_GMID, NULL);
 
 	return 0;
 }
