@@ -98,8 +98,9 @@ struct octtx_domain {
 	bool dpi_domain_created;
 };
 
-struct octtx_gpio gpio;
-int gpio_installed[MAX_GPIO];
+static int gpio_in_use;
+static int gpio_installed[MAX_GPIO];
+static struct thread_info *gpio_installed_threads[MAX_GPIO];
 
 static DEFINE_SPINLOCK(octeontx_domains_lock);
 static LIST_HEAD(octeontx_domains);
@@ -980,34 +981,58 @@ void octtx_reset_domain(struct work_struct *work)
 	queue_delayed_work(reset_domain, &dwork_reset, 10);
 }
 
-static unsigned long __install_el3_inthandler(unsigned long gpio_num,
-					      unsigned long sp,
-					      unsigned long cpu,
-					      unsigned long ttbr0)
+static DEFINE_SPINLOCK(el3_inthandler_lock);
+
+static inline int __install_el3_inthandler(unsigned long gpio_num,
+					   unsigned long sp,
+					   unsigned long cpu,
+					   unsigned long ttbr0)
 {
 	struct arm_smccc_res res;
+	unsigned long flags;
+	int retval = -1;
 
-	arm_smccc_smc(THUNDERX_INSTALL_GPIO_INT, gpio_num, sp, cpu, ttbr0,
-		      0, 0, 0, &res);
-	return res.a0;
+	spin_lock_irqsave(&el3_inthandler_lock, flags);
+	if (!gpio_installed[gpio_num]) {
+		arm_smccc_smc(THUNDERX_INSTALL_GPIO_INT, gpio_num,
+			      sp, cpu, ttbr0, 0, 0, 0, &res);
+		if (res.a0 == 0) {
+			gpio_installed[gpio_num] = 1;
+			retval = 0;
+		}
+	}
+	spin_unlock_irqrestore(&el3_inthandler_lock, flags);
+	return retval;
 }
 
-static void __remove_el3_inthandler(unsigned long gpio_num)
+static inline int __remove_el3_inthandler(unsigned long gpio_num)
 {
 	struct arm_smccc_res res;
+	unsigned long flags;
+	unsigned int retval;
 
-	arm_smccc_smc(THUNDERX_REMOVE_GPIO_INT, gpio_num,
-		      0, 0, 0, 0, 0, 0, &res);
+	spin_lock_irqsave(&el3_inthandler_lock, flags);
+	if (gpio_installed[gpio_num]) {
+		arm_smccc_smc(THUNDERX_REMOVE_GPIO_INT, gpio_num,
+			      0, 0, 0, 0, 0, 0, &res);
+		gpio_installed[gpio_num] = 0;
+		retval = 0;
+	} else {
+		retval = -1;
+	}
+	spin_unlock_irqrestore(&el3_inthandler_lock, flags);
+	return retval;
 }
 
 static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	int err = 0;
 	struct octtx_gpio_usr_data gpio_usr;
+	u64 gpio_ttbr, gpio_isr_base, gpio_sp, gpio_cpu, gpio_num;
 	int ret;
 	//struct task_struct *task = current;
 
-	if (!gpio.in_use)
+	if (!gpio_in_use)
 		return -EINVAL;
 
 	if (_IOC_TYPE(cmd) != OCTTX_IOC_MAGIC)
@@ -1028,32 +1053,30 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		ret = copy_from_user(&gpio_usr, (void *)arg, _IOC_SIZE(cmd));
 		if (gpio_usr.gpio_num >= MAX_GPIO)
 			return -EINVAL;
-		if (gpio_installed[gpio_usr.gpio_num] != 0)
-			return -EEXIST;
 		if (ret)
 			return -EFAULT;
-		gpio.ttbr = 0;
+		gpio_ttbr = 0;
 		//TODO: reserve a asid to avoid asid rollovers
-		asm volatile("mrs %0, ttbr0_el1\n\t" : "=r"(gpio.ttbr));
-		gpio.isr_base = gpio_usr.isr_base;
-		gpio.sp = gpio_usr.sp;
-		gpio.cpu = gpio_usr.cpu;
-		gpio.gpio_num = gpio_usr.gpio_num;
-		ret = __install_el3_inthandler(gpio.gpio_num, gpio.sp,
-					       gpio.cpu, gpio.isr_base);
+		asm volatile("mrs %0, ttbr0_el1\n\t" : "=r"(gpio_ttbr));
+		gpio_isr_base = gpio_usr.isr_base;
+		gpio_sp = gpio_usr.sp;
+		gpio_cpu = gpio_usr.cpu;
+		gpio_num = gpio_usr.gpio_num;
+		ret = __install_el3_inthandler(gpio_num, gpio_sp,
+					       gpio_cpu, gpio_isr_base);
 		if (ret == 0)
-			gpio_installed[gpio_usr.gpio_num] = 1;
+			gpio_installed_threads[gpio_usr.gpio_num]
+				= current_thread_info();
+		else
+			return -EEXIST;
 		break;
 	case OCTTX_IOC_CLR_GPIO_HANDLER: /*Clear GPIO ISR handler*/
-		ret = copy_from_user(&gpio_usr, (void *)arg, _IOC_SIZE(cmd));
-		if (ret)
-			return -EFAULT;
 		gpio_usr.gpio_num = arg;
 		if (gpio_usr.gpio_num >= MAX_GPIO)
 			return -EINVAL;
-		if (gpio_installed[gpio_usr.gpio_num] == 0)
+		ret = __remove_el3_inthandler(gpio_usr.gpio_num);
+		if (ret != 0)
 			return -ENOENT;
-		__remove_el3_inthandler(gpio_usr.gpio_num);
 		break;
 	default:
 		return -ENOTTY;
@@ -1061,12 +1084,19 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
+void cleanup_el3_irqs(struct thread_info *thread)
+{
+	int i;
+
+	for (i = 0; i < MAX_GPIO; i++) {
+		if (gpio_installed[i] && (gpio_installed_threads[i] == thread))
+			__remove_el3_inthandler(i);
+	}
+}
+
 static int octtx_dev_open(struct inode *inode, struct file *fp)
 {
-	if (gpio.in_use)
-		return -EALREADY;
-
-	gpio.in_use = 1;
+	gpio_in_use = 1;
 	return 0;
 }
 
@@ -1074,19 +1104,14 @@ static int octtx_dev_release(struct inode *inode, struct file *fp)
 {
 	int i;
 
-	if (gpio.in_use == 0)
+	if (gpio_in_use == 0)
 		return -EINVAL;
 
-	if (gpio.gpio_num)
-		__remove_el3_inthandler(gpio.gpio_num);
-
-	for (i = 0; i < MAX_GPIO; i++) {
-		if (gpio_installed[i] != 0) {
+	for (i = 0; i < MAX_GPIO; i++)
+		if (gpio_installed[i] != 0)
 			__remove_el3_inthandler(i);
-			gpio_installed[i] = 0;
-		}
-	}
-	gpio.in_use = 0;
+
+	gpio_in_use = 0;
 	return 0;
 }
 
