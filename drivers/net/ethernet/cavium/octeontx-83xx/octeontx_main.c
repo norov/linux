@@ -93,7 +93,9 @@ struct octtx_domain {
 	struct kobject *kobj;
 	struct kobject *ports_kobj;
 	struct device_attribute sysfs_domain_id;
+	struct device_attribute sysfs_domain_in_use;
 	bool sysfs_domain_id_created;
+	bool sysfs_domain_in_use_created;
 
 	bool fpa_domain_created;
 	bool ssow_domain_created;
@@ -512,6 +514,9 @@ static void do_destroy_domain(struct octtx_domain *domain)
 	if (domain->sysfs_domain_id_created)
 		sysfs_remove_file(domain->kobj, &domain->sysfs_domain_id.attr);
 
+	if (domain->sysfs_domain_in_use_created)
+		sysfs_remove_file(domain->kobj,
+				  &domain->sysfs_domain_in_use.attr);
 	if (domain->kobj)
 		kobject_del(domain->kobj);
 }
@@ -525,6 +530,17 @@ static ssize_t octtx_domain_id_show(struct device *dev,
 	domain = container_of(attr, struct octtx_domain, sysfs_domain_id);
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", domain->domain_id);
+}
+
+static ssize_t octtx_domain_in_use_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct octtx_domain *domain;
+
+	domain = container_of(attr, struct octtx_domain, sysfs_domain_in_use);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", domain->in_use);
 }
 
 int octeontx_create_domain(const char *name, int type, int sso_count,
@@ -801,10 +817,22 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	sysfs_attr_init(&domain->sysfs_domain_id.attr);
 	ret = sysfs_create_file(domain->kobj, &domain->sysfs_domain_id.attr);
 	if (ret) {
-		dev_err(octtx_device, " create_domain sysfs failed\n");
+		dev_err(octtx_device, " domain_id sysfs failed\n");
 		goto error;
 	}
 	domain->sysfs_domain_id_created = true;
+
+	domain->sysfs_domain_in_use.show = octtx_domain_in_use_show;
+	domain->sysfs_domain_in_use.attr.name = "domain_in_use";
+	domain->sysfs_domain_in_use.attr.mode = 0444;
+	sysfs_attr_init(&domain->sysfs_domain_in_use.attr);
+	ret = sysfs_create_file(domain->kobj,
+				&domain->sysfs_domain_in_use.attr);
+	if (ret) {
+		dev_err(octtx_device, " domain_in_use sysfs failed\n");
+		goto error;
+	}
+	domain->sysfs_domain_in_use_created = true;
 
 	spin_lock(&octeontx_domains_lock);
 	INIT_LIST_HEAD(&domain->list);
