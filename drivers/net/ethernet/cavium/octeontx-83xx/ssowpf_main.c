@@ -51,9 +51,6 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	for (i = 0; i < ssow->total_vfs; i++) {
 		if (ssow->vf[i].domain.in_use &&
 		    ssow->vf[i].domain.domain_id == domain_id) {
-			ssow->vf[i].domain.domain_id = 0;
-			ssow->vf[i].domain.in_use = 0;
-
 			virtfn = pci_get_domain_bus_and_slot(
 					pci_domain_nr(ssow->pdev->bus),
 					pci_iov_virtfn_bus(ssow->pdev, i),
@@ -64,6 +61,10 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 			dev_info(&ssow->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
 				 i, ssow->vf[i].domain.domain_id, vf_idx);
+
+			ssow->vf[i].domain.domain_id = 0;
+			ssow->vf[i].domain.in_use = 0;
+
 			/* sso: clear hws's gmctl register */
 			reg = 0;
 			reg = SSO_MAP_GMID(1); /* write reset value '1'*/
