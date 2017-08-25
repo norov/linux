@@ -228,7 +228,7 @@ static int fpa_vf_setup(struct fpavf *fpa, u64 num_buffers, u32 buf_len,
 		fpa_vf_do_test(fpa, num_buffers);
 
 	/*Setup THRESHOLD*/
-	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_THRESHOLD(0), num_buffers / 2);
+	fpavf_reg_write(fpa, FPA_VF_VHAURA_CNT_THRESHOLD(0), num_buffers - 1);
 
 	return 0;
 }
