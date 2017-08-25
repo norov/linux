@@ -251,6 +251,9 @@ struct thunder_bgx_com_s {
 			     int lmac_idx, const u8 *mac);
 	void (*enable)(int node, int bgx_idx, int lmac_idx);
 	void (*disable)(int node, int bgx_idx, int lmac_idx);
+	void (*init_ctx_set_cb)(const void *cb);
+	void (*switch_ctx)(int node, int bgx_idx, int lmac_idx,
+			   int ctx, int dp_idx);
 };
 
 extern struct thunder_bgx_com_s thunder_bgx_com;

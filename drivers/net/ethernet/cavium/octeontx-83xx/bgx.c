@@ -209,9 +209,6 @@ static int bgx_port_initial_config(struct octtx_bgx_port *port)
 	if (!bgx)
 		return -ENODEV;
 
-	/* Stop the port first */
-	bgx_port_stop(port);
-
 	/* Adjust TX FIFO and BP thresholds to LMAC type */
 	if (port->lmac_type == OCTTX_BGX_LMAC_TYPE_40GR) {
 		reg = 0x400;
@@ -231,11 +228,10 @@ static int bgx_port_initial_config(struct octtx_bgx_port *port)
 	reg |= CMR_X2P_SELECT_PKI | CMR_P2X_SELECT_PKO;
 	bgx_reg_write(bgx, port->lmac, BGX_CMR_CONFIG, reg);
 	bgx_reg_write(bgx, port->lmac, BGX_CMRX_RX_ID_MAP, 0);
-
 	return 0;
 }
 
-static int save_lmac_cfg(struct octtx_bgx_port *port)
+static int bgx_port_save_config(struct octtx_bgx_port *port)
 {
 	struct lmac_cfg *cfg;
 	const u8 *mac_addr;
@@ -243,10 +239,6 @@ static int save_lmac_cfg(struct octtx_bgx_port *port)
 	int lmac_idx, idx;
 
 	if (!port)
-		return -EINVAL;
-
-	if (port->bgx >= MAX_BGX_PER_CN83XX ||
-	    port->lmac >= MAX_LMAC_PER_BGX)
 		return -EINVAL;
 
 	bgx = get_bgx_dev(port->node, port->bgx);
@@ -290,11 +282,10 @@ static int save_lmac_cfg(struct octtx_bgx_port *port)
 	/* Save mac address */
 	mac_addr = thbgx->get_mac_addr(port->node, port->bgx, port->lmac);
 	memcpy(cfg->mac, mac_addr, ETH_ALEN);
-
 	return 0;
 }
 
-static int restore_lmac_cfg(struct octtx_bgx_port *port)
+static int bgx_port_restore_config(struct octtx_bgx_port *port)
 {
 	struct lmac_cfg *cfg;
 	struct bgxpf *bgx;
@@ -303,17 +294,9 @@ static int restore_lmac_cfg(struct octtx_bgx_port *port)
 	if (!port)
 		return -EINVAL;
 
-	if (port->bgx >= MAX_BGX_PER_CN83XX ||
-	    port->lmac >= MAX_LMAC_PER_BGX)
-		return -EINVAL;
-
 	bgx = get_bgx_dev(port->node, port->bgx);
 	if (!bgx)
 		return -ENODEV;
-
-	bgx = get_bgx_dev(port->node, port->bgx);
-		if (!bgx)
-			return -ENODEV;
 
 	idx = port->bgx * MAX_LMAC_PER_BGX + port->lmac;
 	lmac_idx = port->lmac;
@@ -809,7 +792,9 @@ static int bgx_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	list_for_each_entry(port, &octeontx_bgx_ports, list) {
 		if (port->node == id && port->domain_id == domain_id) {
 			/* Return port to Linux */
-			restore_lmac_cfg(port);
+			bgx_port_restore_config(port);
+			thbgx->switch_ctx(port->node, port->bgx, port->lmac,
+					  NIC_PORT_CTX_LINUX, 0);
 
 			/* sysfs entry: */
 			if (port->kobj.state_initialized) {
@@ -863,6 +848,19 @@ static int bgx_create_domain(u32 id, u16 domain_id,
 			gport->domain_id = domain_id;
 			gport->dom_port_idx = port_idx;
 
+			/* Stop and reconfigure the port.*/
+			bgx_port_stop(port);
+			ret = bgx_port_save_config(port);
+			if (ret)
+				goto err_unlock;
+
+			thbgx->switch_ctx(port->node, port->bgx, port->lmac,
+					  NIC_PORT_CTX_DATAPLANE, port_idx);
+
+			ret = bgx_port_initial_config(port);
+			if (ret)
+				goto err_unlock;
+
 			/* sysfs entry: */
 			ret = kobject_init_and_add(&port->kobj, get_ktype(kobj),
 						   kobj, "net%d", port_idx);
@@ -871,18 +869,6 @@ static int bgx_create_domain(u32 id, u16 domain_id,
 			ret = sysfs_create_file(&port->kobj,
 						&bgx_port_stats_attr.attr);
 			if (ret < 0)
-				goto err_unlock;
-
-			/* Call this function to save lmac configuration and do
-			 * it before any modification to BGX registers are done
-			 * We restore lmac configuration when we destroy domain
-			 */
-			ret = save_lmac_cfg(port);
-			if (ret)
-				goto err_unlock;
-
-			ret = bgx_port_initial_config(port);
-			if (ret)
 				goto err_unlock;
 		}
 	}
@@ -919,9 +905,7 @@ static int bgx_set_pkind(u32 id, u16 domain_id, int port, int pkind)
 	gport = get_bgx_port(domain_id, port);
 	if (!gport)
 		return -EINVAL;
-	/* Domain port: */
 	gport->pkind = pkind;
-
 	return 0;
 }
 
@@ -960,6 +944,8 @@ struct bgx_com_s *bgx_octeontx_init(void)
 		return NULL;
 
 	bgx_map = thbgx->get_bgx_count(node);
+	if (!bgx_map)
+		return NULL;
 
 	for_each_set_bit(bgx_idx, (unsigned long *)&bgx_map,
 			 sizeof(bgx_map) * 8) {
