@@ -141,6 +141,9 @@ static int fpa_vf_addmemory(struct fpavf *fpa, u64 num_buffers, u32 buf_len)
 	u32 i, j, ret = 0;
 
 	chunk_size = MAX_ORDER_NR_PAGES * PAGE_SIZE;
+	if (chunk_size > num_buffers * buf_len)
+		chunk_size = num_buffers * buf_len;
+
 	buffs_per_chunk = chunk_size / buf_len;
 	fpa->vhpool_memvec_size = (num_buffers + buffs_per_chunk - 1) /
 				   buffs_per_chunk;
