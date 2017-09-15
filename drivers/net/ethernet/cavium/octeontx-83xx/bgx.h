@@ -28,6 +28,7 @@ struct bgx_com_s {
 	struct octtx_bgx_port* (*get_port_by_chan)(int node, u16 domain_id,
 						   int chan);
 	int (*set_pkind)(u32 id, u16 domain_id, int port, int pkind);
+	int (*get_port_stats)(struct octtx_bgx_port *port);
 };
 
 struct bgx_com_s *bgx_octeontx_init(void);

@@ -211,6 +211,60 @@ static struct octeontx_master_com_t sso_master_com = {
 	.send_message = ssopf_master_send_message,
 };
 
+static ssize_t group_work_sched_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct ssopf *curr, *sso = NULL;
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	int vfid = pdev->devfn;
+	u64 cnt;
+
+	list_for_each_entry(curr, &octeontx_sso_devices, list) {
+		if (curr->pdev == pdev->physfn) {
+			sso = curr;
+			break;
+		}
+	}
+	if (!sso)
+		return 0;
+
+	cnt = readq_relaxed(sso->reg_base + SSO_PF_GRPX_WS_PC(vfid));
+	return snprintf(buf, PAGE_SIZE, "%lld\n", cnt);
+}
+
+static struct device_attribute group_work_sched_attr = {
+	.attr = {.name = "work_sched",  .mode = 0444},
+	.show = group_work_sched_show,
+	.store = NULL
+};
+
+static ssize_t group_work_admit_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct ssopf *curr, *sso = NULL;
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	int vfid = pdev->devfn;
+	u64 cnt;
+
+	list_for_each_entry(curr, &octeontx_sso_devices, list) {
+		if (curr->pdev == pdev->physfn) {
+			sso = curr;
+			break;
+		}
+	}
+	if (!sso)
+		return 0;
+
+	cnt = readq_relaxed(sso->reg_base + SSO_PF_GRPX_WA_PC(vfid));
+	return snprintf(buf, PAGE_SIZE, "%lld\n", cnt);
+}
+
+static struct device_attribute group_work_admit_attr = {
+	.attr = {.name = "work_admit",  .mode = 0444},
+	.show = group_work_admit_show,
+	.store = NULL
+};
+
 static int sso_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct ssopf *sso = NULL;
@@ -245,9 +299,13 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 					pci_domain_nr(sso->pdev->bus),
 					pci_iov_virtfn_bus(sso->pdev, i),
 					pci_iov_virtfn_devfn(sso->pdev, i));
-			if (virtfn && kobj)
+			if (virtfn && kobj) {
+				sysfs_remove_file(&virtfn->dev.kobj,
+						  &group_work_admit_attr.attr);
+				sysfs_remove_file(&virtfn->dev.kobj,
+						  &group_work_sched_attr.attr);
 				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
-
+			}
 			dev_info(&sso->pdev->dev,
 				 "Free vf[%d] from domain:%d subdomain_id:%d\n",
 				 i, sso->vf[i].domain.domain_id, vf_idx);
@@ -282,7 +340,7 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 	int ret = 0, vf_idx = 0;
 
 	if (!kobj)
-		return -EINVAL;
+		return 0;
 
 	spin_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
@@ -291,9 +349,10 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
-
-	if (!sso)
-		goto err_unlock;
+	if (!sso) {
+		spin_unlock(&octeontx_sso_devices_lock);
+		return 0;
+	}
 
 	for (i = 0; i < sso->total_vfs; i++) {
 		if (sso->vf[i].domain.in_use) {
@@ -304,9 +363,17 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 					pci_iov_virtfn_bus(sso->pdev, i),
 					pci_iov_virtfn_devfn(sso->pdev, i));
 			if (!virtfn)
-				break;
+				goto err_unlock;
 			ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
 						virtfn->dev.kobj.name);
+			if (ret < 0)
+				goto err_unlock;
+			ret = sysfs_create_file(&virtfn->dev.kobj,
+						&group_work_sched_attr.attr);
+			if (ret < 0)
+				goto err_unlock;
+			ret = sysfs_create_file(&virtfn->dev.kobj,
+						&group_work_admit_attr.attr);
 			if (ret < 0)
 				goto err_unlock;
 
@@ -358,11 +425,8 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 			}
 		}
 	}
-
-	if (vf_idx != num_grps) {
-		grp_mask = 0;
+	if (vf_idx != num_grps)
 		goto err_unlock;
-	}
 
 	spin_unlock(&octeontx_sso_devices_lock);
 	return grp_mask;
@@ -370,7 +434,7 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 err_unlock:
 	spin_unlock(&octeontx_sso_devices_lock);
 	sso_pf_destroy_domain(id, domain_id, kobj);
-	return grp_mask;
+	return 0;
 }
 
 static int sso_pf_send_message(u32 id, u16 domain_id,
@@ -559,7 +623,6 @@ int sso_pf_get_value(u32 id, u64 offset, u64 *val)
 		spin_unlock(&octeontx_sso_devices_lock);
 		return -EINVAL;
 	}
-
 	*val = sso_reg_read(sso, offset);
 	spin_unlock(&octeontx_sso_devices_lock);
 	return 0;
