@@ -15,7 +15,7 @@
 #include "lbk.h"
 
 #define DRV_NAME "octeontx-lbk"
-#define DRV_VERSION "0.1"
+#define DRV_VERSION "1.0"
 
 /* LBK PCI Device ID (See PCC_DEV_IDL_E in HRM) */
 #define PCI_DEVICE_ID_OCTEONTX_LBK 0xA042
