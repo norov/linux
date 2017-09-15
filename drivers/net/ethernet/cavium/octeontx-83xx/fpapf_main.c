@@ -13,7 +13,7 @@
 #include "fpa.h"
 
 #define DRV_NAME "octeontx-fpa"
-#define DRV_VERSION "0.1"
+#define DRV_VERSION "1.0"
 
 static atomic_t fpa_count = ATOMIC_INIT(0);
 

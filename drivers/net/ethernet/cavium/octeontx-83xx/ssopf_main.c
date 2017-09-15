@@ -18,7 +18,7 @@
 #include "rst.h"
 
 #define DRV_NAME "octeontx-sso"
-#define DRV_VERSION "0.1"
+#define DRV_VERSION "1.0"
 
 static atomic_t sso_count = ATOMIC_INIT(0);
 static DEFINE_SPINLOCK(octeontx_sso_devices_lock);
