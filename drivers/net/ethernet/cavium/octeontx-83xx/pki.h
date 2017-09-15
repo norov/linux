@@ -479,6 +479,7 @@ struct pki_com_s {
 			    struct octtx_bgx_port *port);
 	int (*add_lbk_port)(u32 node, u16 domain_id,
 			    struct octtx_lbk_port *port);
+	int (*get_bgx_port_stats)(struct octtx_bgx_port *port);
 };
 
 extern struct pki_com_s pki_com;

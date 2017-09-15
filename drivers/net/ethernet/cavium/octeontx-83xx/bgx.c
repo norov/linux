@@ -747,40 +747,37 @@ int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu)
 	return 0;
 }
 
-static ssize_t bgx_port_stats_show(struct kobject *kobj,
-				   struct kobj_attribute *attr, char *buf)
+int bgx_get_port_stats(struct octtx_bgx_port *port)
 {
-	struct octtx_bgx_port *port;
 	struct bgxpf *bgx;
-	u64 rxpkts, rxbytes, rxdrop, rxerr;
-	u64 txpkts, txbytes, txdrop, txerr;
-
-	port = container_of(kobj, struct octtx_bgx_port, kobj);
+	u64 reg;
 
 	bgx = get_bgx_dev(port->node, port->bgx);
 	if (!bgx)
-		return 0;
-	rxpkts = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT0);
-	rxbytes = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT1);
-	rxdrop = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT6);
-	rxerr = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT8);
+		return -EINVAL;
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT0);
+	port->stats.rxpkts = reg & ((1ull << 47) - 1);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT1);
+	port->stats.rxbytes = reg & ((1ull << 47) - 1);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT6);
+	port->stats.rxdrop = reg & ((1ull << 47) - 1);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_RX_STAT8);
+	port->stats.rxerr = reg & ((1ull << 47) - 1);
 
-	txpkts = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT5);
-	txbytes = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT4);
-	txdrop = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT0);
-	txerr = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT16);
-	return snprintf(buf, PAGE_SIZE,
-			"%lld %lld %lld %lld\n"
-			"%lld %lld %lld %lld\n",
-			rxpkts, rxbytes, rxdrop, rxerr,
-			txpkts, txbytes, txdrop, txerr);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT5);
+	port->stats.txpkts = reg & ((1ull << 47) - 1);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT4);
+	port->stats.txbytes = reg & ((1ull << 47) - 1);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT0);
+	port->stats.txdrop = reg & ((1ull << 47) - 1);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT16);
+	port->stats.txerr = reg & ((1ull << 47) - 1);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT14);
+	port->stats.txbcast = reg & ((1ull << 47) - 1);
+	reg = bgx_reg_read(bgx, port->lmac, BGX_CMRX_TX_STAT15);
+	port->stats.txmcast = reg & ((1ull << 47) - 1);
+	return 0;
 }
-
-static struct kobj_attribute bgx_port_stats_attr = {
-	.attr = {.name = "stats",  .mode = 0444},
-	.show = bgx_port_stats_show,
-	.store = NULL
-};
 
 /* Domain destroy function.
  */
@@ -796,12 +793,6 @@ static int bgx_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 			thbgx->switch_ctx(port->node, port->bgx, port->lmac,
 					  NIC_PORT_CTX_LINUX, 0);
 
-			/* sysfs entry: */
-			if (port->kobj.state_initialized) {
-				sysfs_remove_file(&port->kobj,
-						  &bgx_port_stats_attr.attr);
-				kobject_put(&port->kobj);
-			}
 			port->domain_id = BGX_INVALID_ID;
 			port->dom_port_idx = BGX_INVALID_ID;
 		}
@@ -860,16 +851,6 @@ static int bgx_create_domain(u32 id, u16 domain_id,
 			ret = bgx_port_initial_config(port);
 			if (ret)
 				goto err_unlock;
-
-			/* sysfs entry: */
-			ret = kobject_init_and_add(&port->kobj, get_ktype(kobj),
-						   kobj, "net%d", port_idx);
-			if (ret)
-				goto err_unlock;
-			ret = sysfs_create_file(&port->kobj,
-						&bgx_port_stats_attr.attr);
-			if (ret < 0)
-				goto err_unlock;
 		}
 	}
 	spin_unlock(&octeontx_bgx_lock);
@@ -919,7 +900,8 @@ struct bgx_com_s bgx_com  = {
 	.get_num_ports = bgx_get_num_ports,
 	.get_link_status = bgx_get_link_status,
 	.get_port_by_chan = bgx_get_port_by_chan,
-	.set_pkind = bgx_set_pkind
+	.set_pkind = bgx_set_pkind,
+	.get_port_stats = bgx_get_port_stats,
 };
 EXPORT_SYMBOL(bgx_com);
 
