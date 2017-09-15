@@ -349,6 +349,20 @@ static void install_default_vlan(struct pki_t *pki)
 
 /*locks should be used by caller
  */
+static struct pki_t *pki_get_pf(u32 id)
+{
+	struct pki_t *pki = NULL;
+	struct pki_t *curr;
+
+	list_for_each_entry(curr, &octeontx_pki_devices, list) {
+		if (curr->id == id) {
+			pki = curr;
+			break;
+		}
+	}
+	return pki;
+}
+
 static struct pkipf_vf *pki_get_vf(u32 id, u16 domain_id)
 {
 	struct pki_t *pki = NULL;
@@ -648,13 +662,29 @@ int pki_add_lbk_port(u32 id, u16 domain_id, struct octtx_lbk_port *port)
 	return pkind;
 }
 
+int pki_get_bgx_port_stats(struct octtx_bgx_port *port)
+{
+	struct pki_t *pki;
+	u64 reg;
+
+	pki = pki_get_pf(port->node);
+	if (!pki)
+		return -EINVAL;
+	reg = pki_reg_read(pki, PKI_STATX_STAT5(port->pkind));
+	port->stats.rxbcast = reg & ((1ull << 47) - 1);
+	reg = pki_reg_read(pki, PKI_STATX_STAT6(port->pkind));
+	port->stats.rxmcast = reg & ((1ull << 47) - 1);
+	return 0;
+}
+
 struct pki_com_s pki_com  = {
 	.create_domain = pki_create_domain,
 	.destroy_domain = pki_destroy_domain,
 	.reset_domain = pki_reset_domain,
 	.receive_message = pki_receive_message,
 	.add_bgx_port = pki_add_bgx_port,
-	.add_lbk_port = pki_add_lbk_port
+	.add_lbk_port = pki_add_lbk_port,
+	.get_bgx_port_stats = pki_get_bgx_port_stats,
 };
 EXPORT_SYMBOL(pki_com);
 
