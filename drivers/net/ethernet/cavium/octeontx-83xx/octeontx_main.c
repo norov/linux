@@ -418,8 +418,9 @@ err_unlock:
 
 static void do_destroy_domain(struct octtx_domain *domain)
 {
-	u32 ret, node;
+	u32 ret, node, i;
 	u16 domain_id;
+	struct octtx_bgx_port *bgx_port;
 
 	if (!domain)
 		return;
@@ -428,6 +429,11 @@ static void do_destroy_domain(struct octtx_domain *domain)
 	domain_id = domain->domain_id;
 
 	if (domain->bgx_domain_created) {
+		for (i = 0; i < domain->bgx_count; i++) {
+			bgx_port = &domain->bgx_port[i];
+			sysfs_remove_file(&bgx_port->kobj,
+					  &bgx_port->sysfs_stats.attr);
+		}
 		ret = bgx->destroy_domain(node, domain_id, domain->ports_kobj);
 		if (ret) {
 			dev_err(octtx_device,
@@ -508,15 +514,16 @@ static void do_destroy_domain(struct octtx_domain *domain)
 		}
 	}
 
-	if (domain->ports_kobj)
-		kobject_del(domain->ports_kobj);
+	if (domain->sysfs_domain_in_use_created)
+		sysfs_remove_file(domain->kobj,
+				  &domain->sysfs_domain_in_use.attr);
 
 	if (domain->sysfs_domain_id_created)
 		sysfs_remove_file(domain->kobj, &domain->sysfs_domain_id.attr);
 
-	if (domain->sysfs_domain_in_use_created)
-		sysfs_remove_file(domain->kobj,
-				  &domain->sysfs_domain_in_use.attr);
+	if (domain->ports_kobj)
+		kobject_del(domain->ports_kobj);
+
 	if (domain->kobj)
 		kobject_del(domain->kobj);
 }
@@ -543,6 +550,39 @@ static ssize_t octtx_domain_in_use_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%d\n", domain->in_use);
 }
 
+static ssize_t octtx_netport_stats_show(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
+{
+	struct octtx_bgx_port *port;
+	int ret;
+
+	port = container_of(kobj, struct octtx_bgx_port, kobj);
+	if (!port)
+		return 0;
+
+	ret = bgx->get_port_stats(port);
+	if (ret)
+		return 0;
+	ret = pki->get_bgx_port_stats(port);
+	if (ret)
+		return 0;
+	port->stats.rxucast = port->stats.rxpkts -
+			      port->stats.rxbcast - port->stats.rxmcast;
+	port->stats.txucast = port->stats.txpkts -
+			      port->stats.txbcast - port->stats.txmcast;
+	return snprintf(buf, PAGE_SIZE,
+			"%lld %lld %lld %lld %lld %lld %lld\n"
+			"%lld %lld %lld %lld %lld %lld %lld\n",
+			port->stats.rxpkts, port->stats.rxbytes,
+			port->stats.rxdrop, port->stats.rxerr,
+			port->stats.rxucast, port->stats.rxbcast,
+			port->stats.rxmcast,
+			port->stats.txpkts, port->stats.txbytes,
+			port->stats.txdrop, port->stats.txerr,
+			port->stats.txucast, port->stats.txbcast,
+			port->stats.txmcast);
+}
+
 int octeontx_create_domain(const char *name, int type, int sso_count,
 			   int fpa_count, int ssow_count, int pko_count,
 			   int pki_count, int tim_count, int bgx_count,
@@ -552,6 +592,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 {
 	void *ssow_ram_mbox_addr = NULL;
 	struct octtx_domain *domain;
+	struct kobj_attribute *kattr;
 	u16 domain_id;
 	int ret = -EINVAL;
 	int node = 0;
@@ -727,8 +768,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	 * domain->bgx_port[i].port_idx = i; -- domain-local port index.
 	 * domain->bgx_port[i].port_gidx = n; -- global port index.
 	 * In this, default configuraiton, all available ports are
-	 * given to this domain, except port 0, which is under
-	 * Linux, hosting the dataplane application, control.
+	 * given to this domain.
 	 */
 	domain->bgx_count = bgx_count;
 	if (domain->bgx_count) {
@@ -746,7 +786,6 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		}
 		domain->bgx_domain_created = true;
 	}
-
 	/* Now that we know which exact ports we have, set pkinds for them. */
 	for (i = 0; i < domain->bgx_count; i++) {
 		ret = pki->add_bgx_port(node, domain_id, &domain->bgx_port[i]);
@@ -768,8 +807,22 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 				domain->bgx_port[i].glb_port_idx);
 			goto error;
 		}
+		/* sysfs entry: */
+		ret = kobject_init_and_add(&domain->bgx_port[i].kobj,
+					   get_ktype(domain->ports_kobj),
+					   domain->ports_kobj, "net%d", i);
+		if (ret)
+			goto error;
+		kattr = &domain->bgx_port[i].sysfs_stats;
+		kattr->show = octtx_netport_stats_show;
+		kattr->attr.name = "stats";
+		kattr->attr.mode = 0444;
+		sysfs_attr_init(&kattr->attr);
+		ret = sysfs_create_file(&domain->bgx_port[i].kobj,
+					&kattr->attr);
+		if (ret < 0)
+			goto error;
 	}
-
 	/* remove this once PKO init extends for LBK. */
 	domain->pko_vf_count = port_count;
 	if (domain->pko_vf_count) {
