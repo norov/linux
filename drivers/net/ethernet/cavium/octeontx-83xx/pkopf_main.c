@@ -15,7 +15,7 @@
 #include "fpa.h"
 
 #define DRV_NAME "octeontx-pko"
-#define DRV_VERSION "0.1"
+#define DRV_VERSION "1.0"
 
 /* PKO MAC type (enumerated by PKO_LMAC_E) */
 #define PKO_MAC_LBK	0
