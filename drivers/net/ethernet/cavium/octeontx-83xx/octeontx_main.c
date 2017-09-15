@@ -42,7 +42,7 @@ static dev_t octtx_dev;
 
 /* Number of milliseconds we wait since last domain reset before we allow
  * domain to be destroyed, this is to account for a time between application
- * opens devices and a time it actually sends RM_START_DOMAIN message over
+ * opens devices and a time it actually sends RM_START_APP message over
  * mailbox
  */
 #define DESTROY_DELAY_IN_MS	1000
@@ -362,7 +362,7 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 				       req, resp, add_data);
 		break;
 	case NO_COPROC:
-		if (hdr->msg == RM_START_DOMAIN) {
+		if (hdr->msg == RM_START_APP) {
 			domain->in_use = true;
 			/* make sure it is flushed to memory because threads
 			 * using it might be running on different cores
