@@ -16,7 +16,7 @@
 #include "fpa.h"
 
 #define DRV_NAME "octeontx-fpavf"
-#define DRV_VERSION "0.1"
+#define DRV_VERSION "1.0"
 
 static int setup_test;
 module_param(setup_test, int, 0644);
