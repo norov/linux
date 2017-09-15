@@ -250,8 +250,9 @@ static ssize_t pool_maxcnt_show(struct device *dev,
 {
 	struct fpapf *curr, *fpa = NULL;
 	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	int vfid = pdev->devfn;
+	int i, n, vfid = pdev->devfn;
 	u64 cnt;
+	char info[512];
 
 	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
 		if (curr->pdev == pdev->physfn) {
@@ -261,9 +262,13 @@ static ssize_t pool_maxcnt_show(struct device *dev,
 	}
 	if (!fpa)
 		return 0;
-	cnt = readq_relaxed(fpa->vf[vfid].domain.reg_base +
-			    FPA_VF_VHAURA_CNT_LIMIT(0));
-	return snprintf(buf, PAGE_SIZE, "%lld\n", cnt);
+
+	for (i = 0, n = 0; i < FPA_AURA_SET_SIZE; i++) {
+		cnt = readq_relaxed(fpa->vf[vfid].domain.reg_base +
+				    FPA_VF_VHAURA_CNT_LIMIT(i));
+		n += sprintf(&info[n], "%lld\n", cnt);
+	}
+	return snprintf(buf, PAGE_SIZE, "%s", info);
 }
 
 static struct device_attribute pool_maxcnt_attr = {
@@ -277,8 +282,9 @@ static ssize_t pool_curcnt_show(struct device *dev,
 {
 	struct fpapf *curr, *fpa = NULL;
 	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	int vfid = pdev->devfn;
+	int i, n, vfid = pdev->devfn;
 	u64 cnt;
+	char info[512];
 
 	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
 		if (curr->pdev == pdev->physfn) {
@@ -289,14 +295,60 @@ static ssize_t pool_curcnt_show(struct device *dev,
 	if (!fpa)
 		return 0;
 
-	cnt = readq_relaxed(fpa->vf[vfid].domain.reg_base +
-			    FPA_VF_VHAURA_CNT(0));
-	return snprintf(buf, PAGE_SIZE, "%lld\n", cnt);
+	for (i = 0, n = 0; i < FPA_AURA_SET_SIZE; i++) {
+		cnt = readq_relaxed(fpa->vf[vfid].domain.reg_base +
+				    FPA_VF_VHAURA_CNT(i));
+		n += sprintf(&info[n], "%lld\n", cnt);
+	}
+	return snprintf(buf, PAGE_SIZE, "%s", info);
 }
 
 static struct device_attribute pool_curcnt_attr = {
 	.attr = {.name = "pool_curcnt",  .mode = 0444},
 	.show = pool_curcnt_show,
+	.store = NULL
+};
+
+static ssize_t pool_redcnt_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct fpapf *curr, *fpa = NULL;
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	int i, n, vfid = pdev->devfn;
+	u64 reg, ena, lvl, pass, drop, aura;
+	char *info;
+
+	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
+		if (curr->pdev == pdev->physfn) {
+			fpa = curr;
+			break;
+		}
+	}
+	if (!fpa)
+		return 0;
+
+	info = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!info)
+		return 0;
+
+	aura = vfid * FPA_AURA_SET_SIZE;
+	for (i = 0, n = 0; i < FPA_AURA_SET_SIZE; i++, aura++) {
+		reg = fpa_reg_read(fpa, FPA_PF_AURAX_CNT_LEVELS(aura));
+		ena = reg & (1ull << 39);
+		lvl = reg & 0xFFull;
+		pass = (reg >> 8) & 0xFFull;
+		drop = (reg >> 16) & 0xFFull;
+		n += sprintf(&info[n], "%lld %lld %lld %lld\n",
+			     ena, lvl, pass, drop);
+	}
+	n = snprintf(buf, PAGE_SIZE, "%s", info);
+	kfree(info);
+	return n;
+}
+
+static struct device_attribute pool_redcnt_attr = {
+	.attr = {.name = "pool_redcnt",  .mode = 0444},
+	.show = pool_redcnt_show,
 	.store = NULL
 };
 
@@ -352,6 +404,8 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 						  &pool_maxcnt_attr.attr);
 				sysfs_remove_file(&virtfn->dev.kobj,
 						  &pool_curcnt_attr.attr);
+				sysfs_remove_file(&virtfn->dev.kobj,
+						  &pool_redcnt_attr.attr);
 				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
 			}
 			dev_info(&fpa->pdev->dev,
@@ -385,11 +439,11 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 				u32 num_vfs, struct kobject *kobj)
 {
-	int i, j, aura, vf_idx = 0;
+	int i, j, ret, aura, vf_idx = 0;
 	struct fpapf *fpa = NULL;
 	resource_size_t vf_start;
 	struct pci_dev *virtfn;
-	unsigned long ret = 0;
+	unsigned long aura_set = 0;
 	struct fpapf *curr;
 	u64 reg;
 
@@ -401,13 +455,14 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 			break;
 		}
 	}
-
-	if (!fpa)
-		goto err_unlock;
-
-	if ((fpa->total_vfs - fpa->vfs_in_use) < num_vfs)
-		goto err_unlock;
-
+	if (!fpa) {
+		spin_unlock(&octeontx_fpa_devices_lock);
+		return 0;
+	}
+	if ((fpa->total_vfs - fpa->vfs_in_use) < num_vfs) {
+		spin_unlock(&octeontx_fpa_devices_lock);
+		return 0;
+	}
 	for (i = 0; i < fpa->total_vfs; i++) {
 		if (fpa->vf[i].domain.in_use) {
 			continue;
@@ -418,7 +473,7 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 					   pci_iov_virtfn_bus(fpa->pdev, i),
 					   pci_iov_virtfn_devfn(fpa->pdev, i));
 				if (!virtfn)
-					break;
+					goto err_unlock;
 				ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
 							virtfn->dev.kobj.name);
 				if (ret < 0)
@@ -431,8 +486,11 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 							&pool_curcnt_attr.attr);
 				if (ret < 0)
 					goto err_unlock;
+				ret = sysfs_create_file(&virtfn->dev.kobj,
+							&pool_redcnt_attr.attr);
+				if (ret < 0)
+					goto err_unlock;
 			}
-
 			fpa->vf[i].domain.domain_id = domain_id;
 			fpa->vf[i].domain.subdomain_id = vf_idx;
 			fpa->vf[i].domain.gmid = get_gmid(domain_id);
@@ -448,7 +506,7 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 				ioremap(vf_start, FPA_VF_CFG_SIZE);
 
 			if (!fpa->vf[i].domain.reg_base)
-				break;
+				goto err_unlock;
 
 			for (j = 0; j < FPA_AURA_SET_SIZE; j++) {
 				aura = (i * FPA_AURA_SET_SIZE) + j;
@@ -470,10 +528,11 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 				      (0xff & (i + 1)) << 16;
 			else
 				reg = 0;
+
 			fpa_reg_write(fpa, FPA_PF_VFX_GMCTL(i), reg);
 
 			fpa->vf[i].domain.in_use = true;
-			set_bit(i, &ret);
+			set_bit(i, &aura_set);
 			identify(&fpa->vf[i], domain_id, vf_idx,
 				 fpa->stack_ln_ptrs);
 			vf_idx++;
@@ -483,19 +542,16 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 			}
 		}
 	}
-
-	if (vf_idx != num_vfs) {
-		ret = 0;
+	if (vf_idx != num_vfs)
 		goto err_unlock;
-	}
 
 	spin_unlock(&octeontx_fpa_devices_lock);
-	return ret;
+	return aura_set;
 
 err_unlock:
 	spin_unlock(&octeontx_fpa_devices_lock);
 	fpa_pf_destroy_domain(id, domain_id, kobj);
-	return ret;
+	return 0;
 }
 
 static int fpa_pf_get_vf_count(u32 id)
@@ -510,12 +566,10 @@ static int fpa_pf_get_vf_count(u32 id)
 			break;
 		}
 	}
-
 	if (!fpa) {
 		spin_unlock(&octeontx_fpa_devices_lock);
 		return 0;
 	}
-
 	spin_unlock(&octeontx_fpa_devices_lock);
 	return fpa->total_vfs;
 }
@@ -536,7 +590,6 @@ int fpa_reset_domain(u32 id, u16 domain_id)
 			break;
 		}
 	}
-
 	if (!fpa) {
 		spin_unlock(&octeontx_fpa_devices_lock);
 		return 0;

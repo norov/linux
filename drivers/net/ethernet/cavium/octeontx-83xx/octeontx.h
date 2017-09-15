@@ -91,6 +91,24 @@ enum domain_type {
 	HOST_NET
 };
 
+/* Port statistics */
+struct octtx_port_stats {
+	u64	rxpkts;
+	u64	rxbytes;
+	u64	rxdrop;
+	u64	rxerr;
+	u64	rxucast;
+	u64	rxbcast;
+	u64	rxmcast;
+	u64	txpkts;
+	u64	txbytes;
+	u64	txdrop;
+	u64	txerr;
+	u64	txucast;
+	u64	txbcast;
+	u64	txmcast;
+};
+
 /* Domain network (BGX) port */
 #define OCTTX_MAX_BGX_PORTS 16 /* Maximum BGX ports per System */
 
@@ -116,6 +134,8 @@ struct octtx_bgx_port {
 	int	num_chans;
 	int	pkind; /* PKI port number */
 	int	link_up; /* Last retrieved link status */
+	struct octtx_port_stats stats;
+	struct kobj_attribute sysfs_stats;
 };
 
 /* Domain internal (LBK) port */
