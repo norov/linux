@@ -12,7 +12,7 @@
 #include "sso.h"
 
 #define DRV_NAME "octeontx-ssow"
-#define DRV_VERSION "0.1"
+#define DRV_VERSION "1.0"
 
 static atomic_t ssow_count = ATOMIC_INIT(0);
 static DEFINE_SPINLOCK(octeontx_ssow_devices_lock);
