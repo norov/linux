@@ -16,7 +16,7 @@
 #include "rst.h"
 
 #define DRV_NAME "octeontx-rst"
-#define DRV_VERSION "0.1"
+#define DRV_VERSION "1.0"
 
 static atomic_t rst_count = ATOMIC_INIT(0);
 static DEFINE_SPINLOCK(octeontx_rst_devices_lock);
