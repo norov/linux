@@ -1417,43 +1417,79 @@ static const struct bpf_func_proto bpf_skb_store_bytes_proto = {
 	.arg5_type	= ARG_ANYTHING,
 };
 
-static int __bpf_tx_xdp(struct net_device *dev, struct xdp_buff *xdp)
+static int __bpf_tx_xdp(struct net_device *dev,
+			struct bpf_map *map,
+			struct xdp_buff *xdp,
+			u32 index)
 {
-	if (dev->netdev_ops->ndo_xdp_xmit) {
-		dev->netdev_ops->ndo_xdp_xmit(dev, xdp);
-		return 0;
+	int err;
+
+	if (!dev->netdev_ops->ndo_xdp_xmit) {
+		bpf_warn_invalid_xdp_redirect(dev->ifindex);
+		return -EOPNOTSUPP;
 	}
-	bpf_warn_invalid_xdp_redirect(dev->ifindex);
-	return -EOPNOTSUPP;
+	err = dev->netdev_ops->ndo_xdp_xmit(dev, xdp);
+	if (err)
+		return err;
+
+	if (map)
+		__dev_map_insert_ctx(map, index);
+	else
+		dev->netdev_ops->ndo_xdp_flush(dev);
+
+	return err;
+
 }
 
 struct redirect_info {
 	u32 ifindex;
 	u32 flags;
 	struct bpf_map *map;
+	struct bpf_map *map_to_flush;
 };
 
 static DEFINE_PER_CPU(struct redirect_info, redirect_info);
+
+void xdp_do_flush_map(void)
+{
+	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
+	struct bpf_map *map = ri->map_to_flush;
+
+	ri->map = NULL;
+	ri->map_to_flush = NULL;
+
+	if (map)
+		__dev_map_flush(map);
+}
+EXPORT_SYMBOL_GPL(xdp_do_flush_map);
+
 int xdp_do_redirect_map(struct net_device *dev, struct xdp_buff *xdp,
 			struct bpf_prog *xdp_prog)
 {
 	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
 	struct bpf_map *map = ri->map;
+	u32 index = ri->ifindex;
 	struct net_device *fwd;
 
 	if (ri->map)
 		return xdp_do_redirect_map(dev, xdp, xdp_prog);
 
-	fwd = __dev_map_lookup_elem(map, ri->ifindex);
+	fwd = __dev_map_lookup_elem(map, index);
 	if (!fwd)
 		goto out;
 
 	ri->ifindex = 0;
+
+	if (ri->map_to_flush && (ri->map_to_flush != map))
+		xdp_do_flush_map();
+
+	ri->map_to_flush = map;
+
 	ri->map = NULL;
 
 	/*trace_xdp_redirect(dev, fwd, xdp_prog, XDP_REDIRECT);*/
 
-	return __bpf_tx_xdp(fwd, xdp);
+	return __bpf_tx_xdp(fwd, map, xdp, index);
 out:
 	ri->ifindex = 0;
 	ri->map = NULL;
@@ -1473,7 +1509,7 @@ int xdp_do_redirect(struct net_device *dev, struct xdp_buff *xdp,
 		return -EINVAL;
 	}
 
-	return __bpf_tx_xdp(fwd, xdp);
+	return __bpf_tx_xdp(fwd, NULL, xdp, 0);
 }
 EXPORT_SYMBOL_GPL(xdp_do_redirect);
 
