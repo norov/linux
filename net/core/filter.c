@@ -1416,6 +1416,57 @@ static const struct bpf_func_proto bpf_skb_store_bytes_proto = {
 	.arg5_type	= ARG_ANYTHING,
 };
 
+static int __bpf_tx_xdp(struct net_device *dev, struct xdp_buff *xdp)
+{
+	if (dev->netdev_ops->ndo_xdp_xmit) {
+		dev->netdev_ops->ndo_xdp_xmit(dev, xdp);
+		return 0;
+	}
+	bpf_warn_invalid_xdp_redirect(dev->ifindex);
+	return -EOPNOTSUPP;
+}
+
+struct redirect_info {
+	u32 ifindex;
+	u32 flags;
+};
+
+static DEFINE_PER_CPU(struct redirect_info, redirect_info);
+int xdp_do_redirect(struct net_device *dev, struct xdp_buff *xdp)
+{
+	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
+
+	dev = dev_get_by_index_rcu(dev_net(dev), ri->ifindex);
+	ri->ifindex = 0;
+	if (unlikely(!dev)) {
+		bpf_warn_invalid_xdp_redirect(ri->ifindex);
+		return -EINVAL;
+	}
+
+	return __bpf_tx_xdp(dev, xdp);
+}
+EXPORT_SYMBOL_GPL(xdp_do_redirect);
+
+BPF_CALL_2(bpf_xdp_redirect, u32, ifindex, u64, flags)
+{
+	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
+
+	if (unlikely(flags))
+		return XDP_ABORTED;
+
+	ri->ifindex = ifindex;
+	ri->flags = flags;
+	return XDP_REDIRECT;
+}
+
+static const struct bpf_func_proto bpf_xdp_redirect_proto = {
+	.func           = bpf_xdp_redirect,
+	.gpl_only       = false,
+	.ret_type       = RET_INTEGER,
+	.arg1_type      = ARG_ANYTHING,
+	.arg2_type      = ARG_ANYTHING,
+};
+
 BPF_CALL_4(bpf_skb_load_bytes, const struct sk_buff *, skb, u32, offset,
 	   void *, to, u32, len)
 {
@@ -1744,13 +1795,6 @@ static const struct bpf_func_proto bpf_clone_redirect_proto = {
 	.arg2_type      = ARG_ANYTHING,
 	.arg3_type      = ARG_ANYTHING,
 };
-
-struct redirect_info {
-	u32 ifindex;
-	u32 flags;
-};
-
-static DEFINE_PER_CPU(struct redirect_info, redirect_info);
 
 BPF_CALL_2(bpf_redirect, u32, ifindex, u64, flags)
 {
@@ -2771,6 +2815,12 @@ void bpf_warn_invalid_xdp_action(u32 act)
 	WARN_ONCE(1, "Illegal XDP return value %u, expect packet loss\n", act);
 }
 EXPORT_SYMBOL_GPL(bpf_warn_invalid_xdp_action);
+void bpf_warn_invalid_xdp_redirect(u32 ifindex)
+{
+	WARN_ONCE(1, "Illegal XDP redirect to unsupported device ifindex(%i)\n",
+		  ifindex);
+}
+EXPORT_SYMBOL_GPL(bpf_warn_invalid_xdp_redirect);
 
 static u32 sk_filter_convert_ctx_access(enum bpf_access_type type, int dst_reg,
 					int src_reg, int ctx_off,
