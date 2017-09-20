@@ -874,10 +874,21 @@ enum {
 
 /* XDP section */
 
+#define XDP_FLAGS_UPDATE_IF_NOEXIST	(1U << 0)
+#define XDP_FLAGS_SKB_MODE		(1U << 1)
+#define XDP_FLAGS_DRV_MODE		(1U << 2)
+#define XDP_FLAGS_HW_MODE		(1U << 3)
+#define XDP_FLAGS_MODES			(XDP_FLAGS_SKB_MODE | \
+					 XDP_FLAGS_DRV_MODE | \
+					 XDP_FLAGS_HW_MODE)
+#define XDP_FLAGS_MASK			(XDP_FLAGS_UPDATE_IF_NOEXIST | \
+					 XDP_FLAGS_MODES)
+
 enum {
 	IFLA_XDP_UNSPEC,
 	IFLA_XDP_FD,
 	IFLA_XDP_ATTACHED,
+	IFLA_XDP_FLAGS,
 	__IFLA_XDP_MAX,
 };
 

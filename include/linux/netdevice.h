@@ -1901,8 +1901,16 @@ struct net_device {
 	struct lock_class_key	*qdisc_tx_busylock;
 	struct lock_class_key	*qdisc_running_key;
 	bool			proto_down;
+	struct bpf_prog __rcu	*xdp_prog;
 };
 #define to_net_dev(d) container_of(d, struct net_device, dev)
+
+static inline bool netif_elide_gro(const struct net_device *dev)
+{
+	if (!(dev->features & NETIF_F_GRO) || dev->xdp_prog)
+		return true;
+	return false;
+}
 
 #define	NETDEV_ALIGN		32
 
@@ -3345,7 +3353,7 @@ int dev_get_phys_port_id(struct net_device *dev,
 int dev_get_phys_port_name(struct net_device *dev,
 			   char *name, size_t len);
 int dev_change_proto_down(struct net_device *dev, bool proto_down);
-int dev_change_xdp_fd(struct net_device *dev, int fd);
+int dev_change_xdp_fd(struct net_device *dev, int fd, u32 flags);
 struct sk_buff *validate_xmit_skb_list(struct sk_buff *skb, struct net_device *dev);
 struct sk_buff *dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 				    struct netdev_queue *txq, int *ret);
