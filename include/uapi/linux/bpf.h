@@ -92,6 +92,7 @@ enum bpf_map_type {
 	BPF_MAP_TYPE_STACK_TRACE,
 	BPF_MAP_TYPE_CGROUP_ARRAY,
 	BPF_MAP_TYPE_LPM_TRIE,
+	BPF_MAP_TYPE_DEVMAP,
 };
 
 enum bpf_prog_type {
