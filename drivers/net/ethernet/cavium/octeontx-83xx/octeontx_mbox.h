@@ -50,6 +50,7 @@ enum coproc_t {
 #define DPI_GET_REG_CFG 0x4
 
 #define RM_START_APP		0x1
+#define RM_INTERFACE_VERSION	0x2
 
 /*resp messages*/
 #define MBOX_RET_SUCCESS	0x0
@@ -254,6 +255,19 @@ struct mbox_dpi_reg_cfg {
 struct mbox_ssow_identify {
 	u16	domain_id;
 	u16	subdomain_id;
+};
+
+/* MBOX interface version message */
+struct mbox_intf_ver {
+	u32	platform:12;
+	u32	major:10;
+	u32	minor:10;
+};
+
+static const struct mbox_intf_ver MBOX_INTERFACE_VERSION = {
+	.platform = 0x01,
+	.major = 0x00,
+	.minor = 0x00
 };
 
 /* FIXME: This union is temporary until we agree to move all messages to RAM */

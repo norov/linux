@@ -28,8 +28,6 @@ typedef enum {
 	MBOX_CHAN_PARTY = 1, /* channel which other party control */
 } mbox_chan_t;
 
-#define MBOX_VERSION 0x010000 /* 1.0.0 */
-
 /* macro return proper channel index depending on which channel we control and
  * if we TX/RX
  */
