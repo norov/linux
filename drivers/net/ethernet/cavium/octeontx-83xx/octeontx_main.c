@@ -310,6 +310,55 @@ void octtx_sysfs_remove(struct device *octtx_device)
 	sysfs_remove_group(&octtx_device->kobj, &octtx_attr_group);
 }
 
+static int rm_receive_message(struct octtx_domain *domain, struct mbox_hdr *hdr,
+			      union mbox_data *resp, void *mdata)
+{
+	struct mbox_intf_ver *msg = mdata;
+	u32 rm_plat, rm_maj, rm_min;
+	u32 app_plat, app_maj, app_min;
+
+	switch (hdr->msg) {
+	case RM_START_APP:
+		domain->in_use = true;
+		/* make sure it is flushed to memory because threads
+		 * using it might be running on different cores
+		 */
+		mb();
+		break;
+	case RM_INTERFACE_VERSION:
+		rm_plat = MBOX_INTERFACE_VERSION.platform;
+		rm_maj = MBOX_INTERFACE_VERSION.major;
+		rm_min = MBOX_INTERFACE_VERSION.minor;
+		app_plat = msg->platform;
+		app_maj = msg->major;
+		app_min = msg->minor;
+
+		/* RM version will be returned to APP */
+		msg->platform = rm_plat;
+		msg->major = rm_maj;
+		msg->minor = rm_min;
+		resp->data = sizeof(struct mbox_intf_ver);
+
+		if (rm_plat != app_plat ||
+		    rm_maj != app_maj ||
+		    rm_min != app_min) {
+			dev_err(octtx_device, "MBOX Interface version mismatch. APP ver is %d.%d.%d, RM ver is %d.%d.%d\n",
+				app_plat, app_maj, app_min,
+				rm_plat, rm_maj, rm_min);
+			break;
+		}
+		break;
+	default:
+		goto err;
+	}
+
+	hdr->res_code = MBOX_RET_SUCCESS;
+	return 0;
+err:
+	hdr->res_code = MBOX_RET_INVALID;
+	return -EINVAL;
+}
+
 static int octtx_master_receive_message(struct mbox_hdr *hdr,
 					union mbox_data *req,
 					union mbox_data *resp,
@@ -362,15 +411,8 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 				       req, resp, add_data);
 		break;
 	case NO_COPROC:
-		if (hdr->msg == RM_START_APP) {
-			domain->in_use = true;
-			/* make sure it is flushed to memory because threads
-			 * using it might be running on different cores
-			 */
-			mb();
-			hdr->res_code = MBOX_RET_SUCCESS;
-			break;
-		}
+		rm_receive_message(domain, hdr, resp, add_data);
+		break;
 	case SSOW_COPROC:
 	default:
 		dev_err(octtx_device, "invalid mbox message\n");
@@ -1239,7 +1281,9 @@ static int __init octeontx_init_module(void)
 {
 	int ret;
 
-	pr_info("%s, ver %s\n", DRV_NAME, DRV_VERSION);
+	pr_info("%s, ver %s, MBOX IF ver %d.%d.%d\n", DRV_NAME, DRV_VERSION,
+		MBOX_INTERFACE_VERSION.platform, MBOX_INTERFACE_VERSION.major,
+		MBOX_INTERFACE_VERSION.minor);
 
 	bgx = bgx_octeontx_init();
 	if (!bgx)
