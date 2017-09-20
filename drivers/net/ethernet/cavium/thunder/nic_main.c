@@ -1080,7 +1080,7 @@ static void nic_config_timestamp(struct nicpf *nic, int vf, struct set_ptp *ptp)
 	pkind_val = nic_reg_read(nic, NIC_PF_PKIND_0_15_CFG | (pkind_idx << 3));
 	pkind = (struct pkind_cfg *)&pkind_val;
 
-	if (ptp->enable) {
+	if (ptp->enable && !pkind->hdr_sl) {
 		/* Skiplen to exclude 8byte timestamp while parsing pkt
 		 * If not configured, will result in L2 errors.
 		 */
@@ -1091,7 +1091,7 @@ static void nic_config_timestamp(struct nicpf *nic, int vf, struct set_ptp *ptp)
 		nic_reg_write(nic,
 			      NIC_PF_RX_ETYPE_0_7 | (1 << 3),
 			      (ETYPE_ALG_ENDPARSE << 16) | ETH_P_1588);
-	} else {
+	} else if (!ptp->enable && pkind->hdr_sl) {
 		pkind->maxlen -= (pkind->hdr_sl * 2);
 		pkind->hdr_sl = 0;
 		bgx_config_timestamping(nic->node, bgx_idx, lmac, false);
