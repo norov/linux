@@ -267,6 +267,11 @@ enum bpf_func_id {
 	 * @flags: bit 0 - if set, redirect to ingress instead of egress
 	 *         other bits - reserved
 	 * Return: TC_ACT_REDIRECT
+	 * int bpf_redirect_map(key, map, flags)
+	 redirect to endpoint in map
+	 *     @key: index in map to lookup
+	 *     @map: fd of map to do lookup in
+	 *     @flags: --
 	 */
 	BPF_FUNC_redirect,
 
