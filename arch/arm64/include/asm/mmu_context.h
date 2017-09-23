@@ -194,5 +194,8 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 #define activate_mm(prev,next)	switch_mm(prev, next, NULL)
 
 void verify_cpu_asid_bits(void);
+int lock_context(struct mm_struct *mm, int index);
+int unlock_context_by_index(int index);
+bool unlock_context_by_mm(struct mm_struct *mm);
 
 #endif
