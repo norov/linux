@@ -1217,15 +1217,8 @@ static int octtx_dev_open(struct inode *inode, struct file *fp)
 
 static int octtx_dev_release(struct inode *inode, struct file *fp)
 {
-	int i;
-
 	if (gpio_in_use == 0)
 		return -EINVAL;
-
-	for (i = 0; i < MAX_GPIO; i++)
-		if (gpio_installed[i] != 0)
-			__remove_el3_inthandler(i);
-
 	gpio_in_use = 0;
 	return 0;
 }
@@ -1308,6 +1301,13 @@ static int __init octeontx_init_module(void)
 	queue_delayed_work(check_link, &dwork, 0);
 	queue_delayed_work(reset_domain, &dwork_reset, 0);
 
+	/* Register task cleanup handler */
+	ret = task_cleanup_handler_add(cleanup_el3_irqs);
+	if (ret != 0) {
+		ret = -ENODEV;
+		goto cleanup_handler_err;
+	}
+
 	/* create a char device */
 	ret = alloc_chrdev_region(&octtx_dev, 1, 1, DEVICE_NAME);
 	if (ret != 0) {
@@ -1366,6 +1366,9 @@ cdev_alloc_err:
 	unregister_chrdev_region(octtx_dev, 1);
 
 alloc_chrdev_err:
+cleanup_handler_err:
+	task_cleanup_handler_remove(cleanup_el3_irqs);
+
 wq_err:
 	symbol_put(timpf_com);
 
@@ -1418,6 +1421,7 @@ static void __exit octeontx_cleanup_module(void)
 	symbol_put(timpf_com);
 	symbol_put(lbk_com);
 	symbol_put(thunder_bgx_com);
+	task_cleanup_handler_remove(cleanup_el3_irqs);
 }
 
 module_init(octeontx_init_module);
