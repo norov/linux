@@ -16,6 +16,7 @@
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/device.h>
+#include <linux/mmu_context.h>
 
 #include "octeontx.h"
 #include "octeontx_mbox.h"
@@ -1092,6 +1093,7 @@ static inline int __install_el3_inthandler(unsigned long gpio_num,
 
 	spin_lock_irqsave(&el3_inthandler_lock, flags);
 	if (!gpio_installed[gpio_num]) {
+		lock_context(current->group_leader->mm, gpio_num);
 		arm_smccc_smc(THUNDERX_INSTALL_GPIO_INT, gpio_num,
 			      sp, cpu, ttbr0, 0, 0, 0, &res);
 		if (res.a0 == 0) {
@@ -1101,6 +1103,8 @@ static inline int __install_el3_inthandler(unsigned long gpio_num,
 			gpio_installed_tasks[gpio_num]
 				= current->group_leader;
 			retval = 0;
+		} else {
+			unlock_context_by_index(gpio_num);
 		}
 	}
 	spin_unlock_irqrestore(&el3_inthandler_lock, flags);
@@ -1120,6 +1124,7 @@ static inline int __remove_el3_inthandler(unsigned long gpio_num)
 		gpio_installed[gpio_num] = 0;
 		gpio_installed_threads[gpio_num] = NULL;
 		gpio_installed_tasks[gpio_num] = NULL;
+		unlock_context_by_index(gpio_num);
 		retval = 0;
 	} else {
 		retval = -1;
