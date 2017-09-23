@@ -64,15 +64,6 @@ struct intr_hand {
 	irqreturn_t (*handler)(int, void *);
 };
 
-struct octtx_gpio {
-	u64	ttbr;
-	u64	isr_base;
-	u64	sp;
-	int	in_use;
-	u64	cpu;
-	u64	gpio_num;
-};
-
 struct octtx_gpio_usr_data {
 	u64	isr_base;
 	u64	sp;
@@ -84,7 +75,7 @@ struct octtx_gpio_usr_data {
 	_IOW(OCTTX_IOC_MAGIC, 1, struct octtx_gpio_usr_data)
 
 #define OCTTX_IOC_CLR_GPIO_HANDLER \
-	_IOW(OCTTX_IOC_MAGIC, 2, int)
+	_IO(OCTTX_IOC_MAGIC, 2)
 
 enum domain_type {
 	APP_NET = 0,
