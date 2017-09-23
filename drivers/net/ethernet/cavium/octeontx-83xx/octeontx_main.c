@@ -111,6 +111,7 @@ struct octtx_domain {
 static int gpio_in_use;
 static int gpio_installed[MAX_GPIO];
 static struct thread_info *gpio_installed_threads[MAX_GPIO];
+static struct task_struct *gpio_installed_tasks[MAX_GPIO];
 
 static DEFINE_SPINLOCK(octeontx_domains_lock);
 static LIST_HEAD(octeontx_domains);
@@ -1095,6 +1096,10 @@ static inline int __install_el3_inthandler(unsigned long gpio_num,
 			      sp, cpu, ttbr0, 0, 0, 0, &res);
 		if (res.a0 == 0) {
 			gpio_installed[gpio_num] = 1;
+			gpio_installed_threads[gpio_num]
+				= current_thread_info();
+			gpio_installed_tasks[gpio_num]
+				= current->group_leader;
 			retval = 0;
 		}
 	}
@@ -1113,6 +1118,8 @@ static inline int __remove_el3_inthandler(unsigned long gpio_num)
 		arm_smccc_smc(THUNDERX_REMOVE_GPIO_INT, gpio_num,
 			      0, 0, 0, 0, 0, 0, &res);
 		gpio_installed[gpio_num] = 0;
+		gpio_installed_threads[gpio_num] = NULL;
+		gpio_installed_tasks[gpio_num] = NULL;
 		retval = 0;
 	} else {
 		retval = -1;
@@ -1161,10 +1168,7 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		gpio_num = gpio_usr.gpio_num;
 		ret = __install_el3_inthandler(gpio_num, gpio_sp,
 					       gpio_cpu, gpio_isr_base);
-		if (ret == 0)
-			gpio_installed_threads[gpio_usr.gpio_num]
-				= current_thread_info();
-		else
+		if (ret != 0)
 			return -EEXIST;
 		break;
 	case OCTTX_IOC_CLR_GPIO_HANDLER: /*Clear GPIO ISR handler*/
@@ -1181,13 +1185,27 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
-void cleanup_el3_irqs(struct thread_info *thread)
+void cleanup_el3_irqs(struct task_struct *task)
 {
 	int i;
-
 	for (i = 0; i < MAX_GPIO; i++) {
-		if (gpio_installed[i] && (gpio_installed_threads[i] == thread))
+		if (gpio_installed[i] &&
+		    gpio_installed_tasks[i] &&
+		    ((gpio_installed_tasks[i] == task) ||
+			(gpio_installed_tasks[i] == task->group_leader))) {
+			pr_alert("Exiting, removing handler for GPIO %d\n",
+				 i);
 			__remove_el3_inthandler(i);
+			pr_alert("Exited, removed handler for GPIO %d\n",
+				 i);
+		} else {
+			if (gpio_installed[i] &&
+			    (gpio_installed_threads[i]
+			     == current_thread_info()))
+				pr_alert(
+	    "Exiting, thread info matches, not removing handler for GPIO %d\n",
+					 i);
+		}
 	}
 }
 
