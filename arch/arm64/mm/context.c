@@ -35,6 +35,10 @@ static unsigned long *asid_map;
 
 static DEFINE_PER_CPU(atomic64_t, active_asids);
 static DEFINE_PER_CPU(u64, reserved_asids);
+
+#define LOCKED_ASIDS_COUNT 128
+
+static u64 locked_asids[LOCKED_ASIDS_COUNT];
 static cpumask_t tlb_flush_pending;
 
 #define ASID_MASK		(~GENMASK(asid_bits - 1, 0))
@@ -117,13 +121,68 @@ static void flush_context(unsigned int cpu)
 		per_cpu(reserved_asids, i) = asid;
 	}
 
+	/* Set bits for locked ASIDs. */
+	for (i = 0; i < LOCKED_ASIDS_COUNT; i++) {
+		asid = locked_asids[i];
+		if (asid != 0)
+			__set_bit(asid & ~ASID_MASK, asid_map);
+	}
+
 	/* Queue a TLB invalidate and flush the I-cache if necessary. */
 	cpumask_setall(&tlb_flush_pending);
 }
 
+int lock_context(struct mm_struct *mm, int index)
+{
+	unsigned long flags;
+	u64 asid;
+
+	if ((index < 0) || (index >= LOCKED_ASIDS_COUNT))
+		return -1;
+	raw_spin_lock_irqsave(&cpu_asid_lock, flags);
+	asid = atomic64_read(&mm->context.id);
+	locked_asids[index] = asid;
+	raw_spin_unlock_irqrestore(&cpu_asid_lock, flags);
+	return 0;
+}
+
+int unlock_context_by_index(int index)
+{
+	unsigned long flags;
+
+	if ((index < 0) || (index >= LOCKED_ASIDS_COUNT))
+		return -1;
+	raw_spin_lock_irqsave(&cpu_asid_lock, flags);
+	locked_asids[index] = 0;
+	raw_spin_unlock_irqrestore(&cpu_asid_lock, flags);
+	return 0;
+}
+
+bool unlock_context_by_mm(struct mm_struct *mm)
+{
+	int i;
+	unsigned long flags;
+	bool hit = false;
+	u64 asid;
+
+	raw_spin_lock_irqsave(&cpu_asid_lock, flags);
+	asid = atomic64_read(&mm->context.id);
+
+	for (i = 0; i < LOCKED_ASIDS_COUNT; i++) {
+		if (locked_asids[i] == asid) {
+			hit = true;
+			locked_asids[i] = 0;
+		}
+	}
+
+	raw_spin_unlock_irqrestore(&cpu_asid_lock, flags);
+
+	return hit;
+}
+
 static bool check_update_reserved_asid(u64 asid, u64 newasid)
 {
-	int cpu;
+	int i, cpu;
 	bool hit = false;
 
 	/*
@@ -139,6 +198,14 @@ static bool check_update_reserved_asid(u64 asid, u64 newasid)
 		if (per_cpu(reserved_asids, cpu) == asid) {
 			hit = true;
 			per_cpu(reserved_asids, cpu) = newasid;
+		}
+	}
+
+	/* Same mechanism for locked ASIDs */
+	for (i = 0; i < LOCKED_ASIDS_COUNT; i++) {
+		if (locked_asids[i] == asid) {
+			hit = true;
+			locked_asids[i] = newasid;
 		}
 	}
 
