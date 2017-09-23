@@ -261,6 +261,35 @@ static void thunderx_gpio_irq_release_resources(struct irq_data *data)
 	devm_kfree(chip->parent, irqdev->name);
 }
 
+/*
+ * Do not set msix_entries for SPI IRQs.
+ */
+static int thunderx_gpio_irq_spi_request_resources(struct irq_data *data)
+{
+	struct gpio_chip *chip = irq_data_get_irq_chip_data(data);
+	struct thunderx_gpio *gpio =
+		container_of(chip, struct thunderx_gpio, chip);
+	unsigned int line = data->hwirq;
+
+	if (!thunderx_gpio_is_gpio(gpio, line))
+		return -EIO;
+
+	writeq(GPIO_INTR_ENA_W1C, gpio->register_base + intr_reg(line));
+
+	return 0;
+}
+
+static void thunderx_gpio_irq_spi_release_resources(struct irq_data *data)
+{
+	struct gpio_chip *chip = irq_data_get_irq_chip_data(data);
+	struct thunderx_gpio *gpio =
+		container_of(chip, struct thunderx_gpio, chip);
+	unsigned int line = data->hwirq;
+
+	writeq(GPIO_INTR_ENA_W1C, gpio->register_base + intr_reg(line));
+
+}
+
 static void thunderx_gpio_irq_ack(struct irq_data *data)
 {
 	struct gpio_chip *chip = irq_data_get_irq_chip_data(data);
@@ -331,6 +360,41 @@ static int thunderx_gpio_irq_set_type(struct irq_data *data,
 
 	return IRQ_SET_MASK_OK;
 }
+
+static void thunderx_gpio_spi_irq_handler(struct irq_desc *desc)
+{
+	unsigned int line;
+	struct gpio_chip *chip = irq_desc_get_handler_data(desc);
+	struct irq_chip *irqchip = irq_desc_get_chip(desc);
+	struct thunderx_gpio *gpio =
+		container_of(chip, struct thunderx_gpio, chip);
+
+	chained_irq_enter(irqchip, desc);
+	for (line = 0; line < chip->ngpio; line++) {
+		if (readq(gpio->register_base + intr_reg(line)) &
+		    GPIO_INTR_INTR) {
+			generic_handle_irq(irq_find_mapping(chip->irqdomain,
+							    line));
+			writeq(GPIO_INTR_INTR,
+			       gpio->register_base + intr_reg(line));
+		}
+	}
+	chained_irq_exit(irqchip, desc);
+}
+
+static struct irq_chip thunderx_gpio_spi_irq_chip = {
+	.name			= "GPIO",
+	.irq_enable		= thunderx_gpio_irq_unmask,
+	.irq_disable		= thunderx_gpio_irq_mask,
+	.irq_ack		= thunderx_gpio_irq_ack,
+	.irq_mask		= thunderx_gpio_irq_mask,
+	.irq_mask_ack		= thunderx_gpio_irq_mask_ack,
+	.irq_unmask		= thunderx_gpio_irq_unmask,
+	.irq_set_type		= thunderx_gpio_irq_set_type,
+	.irq_request_resources	= thunderx_gpio_irq_spi_request_resources,
+	.irq_release_resources	= thunderx_gpio_irq_spi_release_resources,
+	.flags			= IRQCHIP_SET_TYPE_MASKED
+};
 
 /*
  * Interrupts are chained from underlying MSI-X vectors.  We have
@@ -410,12 +474,16 @@ static int thunderx_gpio_probe(struct pci_dev *pdev,
 		goto out;
 	}
 
-	gpio->irqdev_entries = devm_kzalloc(dev,
-					    sizeof(struct thunderx_irqdev) * ngpio,
-					    GFP_KERNEL);
-	if (!gpio->irqdev_entries) {
-		err = -ENOMEM;
-		goto out;
+	if (pdev->irq == 0) {
+		/* Do not allocate irqdev entries for SPI IRQs */
+		gpio->irqdev_entries =
+		    devm_kzalloc(dev,
+				 sizeof(struct thunderx_irqdev) * ngpio,
+				 GFP_KERNEL);
+		if (!gpio->irqdev_entries) {
+			err = -ENOMEM;
+			goto out;
+		}
 	}
 
 	for (i = 0; i < ngpio; i++)
@@ -441,13 +509,26 @@ static int thunderx_gpio_probe(struct pci_dev *pdev,
 	if (err)
 		goto out;
 
-	err = gpiochip_irqchip_add(chip, &thunderx_gpio_irq_chip, 0,
-				   handle_level_irq, IRQ_TYPE_NONE);
+	/* If SPI IRQ is defined, use configuration specific for it */
+	err = gpiochip_irqchip_add(chip, (pdev->irq == 0) ?
+				   &thunderx_gpio_irq_chip
+				   : &thunderx_gpio_spi_irq_chip,
+				   0,
+				   (pdev->irq == 0) ?
+				   handle_level_irq
+				   : handle_bad_irq,
+				   IRQ_TYPE_NONE);
 	if (err) {
 		dev_err(dev, "gpiochip_irqchip_add failed: %d\n", err);
 		goto irqchip_out;
 	}
 
+	if (pdev->irq != 0) {
+		gpiochip_set_chained_irqchip(chip,
+					     &thunderx_gpio_spi_irq_chip,
+					     pdev->irq,
+					     thunderx_gpio_spi_irq_handler);
+	}
 	dev_info(dev, "ThunderX GPIO: %d lines with base %d.\n",
 		 ngpio, chip->base);
 	return 0;
