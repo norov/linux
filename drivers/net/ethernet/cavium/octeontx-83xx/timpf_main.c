@@ -78,7 +78,7 @@ struct timpf {
 
 /* Global list of TIM devices and rings */
 static atomic_t tim_count = ATOMIC_INIT(0);
-static DEFINE_SPINLOCK(octeontx_tim_dev_lock);
+static DEFINE_MUTEX(octeontx_tim_dev_lock);
 static LIST_HEAD(octeontx_tim_devices);
 
 /* Interface to the RST device */
@@ -123,14 +123,14 @@ static struct timpf *tim_dev_from_id(int id)
 {
 	struct timpf *tim;
 
-	spin_lock(&octeontx_tim_dev_lock);
+	mutex_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(tim, &octeontx_tim_devices, list) {
 		if (tim->id == id) {
-			spin_unlock(&octeontx_tim_dev_lock);
+			mutex_unlock(&octeontx_tim_dev_lock);
 			return tim;
 		}
 	}
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 	return NULL;
 }
 
@@ -138,15 +138,15 @@ static struct timpf *tim_dev_from_devid(int id, int domain_id, int devid)
 {
 	struct timpf *tim;
 
-	spin_lock(&octeontx_tim_dev_lock);
+	mutex_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(tim, &octeontx_tim_devices, list) {
 		if (node_from_devid(tim->id) == id &&
 		    dev_from_devid(tim->id) == devid) {
-			spin_unlock(&octeontx_tim_dev_lock);
+			mutex_unlock(&octeontx_tim_dev_lock);
 			return tim;
 		}
 	}
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 	return NULL;
 }
 
@@ -161,7 +161,7 @@ static struct timpf *tim_dev_from_ringid(int id, int domain_id,
 	if (id != node || !ringid_is_valid(ringid))
 		return NULL;
 
-	spin_lock(&octeontx_tim_dev_lock);
+	mutex_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(tim, &octeontx_tim_devices, list) {
 		if (node_from_devid(tim->id) != id)
 			continue;
@@ -169,13 +169,13 @@ static struct timpf *tim_dev_from_ringid(int id, int domain_id,
 			vf = &tim->vf[i];
 			if (vf->domain.domain_id == domain_id &&
 			    vf->domain.subdomain_id == ringid) {
-				spin_unlock(&octeontx_tim_dev_lock);
+				mutex_unlock(&octeontx_tim_dev_lock);
 				*ring = i;
 				return tim;
 			}
 		}
 	}
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 	return NULL;
 }
 
@@ -295,7 +295,7 @@ static int tim_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	int ret = 0;
 	u64 reg;
 
-	spin_lock(&octeontx_tim_dev_lock);
+	mutex_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(curr, &octeontx_tim_devices, list) {
 		if (curr->id == id) {
 			tim = curr;
@@ -334,7 +334,7 @@ static int tim_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	tim->vfs_in_use -= vf_idx;
 
 err_unlock:
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 	return ret;
 }
 
@@ -354,7 +354,7 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 		return -EINVAL;
 	gmid = get_gmid(domain_id);
 
-	spin_lock(&octeontx_tim_dev_lock);
+	mutex_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(curr, &octeontx_tim_devices, list) {
 		if (curr->id == id) {
 			tim = curr;
@@ -405,11 +405,11 @@ static int tim_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 		ret = -ENODEV;
 		goto err_unlock;
 	}
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 	return ret;
 
 err_unlock:
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 	tim_pf_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
@@ -431,7 +431,7 @@ static int tim_pf_reset_domain(u32 id, u16 domain_id)
 	struct timpf_vf *vf;
 	int i, sdom;
 
-	spin_lock(&octeontx_tim_dev_lock);
+	mutex_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(tim, &octeontx_tim_devices, list) {
 		for (i = 0; i < tim->total_vfs; i++) {
 			vf = &tim->vf[i];
@@ -443,7 +443,7 @@ static int tim_pf_reset_domain(u32 id, u16 domain_id)
 			}
 		}
 	}
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 	return 0;
 }
 
@@ -655,9 +655,9 @@ static int tim_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		return err;
 	}
 	INIT_LIST_HEAD(&tim->list);
-	spin_lock(&octeontx_tim_dev_lock);
+	mutex_lock(&octeontx_tim_dev_lock);
 	list_add(&tim->list, &octeontx_tim_devices);
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 	return 0;
 }
 
@@ -669,14 +669,14 @@ static void tim_remove(struct pci_dev *pdev)
 	if (!tim)
 		return;
 
-	spin_lock(&octeontx_tim_dev_lock);
+	mutex_lock(&octeontx_tim_dev_lock);
 	list_for_each_entry(curr, &octeontx_tim_devices, list) {
 		if (curr == tim) {
 			list_del(&tim->list);
 			break;
 		}
 	}
-	spin_unlock(&octeontx_tim_dev_lock);
+	mutex_unlock(&octeontx_tim_dev_lock);
 
 	tim_irq_free(tim);
 	tim_sriov_configure(pdev, 0);

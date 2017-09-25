@@ -9,7 +9,7 @@
 #define DRV_VERSION	"1.0"
 
 static atomic_t dpi_count = ATOMIC_INIT(0);
-static DEFINE_SPINLOCK(octeontx_dpi_devices_lock);
+static DEFINE_MUTEX(octeontx_dpi_devices_lock);
 static LIST_HEAD(octeontx_dpi_devices);
 
 static int dpi_init(struct dpipf *dpi);
@@ -70,7 +70,7 @@ static int dpi_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	int i, vf_idx = 0;
 	struct pci_dev *virtfn;
 
-	spin_lock(&octeontx_dpi_devices_lock);
+	mutex_lock(&octeontx_dpi_devices_lock);
 	list_for_each_entry(curr, &octeontx_dpi_devices, list) {
 		if (curr->id == id) {
 			dpi = curr;
@@ -79,7 +79,7 @@ static int dpi_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	}
 
 	if (!dpi) {
-		spin_unlock(&octeontx_dpi_devices_lock);
+		mutex_unlock(&octeontx_dpi_devices_lock);
 		return -ENODEV;
 	}
 
@@ -108,7 +108,7 @@ static int dpi_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 		}
 	}
 
-	spin_unlock(&octeontx_dpi_devices_lock);
+	mutex_unlock(&octeontx_dpi_devices_lock);
 
 	return 0;
 }
@@ -127,7 +127,7 @@ static int dpi_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 	if (!kobj)
 		return -EINVAL;
 
-	spin_lock(&octeontx_dpi_devices_lock);
+	mutex_lock(&octeontx_dpi_devices_lock);
 	list_for_each_entry(curr, &octeontx_dpi_devices, list) {
 		if (curr->id == id) {
 			dpi = curr;
@@ -204,7 +204,7 @@ static int dpi_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 		}
 	}
 
-	spin_unlock(&octeontx_dpi_devices_lock);
+	mutex_unlock(&octeontx_dpi_devices_lock);
 
 	if (vf_idx != num_vfs) {
 		ret = -ENODEV;
@@ -213,7 +213,7 @@ static int dpi_pf_create_domain(u32 id, u16 domain_id, u32 num_vfs,
 	return ret;
 
 err_unlock:
-	spin_unlock(&octeontx_dpi_devices_lock);
+	mutex_unlock(&octeontx_dpi_devices_lock);
 	return ret;
 }
 
@@ -260,13 +260,13 @@ static int dpi_pf_receive_message(u32 id, u16 domain_id,
 	struct dpipf *dpi = NULL;
 	struct mbox_dpi_cfg *cfg;
 
-	spin_lock(&octeontx_dpi_devices_lock);
+	mutex_lock(&octeontx_dpi_devices_lock);
 
 	vf = get_vf(id, domain_id, hdr->vfid, &dpi);
 
 	if (!vf) {
 		hdr->res_code = MBOX_RET_INVALID;
-		spin_unlock(&octeontx_dpi_devices_lock);
+		mutex_unlock(&octeontx_dpi_devices_lock);
 		return -ENODEV;
 	}
 
@@ -303,7 +303,7 @@ static int dpi_pf_receive_message(u32 id, u16 domain_id,
 	}
 
 	hdr->res_code = MBOX_RET_SUCCESS;
-	spin_unlock(&octeontx_dpi_devices_lock);
+	mutex_unlock(&octeontx_dpi_devices_lock);
 	return 0;
 }
 
@@ -313,7 +313,7 @@ static int dpi_pf_get_vf_count(u32 id)
 	struct dpipf *curr;
 	int ret = 0;
 
-	spin_lock(&octeontx_dpi_devices_lock);
+	mutex_lock(&octeontx_dpi_devices_lock);
 	list_for_each_entry(curr, &octeontx_dpi_devices, list) {
 		if (curr->id == id) {
 			dpi = curr;
@@ -321,7 +321,7 @@ static int dpi_pf_get_vf_count(u32 id)
 		}
 	}
 
-	spin_unlock(&octeontx_dpi_devices_lock);
+	mutex_unlock(&octeontx_dpi_devices_lock);
 	if (dpi)
 		ret = dpi->total_vfs;
 
@@ -334,7 +334,7 @@ int dpi_reset_domain(u32 id, u16 domain_id)
 	struct dpipf *curr;
 	int i;
 
-	spin_lock(&octeontx_dpi_devices_lock);
+	mutex_lock(&octeontx_dpi_devices_lock);
 	list_for_each_entry(curr, &octeontx_dpi_devices, list) {
 		if (curr->id == id) {
 			dpi = curr;
@@ -343,7 +343,7 @@ int dpi_reset_domain(u32 id, u16 domain_id)
 	}
 
 	if (!dpi) {
-		spin_unlock(&octeontx_dpi_devices_lock);
+		mutex_unlock(&octeontx_dpi_devices_lock);
 		return -ENODEV;
 	}
 
@@ -356,7 +356,7 @@ int dpi_reset_domain(u32 id, u16 domain_id)
 		}
 	}
 
-	spin_unlock(&octeontx_dpi_devices_lock);
+	mutex_unlock(&octeontx_dpi_devices_lock);
 	return 0;
 }
 
@@ -802,9 +802,9 @@ int dpi_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	INIT_LIST_HEAD(&dpi->list);
-	spin_lock(&octeontx_dpi_devices_lock);
+	mutex_lock(&octeontx_dpi_devices_lock);
 	list_add(&dpi->list, &octeontx_dpi_devices);
-	spin_unlock(&octeontx_dpi_devices_lock);
+	mutex_unlock(&octeontx_dpi_devices_lock);
 
 	return 0;
 }

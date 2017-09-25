@@ -18,7 +18,7 @@
 
 static atomic_t pki_count = ATOMIC_INIT(0);
 
-static DEFINE_SPINLOCK(octeontx_pki_devices_lock);
+static DEFINE_MUTEX(octeontx_pki_devices_lock);
 static LIST_HEAD(octeontx_pki_devices);
 
 static irqreturn_t pki_gen_intr_handler(int irq, void *pki_irq)
@@ -406,7 +406,7 @@ static int pki_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	struct pki_t *curr;
 	int i, port, vf_idx = 0;
 
-	spin_lock(&octeontx_pki_devices_lock);
+	mutex_lock(&octeontx_pki_devices_lock);
 	list_for_each_entry(curr, &octeontx_pki_devices, list) {
 		if (curr->id == id) {
 			pki = curr;
@@ -414,7 +414,7 @@ static int pki_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 		}
 	}
 	if (!pki) {
-		spin_unlock(&octeontx_pki_devices_lock);
+		mutex_unlock(&octeontx_pki_devices_lock);
 		return -ENODEV;
 	}
 
@@ -444,7 +444,7 @@ static int pki_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	}
 
 	pki->vfs_in_use -= vf_idx;
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 	return 0;
 }
 
@@ -463,7 +463,7 @@ static int pki_create_domain(u32 id, u16 domain_id,
 	if (!kobj)
 		return -EINVAL;
 
-	spin_lock(&octeontx_pki_devices_lock);
+	mutex_lock(&octeontx_pki_devices_lock);
 	list_for_each_entry(curr, &octeontx_pki_devices, list) {
 		if (curr->id == id) {
 			pki = curr;
@@ -528,11 +528,11 @@ static int pki_create_domain(u32 id, u16 domain_id,
 	}
 
 	pki->vfs_in_use += vf_idx;
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 	return ret;
 
 err_unlock:
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 	pki_destroy_domain(id, domain_id, kobj);
 	return ret;
 	return ret;
@@ -550,13 +550,13 @@ static int pki_receive_message(u32 id, u16 domain_id,
 
 	hdr->res_code = MBOX_RET_SUCCESS;
 	resp->data = 0;
-	spin_lock(&octeontx_pki_devices_lock);
+	mutex_lock(&octeontx_pki_devices_lock);
 
 	vf = pki_get_vf(id, domain_id);
 
 	if (!vf) {
 		hdr->res_code = MBOX_RET_INVALID;
-		spin_unlock(&octeontx_pki_devices_lock);
+		mutex_unlock(&octeontx_pki_devices_lock);
 		return -ENODEV;
 	}
 
@@ -590,7 +590,7 @@ static int pki_receive_message(u32 id, u16 domain_id,
 		break;
 	}
 
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 	return 0;
 }
 
@@ -599,11 +599,11 @@ int pki_reset_domain(u32 id, u16 domain_id)
 	int i;
 	struct pkipf_vf *vf = NULL;
 
-	spin_lock(&octeontx_pki_devices_lock);
+	mutex_lock(&octeontx_pki_devices_lock);
 
 	vf = pki_get_vf(id, domain_id);
 	if (!vf) {
-		spin_unlock(&octeontx_pki_devices_lock);
+		mutex_unlock(&octeontx_pki_devices_lock);
 		return -ENODEV;
 	}
 
@@ -616,7 +616,7 @@ int pki_reset_domain(u32 id, u16 domain_id)
 
 	identify(vf, vf->domain.domain_id, vf->domain.subdomain_id);
 
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 	return 0;
 }
 
@@ -628,17 +628,17 @@ int pki_add_bgx_port(u32 id, u16 domain_id, struct octtx_bgx_port *port)
 	struct pkipf_vf *vf = NULL;
 	int pkind;
 
-	spin_lock(&octeontx_pki_devices_lock);
+	mutex_lock(&octeontx_pki_devices_lock);
 
 	vf = pki_get_vf(id, domain_id);
 	if (!vf) {
-		spin_unlock(&octeontx_pki_devices_lock);
+		mutex_unlock(&octeontx_pki_devices_lock);
 		return -ENODEV;
 	}
 
 	pkind = assign_pkind_bgx(vf, port);
 
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 	return pkind;
 }
 
@@ -647,18 +647,18 @@ int pki_add_lbk_port(u32 id, u16 domain_id, struct octtx_lbk_port *port)
 	struct pkipf_vf *vf = NULL;
 	int pkind;
 
-	spin_lock(&octeontx_pki_devices_lock);
+	mutex_lock(&octeontx_pki_devices_lock);
 
 	vf = pki_get_vf(id, domain_id);
 	if (!vf) {
-		spin_unlock(&octeontx_pki_devices_lock);
+		mutex_unlock(&octeontx_pki_devices_lock);
 		return -ENODEV;
 	}
 
 	/*TO_DO it needs channel number too*/
 	pkind = assign_pkind_lbk(vf, port);
 
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 	return pkind;
 }
 
@@ -877,9 +877,9 @@ static int pki_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	INIT_LIST_HEAD(&pki->list);
-	spin_lock(&octeontx_pki_devices_lock);
+	mutex_lock(&octeontx_pki_devices_lock);
 	list_add(&pki->list, &octeontx_pki_devices);
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 
 	return 0;
 }
@@ -892,14 +892,14 @@ static void pki_remove(struct pci_dev *pdev)
 	if (!pki)
 		return;
 
-	spin_lock(&octeontx_pki_devices_lock);
+	mutex_lock(&octeontx_pki_devices_lock);
 	list_for_each_entry(curr, &octeontx_pki_devices, list) {
 		if (curr == pki) {
 			list_del(&pki->list);
 			break;
 		}
 	}
-	spin_unlock(&octeontx_pki_devices_lock);
+	mutex_unlock(&octeontx_pki_devices_lock);
 
 	pki_sriov_configure(pdev, 0);
 	pki_irq_free(pki);
