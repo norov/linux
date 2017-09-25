@@ -19,7 +19,7 @@
 #define DRV_VERSION "1.0"
 
 static atomic_t rst_count = ATOMIC_INIT(0);
-static DEFINE_SPINLOCK(octeontx_rst_devices_lock);
+static DEFINE_MUTEX(octeontx_rst_devices_lock);
 static LIST_HEAD(octeontx_rst_devices);
 
 struct rstpf {
@@ -51,7 +51,7 @@ static struct rstpf *rst_get(u32 id)
 	struct rstpf *rst = NULL;
 	struct rstpf *curr;
 
-	spin_lock(&octeontx_rst_devices_lock);
+	mutex_lock(&octeontx_rst_devices_lock);
 	list_for_each_entry(curr, &octeontx_rst_devices, list) {
 		if (curr->id == id) {
 			rst = curr;
@@ -60,11 +60,11 @@ static struct rstpf *rst_get(u32 id)
 	}
 
 	if (!rst) {
-		spin_unlock(&octeontx_rst_devices_lock);
+		mutex_unlock(&octeontx_rst_devices_lock);
 		return NULL;
 	}
 
-	spin_unlock(&octeontx_rst_devices_lock);
+	mutex_unlock(&octeontx_rst_devices_lock);
 	return rst;
 }
 
@@ -130,9 +130,9 @@ static int rst_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	INIT_LIST_HEAD(&rst->list);
 
 	/* use sso_device_lock; as rst use-case scope limited till sso */
-	spin_lock(&octeontx_rst_devices_lock);
+	mutex_lock(&octeontx_rst_devices_lock);
 	list_add(&rst->list, &octeontx_rst_devices);
-	spin_unlock(&octeontx_rst_devices_lock);
+	mutex_unlock(&octeontx_rst_devices_lock);
 
 	return 0;
 }
@@ -146,9 +146,9 @@ static void rst_remove(struct pci_dev *pdev)
 		return;
 
 	/* use sso_device_lock; as rst use-case scope limited till sso */
-	spin_lock(&octeontx_rst_devices_lock);
+	mutex_lock(&octeontx_rst_devices_lock);
 	list_del(&rst->list);
-	spin_unlock(&octeontx_rst_devices_lock);
+	mutex_unlock(&octeontx_rst_devices_lock);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	pci_set_drvdata(pdev, NULL);

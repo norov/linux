@@ -15,7 +15,7 @@
 #define DRV_VERSION "1.0"
 
 static atomic_t ssow_count = ATOMIC_INIT(0);
-static DEFINE_SPINLOCK(octeontx_ssow_devices_lock);
+static DEFINE_MUTEX(octeontx_ssow_devices_lock);
 static LIST_HEAD(octeontx_ssow_devices);
 
 static void identify(struct ssowpf_vf *vf, u16 domain_id, u16 subdomain_id)
@@ -35,7 +35,7 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	struct ssowpf *curr;
 	u64 reg;
 
-	spin_lock(&octeontx_ssow_devices_lock);
+	mutex_lock(&octeontx_ssow_devices_lock);
 	list_for_each_entry(curr, &octeontx_ssow_devices, list) {
 		if (curr->id == id) {
 			ssow = curr;
@@ -43,7 +43,7 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 		}
 	}
 	if (!ssow) {
-		spin_unlock(&octeontx_ssow_devices_lock);
+		mutex_unlock(&octeontx_ssow_devices_lock);
 		return -ENODEV;
 	}
 
@@ -80,7 +80,7 @@ static int ssow_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 
 unlock:
 	ssow->vfs_in_use -= vf_idx;
-	spin_unlock(&octeontx_ssow_devices_lock);
+	mutex_unlock(&octeontx_ssow_devices_lock);
 	return ret;
 }
 
@@ -98,7 +98,7 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 	if (!kobj)
 		return -EINVAL;
 
-	spin_lock(&octeontx_ssow_devices_lock);
+	mutex_lock(&octeontx_ssow_devices_lock);
 	list_for_each_entry(curr, &octeontx_ssow_devices, list) {
 		if (curr->id == id) {
 			ssow = curr;
@@ -106,7 +106,7 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 		}
 	}
 	if (!ssow) {
-		spin_unlock(&octeontx_ssow_devices_lock);
+		mutex_unlock(&octeontx_ssow_devices_lock);
 		return -ENODEV;
 	}
 
@@ -172,11 +172,11 @@ static int ssow_pf_create_domain(u32 id, u16 domain_id, u32 vf_count,
 	if (vf_idx != vf_count)
 		goto err_unlock;
 
-	spin_unlock(&octeontx_ssow_devices_lock);
+	mutex_unlock(&octeontx_ssow_devices_lock);
 	return 0;
 
 err_unlock:
-	spin_unlock(&octeontx_ssow_devices_lock);
+	mutex_unlock(&octeontx_ssow_devices_lock);
 	ssow_pf_destroy_domain(id, domain_id, kobj);
 	return -ENODEV;
 }
@@ -188,7 +188,7 @@ static int ssow_pf_get_ram_mbox_addr(u32 node, u16 domain_id,
 	struct ssowpf *curr;
 	u64 i;
 
-	spin_lock(&octeontx_ssow_devices_lock);
+	mutex_lock(&octeontx_ssow_devices_lock);
 	list_for_each_entry(curr, &octeontx_ssow_devices, list) {
 		if (curr->id == node) {
 			ssow = curr;
@@ -196,7 +196,7 @@ static int ssow_pf_get_ram_mbox_addr(u32 node, u16 domain_id,
 		}
 	}
 	if (!ssow) {
-		spin_unlock(&octeontx_ssow_devices_lock);
+		mutex_unlock(&octeontx_ssow_devices_lock);
 		return -ENODEV;
 	}
 
@@ -208,7 +208,7 @@ static int ssow_pf_get_ram_mbox_addr(u32 node, u16 domain_id,
 			break;
 		}
 	}
-	spin_unlock(&octeontx_ssow_devices_lock);
+	mutex_unlock(&octeontx_ssow_devices_lock);
 
 	if (i != ssow->total_vfs)
 		return 0;
@@ -226,7 +226,7 @@ static int ssow_pf_receive_message(u32 id, u16 domain_id,
 	int i;
 
 	resp->data = 0;
-	spin_lock(&octeontx_ssow_devices_lock);
+	mutex_lock(&octeontx_ssow_devices_lock);
 
 	list_for_each_entry(curr, &octeontx_ssow_devices, list) {
 		if (curr->id == id) {
@@ -236,7 +236,7 @@ static int ssow_pf_receive_message(u32 id, u16 domain_id,
 	}
 	if (!ssow) {
 		hdr->res_code = MBOX_RET_INVALID;
-		spin_unlock(&octeontx_ssow_devices_lock);
+		mutex_unlock(&octeontx_ssow_devices_lock);
 		return -ENODEV;
 	}
 
@@ -252,7 +252,7 @@ static int ssow_pf_receive_message(u32 id, u16 domain_id,
 
 	if (vf_idx < 0) {
 		hdr->res_code = MBOX_RET_INVALID;
-		spin_unlock(&octeontx_ssow_devices_lock);
+		mutex_unlock(&octeontx_ssow_devices_lock);
 		return -ENODEV;
 	}
 
@@ -263,10 +263,10 @@ static int ssow_pf_receive_message(u32 id, u16 domain_id,
 		break;
 	default:
 		hdr->res_code = MBOX_RET_INVALID;
-		spin_unlock(&octeontx_ssow_devices_lock);
+		mutex_unlock(&octeontx_ssow_devices_lock);
 		return -1;
 	}
-	spin_unlock(&octeontx_ssow_devices_lock);
+	mutex_unlock(&octeontx_ssow_devices_lock);
 	return 0;
 }
 
@@ -275,7 +275,7 @@ static int ssow_pf_get_vf_count(u32 id)
 	struct ssowpf *ssow = NULL;
 	struct ssowpf *curr;
 
-	spin_lock(&octeontx_ssow_devices_lock);
+	mutex_lock(&octeontx_ssow_devices_lock);
 
 	list_for_each_entry(curr, &octeontx_ssow_devices, list) {
 		if (curr->id == id) {
@@ -284,11 +284,11 @@ static int ssow_pf_get_vf_count(u32 id)
 		}
 	}
 	if (!ssow) {
-		spin_unlock(&octeontx_ssow_devices_lock);
+		mutex_unlock(&octeontx_ssow_devices_lock);
 		return 0;
 	}
 
-	spin_unlock(&octeontx_ssow_devices_lock);
+	mutex_unlock(&octeontx_ssow_devices_lock);
 	return ssow->total_vfs;
 }
 
@@ -366,7 +366,7 @@ int ssow_reset_domain(u32 id, u16 domain_id, u64 grp_mask)
 	u64 reg;
 	void __iomem *reg_base;
 
-	spin_lock(&octeontx_ssow_devices_lock);
+	mutex_lock(&octeontx_ssow_devices_lock);
 	list_for_each_entry(curr, &octeontx_ssow_devices, list) {
 		if (curr->id == id) {
 			ssow = curr;
@@ -443,7 +443,7 @@ int ssow_reset_domain(u32 id, u16 domain_id, u64 grp_mask)
 	}
 
 unlock:
-	spin_unlock(&octeontx_ssow_devices_lock);
+	mutex_unlock(&octeontx_ssow_devices_lock);
 	return ret;
 }
 
@@ -553,9 +553,9 @@ static int ssow_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	INIT_LIST_HEAD(&ssow->list);
-	spin_lock(&octeontx_ssow_devices_lock);
+	mutex_lock(&octeontx_ssow_devices_lock);
 	list_add(&ssow->list, &octeontx_ssow_devices);
-	spin_unlock(&octeontx_ssow_devices_lock);
+	mutex_unlock(&octeontx_ssow_devices_lock);
 	return 0;
 }
 
