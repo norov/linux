@@ -66,7 +66,7 @@ struct lbkpf {
 };
 
 /* Global list of LBK devices and ports. */
-static DEFINE_SPINLOCK(octeontx_lbk_lock);
+static DEFINE_MUTEX(octeontx_lbk_lock);
 static LIST_HEAD(octeontx_lbk_devices);
 static struct octtx_lbk_port octeontx_lbk_ports[LBK_MAX_PORTS] = {
 	{.glb_port_idx = 0, .domain_id = LBK_INVALID_ID},
@@ -108,16 +108,16 @@ static struct octtx_lbk_port *get_lbk_port(int domain_id, int port_idx)
 	struct octtx_lbk_port *port;
 	int i;
 
-	spin_lock(&octeontx_lbk_lock);
+	mutex_lock(&octeontx_lbk_lock);
 	for (i = 0; i < LBK_MAX_PORTS; i++) {
 		port = &octeontx_lbk_ports[i];
 		if (port->domain_id == domain_id &&
 		    port->dom_port_idx == port_idx) {
-			spin_unlock(&octeontx_lbk_lock);
+			mutex_unlock(&octeontx_lbk_lock);
 			return port;
 		}
 	}
-	spin_unlock(&octeontx_lbk_lock);
+	mutex_unlock(&octeontx_lbk_lock);
 	return NULL;
 }
 
@@ -147,7 +147,7 @@ static struct octtx_lbk_port *lbk_get_port_by_chan(int node, u16 domain_id,
 	struct octtx_lbk_port *port;
 	int i, max_chan;
 
-	spin_lock(&octeontx_lbk_lock);
+	mutex_lock(&octeontx_lbk_lock);
 	for (i = 0; i < LBK_MAX_PORTS; i++) {
 		port = &octeontx_lbk_ports[i];
 		if (port->domain_id == LBK_INVALID_ID ||
@@ -156,11 +156,11 @@ static struct octtx_lbk_port *lbk_get_port_by_chan(int node, u16 domain_id,
 			continue;
 		max_chan = port->olbk_base_chan + port->olbk_num_chans;
 		if (chan >= port->olbk_base_chan && chan < max_chan) {
-			spin_unlock(&octeontx_lbk_lock);
+			mutex_unlock(&octeontx_lbk_lock);
 			return port;
 		}
 	}
-	spin_unlock(&octeontx_lbk_lock);
+	mutex_unlock(&octeontx_lbk_lock);
 	return NULL;
 }
 
@@ -339,7 +339,7 @@ static int lbk_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	struct octtx_lbk_port *port;
 	int i;
 
-	spin_lock(&octeontx_lbk_lock);
+	mutex_lock(&octeontx_lbk_lock);
 	for (i = 0; i < LBK_MAX_PORTS; i++) {
 		port = &octeontx_lbk_ports[i];
 		if (port->domain_id != domain_id)
@@ -352,7 +352,7 @@ static int lbk_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 		}
 		port->domain_id = LBK_INVALID_ID;
 	}
-	spin_unlock(&octeontx_lbk_lock);
+	mutex_unlock(&octeontx_lbk_lock);
 	return 0;
 }
 
@@ -366,7 +366,7 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 	struct octtx_lbk_port *port, *gport;
 	int i, j, ret = 0;
 
-	spin_lock(&octeontx_lbk_lock);
+	mutex_lock(&octeontx_lbk_lock);
 	for (i = 0; i < port_count; i++) {
 		port = &port_tbl[i];
 		for (j = 0; j < LBK_MAX_PORTS; j++) {
@@ -403,11 +403,11 @@ static int lbk_create_domain(u32 id, u16 domain_id,
 		}
 	}
 
-	spin_unlock(&octeontx_lbk_lock);
+	mutex_unlock(&octeontx_lbk_lock);
 	return ret;
 
 err_unlock:
-	spin_unlock(&octeontx_lbk_lock);
+	mutex_unlock(&octeontx_lbk_lock);
 	lbk_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
@@ -419,14 +419,14 @@ static int lbk_reset_domain(u32 id, u16 domain_id)
 	struct octtx_lbk_port *port;
 	int i;
 
-	spin_lock(&octeontx_lbk_lock);
+	mutex_lock(&octeontx_lbk_lock);
 	for (i = 0; i < LBK_MAX_PORTS; i++) {
 		port = &octeontx_lbk_ports[i];
 		if (port->domain_id != domain_id)
 			continue;
 		lbk_port_stop(port);
 	}
-	spin_unlock(&octeontx_lbk_lock);
+	mutex_unlock(&octeontx_lbk_lock);
 	return 0;
 }
 
@@ -537,14 +537,14 @@ static void lbk_remove(struct pci_dev *pdev)
 	if (!lbk)
 		return;
 
-	spin_lock(&octeontx_lbk_lock);
+	mutex_lock(&octeontx_lbk_lock);
 	list_for_each_entry(curr, &octeontx_lbk_devices, list) {
 		if (curr == lbk) {
 			list_del(&lbk->list);
 			break;
 		}
 	}
-	spin_unlock(&octeontx_lbk_lock);
+	mutex_unlock(&octeontx_lbk_lock);
 }
 
 static const struct pci_device_id lbk_id_table[] = {

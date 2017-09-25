@@ -17,7 +17,7 @@
 
 static atomic_t fpa_count = ATOMIC_INIT(0);
 
-static DEFINE_SPINLOCK(octeontx_fpa_devices_lock);
+static DEFINE_MUTEX(octeontx_fpa_devices_lock);
 static LIST_HEAD(octeontx_fpa_devices);
 
 /* In Cavium OcteonTX SoCs, all accesses to the device registers are
@@ -110,12 +110,12 @@ static int fpa_pf_receive_message(u32 id, u16 domain_id,
 	u64 reg;
 	int i;
 
-	spin_lock(&octeontx_fpa_devices_lock);
+	mutex_lock(&octeontx_fpa_devices_lock);
 
 	vf = get_vf(id, domain_id, hdr->vfid, &fpa);
 	if (!vf) {
 		hdr->res_code = MBOX_RET_INVALID;
-		spin_unlock(&octeontx_fpa_devices_lock);
+		mutex_unlock(&octeontx_fpa_devices_lock);
 		return -ENODEV;
 	}
 
@@ -241,7 +241,7 @@ static int fpa_pf_receive_message(u32 id, u16 domain_id,
 		break;
 	}
 
-	spin_unlock(&octeontx_fpa_devices_lock);
+	mutex_unlock(&octeontx_fpa_devices_lock);
 	return 0;
 }
 
@@ -360,7 +360,7 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	int i, j, vf_idx = 0;
 	u64 reg;
 
-	spin_lock(&octeontx_fpa_devices_lock);
+	mutex_lock(&octeontx_fpa_devices_lock);
 	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
 		if (curr->id == id) {
 			fpa = curr;
@@ -369,7 +369,7 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	}
 
 	if (!fpa) {
-		spin_unlock(&octeontx_fpa_devices_lock);
+		mutex_unlock(&octeontx_fpa_devices_lock);
 		return -ENODEV;
 	}
 
@@ -421,7 +421,7 @@ static int fpa_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	}
 
 	fpa->vfs_in_use -= vf_idx;
-	spin_unlock(&octeontx_fpa_devices_lock);
+	mutex_unlock(&octeontx_fpa_devices_lock);
 	return 0;
 }
 
@@ -447,7 +447,7 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 	struct fpapf *curr;
 	u64 reg;
 
-	spin_lock(&octeontx_fpa_devices_lock);
+	mutex_lock(&octeontx_fpa_devices_lock);
 	/* this loop is unnecessary as nodid is always 0 :: ask tirumalesh? */
 	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
 		if (curr->id == id) {
@@ -456,11 +456,11 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 		}
 	}
 	if (!fpa) {
-		spin_unlock(&octeontx_fpa_devices_lock);
+		mutex_unlock(&octeontx_fpa_devices_lock);
 		return 0;
 	}
 	if ((fpa->total_vfs - fpa->vfs_in_use) < num_vfs) {
-		spin_unlock(&octeontx_fpa_devices_lock);
+		mutex_unlock(&octeontx_fpa_devices_lock);
 		return 0;
 	}
 	for (i = 0; i < fpa->total_vfs; i++) {
@@ -545,11 +545,11 @@ static u64 fpa_pf_create_domain(u32 id, u16 domain_id,
 	if (vf_idx != num_vfs)
 		goto err_unlock;
 
-	spin_unlock(&octeontx_fpa_devices_lock);
+	mutex_unlock(&octeontx_fpa_devices_lock);
 	return aura_set;
 
 err_unlock:
-	spin_unlock(&octeontx_fpa_devices_lock);
+	mutex_unlock(&octeontx_fpa_devices_lock);
 	fpa_pf_destroy_domain(id, domain_id, kobj);
 	return 0;
 }
@@ -559,7 +559,7 @@ static int fpa_pf_get_vf_count(u32 id)
 	struct fpapf *fpa = NULL;
 	struct fpapf *curr;
 
-	spin_lock(&octeontx_fpa_devices_lock);
+	mutex_lock(&octeontx_fpa_devices_lock);
 	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
 		if (curr->id == id) {
 			fpa = curr;
@@ -567,10 +567,10 @@ static int fpa_pf_get_vf_count(u32 id)
 		}
 	}
 	if (!fpa) {
-		spin_unlock(&octeontx_fpa_devices_lock);
+		mutex_unlock(&octeontx_fpa_devices_lock);
 		return 0;
 	}
-	spin_unlock(&octeontx_fpa_devices_lock);
+	mutex_unlock(&octeontx_fpa_devices_lock);
 	return fpa->total_vfs;
 }
 
@@ -583,7 +583,7 @@ int fpa_reset_domain(u32 id, u16 domain_id)
 	u64 addr;
 	u64 avail;
 
-	spin_lock(&octeontx_fpa_devices_lock);
+	mutex_lock(&octeontx_fpa_devices_lock);
 	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
 		if (curr->id == id) {
 			fpa = curr;
@@ -591,7 +591,7 @@ int fpa_reset_domain(u32 id, u16 domain_id)
 		}
 	}
 	if (!fpa) {
-		spin_unlock(&octeontx_fpa_devices_lock);
+		mutex_unlock(&octeontx_fpa_devices_lock);
 		return 0;
 	}
 
@@ -663,7 +663,7 @@ empty:
 		}
 	}
 
-	spin_unlock(&octeontx_fpa_devices_lock);
+	mutex_unlock(&octeontx_fpa_devices_lock);
 	return 0;
 }
 
@@ -966,9 +966,9 @@ static int fpa_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	INIT_LIST_HEAD(&fpa->list);
-	spin_lock(&octeontx_fpa_devices_lock);
+	mutex_lock(&octeontx_fpa_devices_lock);
 	list_add(&fpa->list, &octeontx_fpa_devices);
-	spin_unlock(&octeontx_fpa_devices_lock);
+	mutex_unlock(&octeontx_fpa_devices_lock);
 
 	return 0;
 }
@@ -982,14 +982,14 @@ static void fpa_remove(struct pci_dev *pdev)
 	if (!fpa)
 		return;
 
-	spin_lock(&octeontx_fpa_devices_lock);
+	mutex_lock(&octeontx_fpa_devices_lock);
 	list_for_each_entry(curr, &octeontx_fpa_devices, list) {
 		if (curr == fpa) {
 			list_del(&fpa->list);
 			break;
 		}
 	}
-	spin_unlock(&octeontx_fpa_devices_lock);
+	mutex_unlock(&octeontx_fpa_devices_lock);
 
 	fpa_irq_free(fpa);
 	fpa_sriov_configure(pdev, 0);
