@@ -114,7 +114,7 @@ static int gpio_installed[MAX_GPIO];
 static struct thread_info *gpio_installed_threads[MAX_GPIO];
 static struct task_struct *gpio_installed_tasks[MAX_GPIO];
 
-static DEFINE_SPINLOCK(octeontx_domains_lock);
+static DEFINE_MUTEX(octeontx_domains_lock);
 static LIST_HEAD(octeontx_domains);
 
 MODULE_AUTHOR("Tirumalesh Chalamarla");
@@ -389,7 +389,7 @@ void octeontx_destroy_domain(const char *domain_name)
 	struct octtx_domain *domain = NULL;
 	struct octtx_domain *curr;
 
-	spin_lock(&octeontx_domains_lock);
+	mutex_lock(&octeontx_domains_lock);
 	list_for_each_entry(curr, &octeontx_domains, list) {
 		if (!strcmp(curr->name, domain_name)) {
 			domain = curr;
@@ -415,7 +415,7 @@ void octeontx_destroy_domain(const char *domain_name)
 	}
 
 err_unlock:
-	spin_unlock(&octeontx_domains_lock);
+	mutex_unlock(&octeontx_domains_lock);
 }
 
 static void do_destroy_domain(struct octtx_domain *domain)
@@ -889,11 +889,11 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	}
 	domain->sysfs_domain_in_use_created = true;
 
-	spin_lock(&octeontx_domains_lock);
+	mutex_lock(&octeontx_domains_lock);
 	INIT_LIST_HEAD(&domain->list);
 	list_add(&domain->list, &octeontx_domains);
 	try_module_get(THIS_MODULE);
-	spin_unlock(&octeontx_domains_lock);
+	mutex_unlock(&octeontx_domains_lock);
 	return 0;
 error:
 	do_destroy_domain(domain);
@@ -1022,7 +1022,7 @@ static void poll_for_link(struct work_struct *work)
 	int i, node, bgx_idx, lmac;
 	int link_up;
 
-	spin_lock(&octeontx_domains_lock);
+	mutex_lock(&octeontx_domains_lock);
 	list_for_each_entry(domain, &octeontx_domains, list) {
 		/* don't bother if setup is not done */
 		if (!domain->setup)
@@ -1040,7 +1040,7 @@ static void poll_for_link(struct work_struct *work)
 			domain->bgx_port[i].link_up = link_up;
 		}
 	}
-	spin_unlock(&octeontx_domains_lock);
+	mutex_unlock(&octeontx_domains_lock);
 	queue_delayed_work(check_link, &dwork, HZ * 2);
 }
 
@@ -1051,7 +1051,7 @@ void octtx_reset_domain(struct work_struct *work)
 	u64 mask = -1;
 	u64 val;
 
-	spin_lock(&octeontx_domains_lock);
+	mutex_lock(&octeontx_domains_lock);
 	list_for_each_entry(domain, &octeontx_domains, list) {
 		/* find first SSO from domain */
 		master_sso = __ffs(domain->grp_mask);
@@ -1059,9 +1059,9 @@ void octtx_reset_domain(struct work_struct *work)
 				 sizeof(domain->grp_mask) * 8) {
 			val = atomic_read(&octtx_sso_reset[i]);
 			if ((master_sso == i) && val) {
-				spin_unlock(&octeontx_domains_lock);
+				mutex_unlock(&octeontx_domains_lock);
 				octeontx_reset_domain(domain);
-				spin_lock(&octeontx_domains_lock);
+				mutex_lock(&octeontx_domains_lock);
 			}
 			atomic_set(&octtx_sso_reset[i], 0);
 		}
@@ -1076,7 +1076,7 @@ void octtx_reset_domain(struct work_struct *work)
 	/*make sure the other end receives it*/
 	mb();
 
-	spin_unlock(&octeontx_domains_lock);
+	mutex_unlock(&octeontx_domains_lock);
 	queue_delayed_work(reset_domain, &dwork_reset, 10);
 }
 

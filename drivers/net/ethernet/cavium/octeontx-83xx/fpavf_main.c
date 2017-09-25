@@ -22,8 +22,8 @@ static int setup_test;
 module_param(setup_test, int, 0644);
 MODULE_PARM_DESC(setup_test, "does a test after doing setup");
 
-static DEFINE_SPINLOCK(octeontx_fpavf_devices_lock);
-static DEFINE_SPINLOCK(octeontx_fpavf_alloc_lock);
+static DEFINE_MUTEX(octeontx_fpavf_devices_lock);
+static DEFINE_MUTEX(octeontx_fpavf_alloc_lock);
 static LIST_HEAD(octeontx_fpavf_devices);
 
 /* In Cavium OcteonTX SoCs, all accesses to the device registers are
@@ -393,7 +393,7 @@ static struct fpavf *fpa_vf_get(u16 domain_id, u16 subdomain_id,
 	u32 d_id, sd_id;
 	int ret;
 
-	spin_lock(&octeontx_fpavf_devices_lock);
+	mutex_lock(&octeontx_fpavf_devices_lock);
 	list_for_each_entry(curr, &octeontx_fpavf_devices, list) {
 		if (curr->domain_id == domain_id &&
 		    curr->subdomain_id == subdomain_id) {
@@ -401,7 +401,7 @@ static struct fpavf *fpa_vf_get(u16 domain_id, u16 subdomain_id,
 			break;
 		}
 	}
-	spin_unlock(&octeontx_fpavf_devices_lock);
+	mutex_unlock(&octeontx_fpavf_devices_lock);
 
 	if (!fpa) {
 		/*Try sending identify to PF*/
@@ -414,7 +414,7 @@ static struct fpavf *fpa_vf_get(u16 domain_id, u16 subdomain_id,
 		if (ret)
 			return NULL;
 
-		spin_lock(&octeontx_fpavf_devices_lock);
+		mutex_lock(&octeontx_fpavf_devices_lock);
 		list_for_each_entry(curr, &octeontx_fpavf_devices, list) {
 			reg = fpavf_reg_read(curr, FPA_VF_VHPOOL_START_ADDR(0));
 
@@ -433,7 +433,7 @@ static struct fpavf *fpa_vf_get(u16 domain_id, u16 subdomain_id,
 				break;
 			}
 		}
-		spin_unlock(&octeontx_fpavf_devices_lock);
+		mutex_unlock(&octeontx_fpavf_devices_lock);
 	}
 
 	if (fpa) {
@@ -453,13 +453,13 @@ static int fpa_vf_refill(struct fpavf *fpa)
 {
 	u64 alloc_count;
 
-	spin_lock(&octeontx_fpavf_alloc_lock);
+	mutex_lock(&octeontx_fpavf_alloc_lock);
 	alloc_count = atomic_read(&fpa->alloc_count);
 	if (alloc_count >= fpa->alloc_thold)
 		fpa_vf_addbuffers(fpa, alloc_count, fpa->buf_len);
 
 	atomic_sub_return(alloc_count, &fpa->alloc_count);
-	spin_unlock(&octeontx_fpavf_alloc_lock);
+	mutex_unlock(&octeontx_fpavf_alloc_lock);
 	return alloc_count;
 }
 
@@ -600,9 +600,9 @@ static int fpavf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	fpa->iommu_domain = iommu_get_domain_for_dev(&pdev->dev);
 
 	INIT_LIST_HEAD(&fpa->list);
-	spin_lock(&octeontx_fpavf_devices_lock);
+	mutex_lock(&octeontx_fpavf_devices_lock);
 	list_add(&fpa->list, &octeontx_fpavf_devices);
-	spin_unlock(&octeontx_fpavf_devices_lock);
+	mutex_unlock(&octeontx_fpavf_devices_lock);
 
 	return 0;
 }
@@ -615,14 +615,14 @@ static void fpavf_remove(struct pci_dev *pdev)
 	if (!fpa)
 		return;
 
-	spin_lock(&octeontx_fpavf_devices_lock);
+	mutex_lock(&octeontx_fpavf_devices_lock);
 	list_for_each_entry(curr, &octeontx_fpavf_devices, list) {
 		if (curr == fpa) {
 			list_del(&fpa->list);
 			break;
 		}
 	}
-	spin_unlock(&octeontx_fpavf_devices_lock);
+	mutex_unlock(&octeontx_fpavf_devices_lock);
 
 	fpavf_irq_free(fpa);
 	pcim_iounmap(pdev, fpa->reg_base);

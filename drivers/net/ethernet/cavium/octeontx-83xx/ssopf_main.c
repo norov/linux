@@ -21,7 +21,7 @@
 #define DRV_VERSION "1.0"
 
 static atomic_t sso_count = ATOMIC_INIT(0);
-static DEFINE_SPINLOCK(octeontx_sso_devices_lock);
+static DEFINE_MUTEX(octeontx_sso_devices_lock);
 static LIST_HEAD(octeontx_sso_devices);
 static DEFINE_MUTEX(pf_mbox_lock);
 
@@ -275,7 +275,7 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 
 	vf_idx = 0;
 	reg = 0;
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == id) {
 			sso = curr;
@@ -284,7 +284,7 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	}
 
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return -ENODEV;
 	}
 
@@ -323,7 +323,7 @@ static int sso_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	}
 
 	sso->vfs_in_use -= vf_idx;
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	return 0;
 }
 
@@ -342,7 +342,7 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 	if (!kobj)
 		return 0;
 
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == id) {
 			sso = curr;
@@ -350,7 +350,7 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 		}
 	}
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return 0;
 	}
 
@@ -428,11 +428,11 @@ static u64 sso_pf_create_domain(u32 id, u16 domain_id,
 	if (vf_idx != num_grps)
 		goto err_unlock;
 
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	return grp_mask;
 
 err_unlock:
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	sso_pf_destroy_domain(id, domain_id, kobj);
 	return 0;
 }
@@ -447,7 +447,7 @@ static int sso_pf_send_message(u32 id, u16 domain_id,
 	int vf_idx = -1;
 	int ret;
 
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == id) {
 			sso = curr;
@@ -456,7 +456,7 @@ static int sso_pf_send_message(u32 id, u16 domain_id,
 	}
 
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return -ENODEV;
 	}
 
@@ -470,7 +470,7 @@ static int sso_pf_send_message(u32 id, u16 domain_id,
 		}
 	}
 
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 
 	if (vf_idx == -1)
 		return -ENODEV; /* SSOVF for domain not found */
@@ -496,7 +496,7 @@ static int sso_pf_set_mbox_ram(u32 node, u16 domain_id,
 	if (!mbox_addr || !mbox_size)
 		return -EINVAL;
 
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == node) {
 			sso = curr;
@@ -505,7 +505,7 @@ static int sso_pf_set_mbox_ram(u32 node, u16 domain_id,
 	}
 
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return -ENODEV;
 	}
 
@@ -519,7 +519,7 @@ static int sso_pf_set_mbox_ram(u32 node, u16 domain_id,
 		}
 	}
 
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 
 	if (vf_idx < 0)
 		return -ENODEV; /* SSOVF for domain not found */
@@ -537,7 +537,7 @@ static int sso_pf_get_vf_count(u32 id)
 	struct ssopf *sso = NULL;
 	struct ssopf *curr;
 
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == id) {
 			sso = curr;
@@ -546,11 +546,11 @@ static int sso_pf_get_vf_count(u32 id)
 	}
 
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return 0;
 	}
 
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	return sso->total_vfs;
 }
 
@@ -560,7 +560,7 @@ int sso_reset_domain(u32 id, u16 domain_id)
 	struct ssopf *curr;
 	int i;
 
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == id) {
 			sso = curr;
@@ -569,7 +569,7 @@ int sso_reset_domain(u32 id, u16 domain_id)
 	}
 
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return -EINVAL;
 	}
 
@@ -581,7 +581,7 @@ int sso_reset_domain(u32 id, u16 domain_id)
 		}
 	}
 
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	return 0;
 }
 
@@ -590,7 +590,7 @@ int sso_pf_set_value(u32 id, u64 offset, u64 val)
 	struct ssopf *sso = NULL;
 	struct ssopf *curr;
 
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == id) {
 			sso = curr;
@@ -598,11 +598,11 @@ int sso_pf_set_value(u32 id, u64 offset, u64 val)
 		}
 	}
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return -EINVAL;
 	}
 	sso_reg_write(sso, offset, val);
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	return 0;
 }
 EXPORT_SYMBOL(sso_pf_set_value);
@@ -612,7 +612,7 @@ int sso_pf_get_value(u32 id, u64 offset, u64 *val)
 	struct ssopf *sso = NULL;
 	struct ssopf *curr;
 
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == id) {
 			sso = curr;
@@ -620,11 +620,11 @@ int sso_pf_get_value(u32 id, u64 offset, u64 *val)
 		}
 	}
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return -EINVAL;
 	}
 	*val = sso_reg_read(sso, offset);
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	return 0;
 }
 EXPORT_SYMBOL(sso_pf_get_value);
@@ -634,7 +634,7 @@ int sso_vf_get_value(u32 id, int vf_id, u64 offset, u64 *val)
 	struct ssopf *sso = NULL;
 	struct ssopf *curr;
 
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_for_each_entry(curr, &octeontx_sso_devices, list) {
 		if (curr->id == id) {
 			sso = curr;
@@ -642,12 +642,12 @@ int sso_vf_get_value(u32 id, int vf_id, u64 offset, u64 *val)
 		}
 	}
 	if (!sso) {
-		spin_unlock(&octeontx_sso_devices_lock);
+		mutex_unlock(&octeontx_sso_devices_lock);
 		return -EINVAL;
 	}
 
 	*val = readq_relaxed((sso->vf[vf_id].domain.reg_base + offset));
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	return 0;
 }
 EXPORT_SYMBOL(sso_vf_get_value);
@@ -1349,9 +1349,9 @@ static int sso_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	INIT_WORK(&sso->mbox_work, handle_mbox);
 
 	INIT_LIST_HEAD(&sso->list);
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_add(&sso->list, &octeontx_sso_devices);
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	return 0;
 }
 
@@ -1392,9 +1392,9 @@ static void sso_remove(struct pci_dev *pdev)
 	sso_fini(sso);
 
 	/* release probed resources */
-	spin_lock(&octeontx_sso_devices_lock);
+	mutex_lock(&octeontx_sso_devices_lock);
 	list_del(&sso->list);
-	spin_unlock(&octeontx_sso_devices_lock);
+	mutex_unlock(&octeontx_sso_devices_lock);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	pci_set_drvdata(pdev, NULL);

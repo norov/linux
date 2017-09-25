@@ -31,7 +31,7 @@
 #define BGX_CHAN_RANGE	BIT(8)
 
 static atomic_t pko_count = ATOMIC_INIT(0);
-static DEFINE_SPINLOCK(octeontx_pko_devices_lock);
+static DEFINE_MUTEX(octeontx_pko_devices_lock);
 static LIST_HEAD(octeontx_pko_devices);
 
 static struct fpapf_com_s *fpapf;
@@ -267,7 +267,7 @@ static int pko_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	struct pkopf *curr;
 	int i, vf_idx = 0;
 
-	spin_lock(&octeontx_pko_devices_lock);
+	mutex_lock(&octeontx_pko_devices_lock);
 	list_for_each_entry(curr, &octeontx_pko_devices, list) {
 		if (curr->id == id) {
 			pko = curr;
@@ -276,7 +276,7 @@ static int pko_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	}
 
 	if (!pko) {
-		spin_unlock(&octeontx_pko_devices_lock);
+		mutex_unlock(&octeontx_pko_devices_lock);
 		return -ENODEV;
 	}
 
@@ -304,7 +304,7 @@ static int pko_pf_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 	}
 
 	pko->vfs_in_use -= vf_idx;
-	spin_unlock(&octeontx_pko_devices_lock);
+	mutex_unlock(&octeontx_pko_devices_lock);
 
 	return 0;
 }
@@ -341,7 +341,7 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 	if (!kobj)
 		return -EINVAL;
 
-	spin_lock(&octeontx_pko_devices_lock);
+	mutex_lock(&octeontx_pko_devices_lock);
 	list_for_each_entry(curr, &octeontx_pko_devices, list) {
 		if (curr->id == id) {
 			pko = curr;
@@ -434,11 +434,11 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 		goto err_unlock;
 	}
 
-	spin_unlock(&octeontx_pko_devices_lock);
+	mutex_unlock(&octeontx_pko_devices_lock);
 	return ret;
 
 err_unlock:
-	spin_unlock(&octeontx_pko_devices_lock);
+	mutex_unlock(&octeontx_pko_devices_lock);
 	pko_pf_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
@@ -486,13 +486,13 @@ static int pko_pf_receive_message(u32 id, u16 domain_id,
 	struct pkopf_vf *vf;
 	struct pkopf *pko = NULL;
 
-	spin_lock(&octeontx_pko_devices_lock);
+	mutex_lock(&octeontx_pko_devices_lock);
 
 	vf = get_vf(id, domain_id, hdr->vfid, &pko);
 
 	if (!vf) {
 		hdr->res_code = MBOX_RET_INVALID;
-		spin_unlock(&octeontx_pko_devices_lock);
+		mutex_unlock(&octeontx_pko_devices_lock);
 		return -ENODEV;
 	}
 
@@ -507,7 +507,7 @@ static int pko_pf_receive_message(u32 id, u16 domain_id,
 		hdr->res_code = MBOX_RET_INVALID;
 	}
 
-	spin_unlock(&octeontx_pko_devices_lock);
+	mutex_unlock(&octeontx_pko_devices_lock);
 	return 0;
 }
 
@@ -516,7 +516,7 @@ static int pko_pf_get_vf_count(u32 id)
 	struct pkopf *pko = NULL;
 	struct pkopf *curr;
 
-	spin_lock(&octeontx_pko_devices_lock);
+	mutex_lock(&octeontx_pko_devices_lock);
 	list_for_each_entry(curr, &octeontx_pko_devices, list) {
 		if (curr->id == id) {
 			pko = curr;
@@ -525,11 +525,11 @@ static int pko_pf_get_vf_count(u32 id)
 	}
 
 	if (!pko) {
-		spin_unlock(&octeontx_pko_devices_lock);
+		mutex_unlock(&octeontx_pko_devices_lock);
 		return 0;
 	}
 
-	spin_unlock(&octeontx_pko_devices_lock);
+	mutex_unlock(&octeontx_pko_devices_lock);
 	return pko->total_vfs;
 }
 
@@ -558,7 +558,7 @@ int pko_reset_domain(u32 id, u16 domain_id)
 	int retry, queue_base;
 	int i, j, mac_num;
 
-	spin_lock(&octeontx_pko_devices_lock);
+	mutex_lock(&octeontx_pko_devices_lock);
 	list_for_each_entry(curr, &octeontx_pko_devices, list) {
 		if (curr->id == id) {
 			pko = curr;
@@ -567,7 +567,7 @@ int pko_reset_domain(u32 id, u16 domain_id)
 	}
 
 	if (!pko) {
-		spin_unlock(&octeontx_pko_devices_lock);
+		mutex_unlock(&octeontx_pko_devices_lock);
 		return -ENODEV;
 	}
 
@@ -664,7 +664,7 @@ int pko_reset_domain(u32 id, u16 domain_id)
 		}
 	}
 
-	spin_unlock(&octeontx_pko_devices_lock);
+	mutex_unlock(&octeontx_pko_devices_lock);
 	return 0;
 }
 
@@ -1319,9 +1319,9 @@ static int pko_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	INIT_LIST_HEAD(&pko->list);
-	spin_lock(&octeontx_pko_devices_lock);
+	mutex_lock(&octeontx_pko_devices_lock);
 	list_add(&pko->list, &octeontx_pko_devices);
-	spin_unlock(&octeontx_pko_devices_lock);
+	mutex_unlock(&octeontx_pko_devices_lock);
 	return 0;
 }
 
