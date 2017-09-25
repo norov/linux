@@ -88,7 +88,7 @@ struct lmac_cfg {
 static struct lmac_cfg lmac_saved_cfg[MAX_BGX_PER_CN83XX * MAX_LMAC_PER_BGX];
 
 /* Global lists of LBK devices and ports */
-static DEFINE_SPINLOCK(octeontx_bgx_lock);
+static DEFINE_MUTEX(octeontx_bgx_lock);
 static LIST_HEAD(octeontx_bgx_devices);
 static LIST_HEAD(octeontx_bgx_ports);
 
@@ -110,15 +110,15 @@ static struct octtx_bgx_port *get_bgx_port(int domain_id, int port_idx)
 {
 	struct octtx_bgx_port *port;
 
-	spin_lock(&octeontx_bgx_lock);
+	mutex_lock(&octeontx_bgx_lock);
 	list_for_each_entry(port, &octeontx_bgx_ports, list) {
 		if (port->domain_id == domain_id &&
 		    port->dom_port_idx == port_idx) {
-			spin_unlock(&octeontx_bgx_lock);
+			mutex_unlock(&octeontx_bgx_lock);
 			return port;
 		}
 	}
-	spin_unlock(&octeontx_bgx_lock);
+	mutex_unlock(&octeontx_bgx_lock);
 	return NULL;
 }
 
@@ -139,12 +139,12 @@ static int bgx_get_num_ports(int node)
 	struct octtx_bgx_port *port;
 	int count = 0;
 
-	spin_lock(&octeontx_bgx_lock);
+	mutex_lock(&octeontx_bgx_lock);
 	list_for_each_entry(port, &octeontx_bgx_ports, list) {
 		if (port->node == node)
 			count++;
 	}
-	spin_unlock(&octeontx_bgx_lock);
+	mutex_unlock(&octeontx_bgx_lock);
 	return count;
 }
 
@@ -162,7 +162,7 @@ static struct octtx_bgx_port *bgx_get_port_by_chan(int node, u16 domain_id,
 	struct octtx_bgx_port *port;
 	int max_chan;
 
-	spin_lock(&octeontx_bgx_lock);
+	mutex_lock(&octeontx_bgx_lock);
 	list_for_each_entry(port, &octeontx_bgx_ports, list) {
 		if (port->domain_id == BGX_INVALID_ID ||
 		    port->domain_id != domain_id ||
@@ -170,11 +170,11 @@ static struct octtx_bgx_port *bgx_get_port_by_chan(int node, u16 domain_id,
 			continue;
 		max_chan = port->base_chan + port->num_chans;
 		if (chan >= port->base_chan && chan < max_chan) {
-			spin_unlock(&octeontx_bgx_lock);
+			mutex_unlock(&octeontx_bgx_lock);
 			return port;
 		}
 	}
-	spin_unlock(&octeontx_bgx_lock);
+	mutex_unlock(&octeontx_bgx_lock);
 	return NULL;
 }
 
@@ -794,7 +794,7 @@ static int bgx_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct octtx_bgx_port *port;
 
-	spin_lock(&octeontx_bgx_lock);
+	mutex_lock(&octeontx_bgx_lock);
 	list_for_each_entry(port, &octeontx_bgx_ports, list) {
 		if (port->node == id && port->domain_id == domain_id) {
 			/* Return port to Linux */
@@ -806,7 +806,7 @@ static int bgx_destroy_domain(u32 id, u16 domain_id, struct kobject *kobj)
 			port->dom_port_idx = BGX_INVALID_ID;
 		}
 	}
-	spin_unlock(&octeontx_bgx_lock);
+	mutex_unlock(&octeontx_bgx_lock);
 	return 0;
 }
 
@@ -823,7 +823,7 @@ static int bgx_create_domain(u32 id, u16 domain_id,
 	/* For each domain port, find requested entry in the list of
 	 * global ports and sync up those two port structures.
 	 */
-	spin_lock(&octeontx_bgx_lock);
+	mutex_lock(&octeontx_bgx_lock);
 	for (port_idx = 0; port_idx < ports; port_idx++) {
 		port = &port_tbl[port_idx];
 
@@ -862,11 +862,11 @@ static int bgx_create_domain(u32 id, u16 domain_id,
 				goto err_unlock;
 		}
 	}
-	spin_unlock(&octeontx_bgx_lock);
+	mutex_unlock(&octeontx_bgx_lock);
 	return ret;
 
 err_unlock:
-	spin_unlock(&octeontx_bgx_lock);
+	mutex_unlock(&octeontx_bgx_lock);
 	bgx_destroy_domain(id, domain_id, kobj);
 	return ret;
 }
@@ -877,12 +877,12 @@ static int bgx_reset_domain(u32 id, u16 domain_id)
 {
 	struct octtx_bgx_port *port;
 
-	spin_lock(&octeontx_bgx_lock);
+	mutex_lock(&octeontx_bgx_lock);
 	list_for_each_entry(port, &octeontx_bgx_ports, list) {
 		if (port->node == id && port->domain_id == domain_id)
 			bgx_port_stop(port);
 	}
-	spin_unlock(&octeontx_bgx_lock);
+	mutex_unlock(&octeontx_bgx_lock);
 	return 0;
 }
 
