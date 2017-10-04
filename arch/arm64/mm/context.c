@@ -145,6 +145,7 @@ int lock_context(struct mm_struct *mm, int index)
 	raw_spin_unlock_irqrestore(&cpu_asid_lock, flags);
 	return 0;
 }
+EXPORT_SYMBOL(lock_context);
 
 int unlock_context_by_index(int index)
 {
@@ -157,6 +158,7 @@ int unlock_context_by_index(int index)
 	raw_spin_unlock_irqrestore(&cpu_asid_lock, flags);
 	return 0;
 }
+EXPORT_SYMBOL(unlock_context_by_index);
 
 bool unlock_context_by_mm(struct mm_struct *mm)
 {
