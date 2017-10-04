@@ -782,6 +782,7 @@ int task_cleanup_handler_add(void (*handler)(struct task_struct *))
 	mutex_unlock(&task_cleanup_handlers_mutex);
 	return 0;
 }
+EXPORT_SYMBOL(task_cleanup_handler_add);
 
 int task_cleanup_handler_remove(void (*handler)(struct task_struct *))
 {
@@ -802,6 +803,7 @@ int task_cleanup_handler_remove(void (*handler)(struct task_struct *))
 	mutex_unlock(&task_cleanup_handlers_mutex);
 	return retval;
 }
+EXPORT_SYMBOL(task_cleanup_handler_remove);
 
 static void task_cleanup_handlers_call(struct task_struct *task)
 {
