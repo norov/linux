@@ -1360,7 +1360,6 @@ sysfs_init_err:
 	device_destroy(octtx_class, octtx_dev);
 
 device_create_err:
-	class_unregister(octtx_class);
 	class_destroy(octtx_class);
 
 class_create_err:
@@ -1412,7 +1411,6 @@ static void __exit octeontx_cleanup_module(void)
 
 	octtx_sysfs_remove(octtx_device);
 	device_destroy(octtx_class, octtx_dev);
-	class_unregister(octtx_class);
 	class_destroy(octtx_class);
 
 	cdev_del(octtx_cdev);
