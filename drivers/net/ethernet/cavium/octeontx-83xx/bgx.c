@@ -210,12 +210,21 @@ static int bgx_port_initial_config(struct octtx_bgx_port *port)
 		return -ENODEV;
 
 	/* Adjust TX FIFO and BP thresholds to LMAC type */
-	if (port->lmac_type == OCTTX_BGX_LMAC_TYPE_40GR) {
+	switch (port->lmac_type) {
+	case OCTTX_BGX_LMAC_TYPE_40GR:
 		reg = 0x400;
+		thr = 0x300;
+		break;
+	case OCTTX_BGX_LMAC_TYPE_XAUI:
+	case OCTTX_BGX_LMAC_TYPE_RXAUI:
+	case OCTTX_BGX_LMAC_TYPE_10GR:
+		reg = 0x100;
 		thr = 0x100;
-	} else {
+		break;
+	default:
 		reg = 0x100;
 		thr = 0x20;
+		break;
 	}
 	bgx_reg_write(bgx, port->lmac, BGX_CMR_RX_BP_ON, reg);
 	bgx_reg_write(bgx, port->lmac, BGX_SMUX_TX_THRESH, thr);
