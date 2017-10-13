@@ -1099,7 +1099,7 @@ static int setup_dpfi(struct pkopf *pko)
 		symbol_put(fpavf_com);
 		return -ENODEV;
 	}
-	buffers = 80000;
+	buffers = 4096;
 
 	err = fpavf->setup(fpa, buffers, pko->pdm_buf_size,
 			FPA_VF_FLAG_CONT_MEM);
