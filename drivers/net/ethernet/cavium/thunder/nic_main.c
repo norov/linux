@@ -1193,7 +1193,7 @@ static void nic_config_timestamp(struct nicpf *nic, int vf, struct set_ptp *ptp)
 	u8 lmac, bgx_idx;
 	u64 pkind_val, pkind_idx;
 
-	if (vf >= nic->num_vf_en)
+	if (vf >= nic->num_vf_en || nic->lbk_vf == vf)
 		return;
 	bgx_idx = NIC_GET_BGX_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vf]);
 	lmac = NIC_GET_LMAC_FROM_VF_LMAC_MAP(nic->vf_lmac_map[vf]);
