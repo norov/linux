@@ -219,7 +219,7 @@ static int bgx_port_initial_config(struct octtx_bgx_port *port)
 	case OCTTX_BGX_LMAC_TYPE_RXAUI:
 	case OCTTX_BGX_LMAC_TYPE_10GR:
 		reg = 0x100;
-		thr = 0x100;
+		thr = 0x80;
 		break;
 	default:
 		reg = 0x100;
