@@ -31,6 +31,7 @@
 #include <linux/smp.h>
 #include <linux/module.h>
 #include <linux/hugetlb.h>
+#include <linux/isolation.h>
 
 #include <asm/page.h>
 #include <asm/sections.h>
@@ -85,6 +86,16 @@ static void hv_flush_update(const struct cpumask *cache_cpumask,
 	 */
 	for_each_cpu(cpu, &mask)
 		++per_cpu(irq_stat, cpu).irq_hv_flush_count;
+
+	/*
+	 * Send an extra Linux-level interrupt here to task isolation tasks
+	 * so that they can generate the appropriate signal to kill
+	 * themselves.  If we didn't send a Linux interrupt, we would
+	 * interrupt the task into the hypervisor but it wouldn't get a
+	 * signal to advise it of the loss of the cpu.
+	 */
+	task_isolation_remote_cpumask_interrupt(&mask,
+						"remote cache/TLB flush");
 }
 
 /*
