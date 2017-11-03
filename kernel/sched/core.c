@@ -670,6 +670,17 @@ bool sched_can_stop_tick(struct rq *rq)
 }
 #endif /* CONFIG_NO_HZ_FULL */
 
+/*
+ * Return a pointer to the task_struct for the task that is running on
+ * the specified cpu at the time of the call (note that the task may have
+ * exited by the time the caller inspects the resulting task_struct).
+ * Caller must put_task_struct() with the pointer when finished with it.
+ */
+struct task_struct *try_get_task_struct_on_cpu(int cpu)
+{
+	return try_get_task_struct(&cpu_rq(cpu)->curr);
+}
+
 void sched_avg_update(struct rq *rq)
 {
 	s64 period = sched_avg_period();
