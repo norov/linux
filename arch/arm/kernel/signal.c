@@ -15,6 +15,7 @@
 #include <linux/tracehook.h>
 #include <linux/uprobes.h>
 #include <linux/syscalls.h>
+#include <linux/isolation.h>
 
 #include <asm/elf.h>
 #include <asm/cacheflush.h>
@@ -605,6 +606,9 @@ static int do_signal(struct pt_regs *regs, int syscall)
 	return 0;
 }
 
+#define WORK_PENDING_LOOP_FLAGS \
+	(_TIF_NEED_RESCHED | _TIF_SIGPENDING | _TIF_NOTIFY_RESUME | _TIF_UPROBE)
+
 asmlinkage int
 do_work_pending(struct pt_regs *regs, unsigned int thread_flags, int syscall)
 {
@@ -641,7 +645,11 @@ do_work_pending(struct pt_regs *regs, unsigned int thread_flags, int syscall)
 		}
 		local_irq_disable();
 		thread_flags = current_thread_info()->flags;
-	} while (thread_flags & _TIF_WORK_MASK);
+	} while (thread_flags & WORK_PENDING_LOOP_FLAGS);
+
+	if (thread_flags & _TIF_TASK_ISOLATION)
+		task_isolation_start();
+
 	return 0;
 }
 
