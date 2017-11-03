@@ -32,6 +32,7 @@
 #include <linux/signal.h>
 #include <linux/delay.h>
 #include <linux/context_tracking.h>
+#include <linux/isolation.h>
 #include <asm/stack.h>
 #include <asm/switch_to.h>
 #include <asm/homecache.h>
@@ -515,6 +516,9 @@ void prepare_exit_to_usermode(struct pt_regs *regs, u32 thread_info_flags)
 		local_irq_disable();
 #endif
 	}
+
+	if (thread_info_flags & _TIF_TASK_ISOLATION)
+		task_isolation_start();
 
 	user_enter();
 }
