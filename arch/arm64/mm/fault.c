@@ -32,6 +32,7 @@
 #include <linux/perf_event.h>
 #include <linux/preempt.h>
 #include <linux/hugetlb.h>
+#include <linux/isolation.h>
 
 #include <asm/bug.h>
 #include <asm/cmpxchg.h>
@@ -495,6 +496,10 @@ retry:
 	 */
 	if (likely(!(fault & (VM_FAULT_ERROR | VM_FAULT_BADMAP |
 			      VM_FAULT_BADACCESS)))) {
+		/* No signal was generated, but notify task-isolation tasks. */
+		if (user_mode(regs))
+			task_isolation_interrupt("page fault at %#lx", addr);
+
 		/*
 		 * Major/minor page fault accounting is only done
 		 * once. If we go through a retry, it is extremely
