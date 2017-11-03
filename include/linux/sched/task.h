@@ -98,6 +98,7 @@ static inline void put_task_struct(struct task_struct *t)
 
 struct task_struct *task_rcu_dereference(struct task_struct **ptask);
 struct task_struct *try_get_task_struct(struct task_struct **ptask);
+struct task_struct *try_get_task_struct_on_cpu(int cpu);
 
 
 #ifdef CONFIG_ARCH_WANTS_DYNAMIC_TASK_STRUCT
