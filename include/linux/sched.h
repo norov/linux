@@ -1137,6 +1137,10 @@ struct task_struct {
 	/* Used by LSM modules for access restriction: */
 	void				*security;
 #endif
+#ifdef CONFIG_TASK_ISOLATION
+	unsigned short			task_isolation_flags;  /* prctl */
+	unsigned short			task_isolation_state;
+#endif
 
 	/*
 	 * New fields for task_struct should be added above here, so that
