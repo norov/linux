@@ -24,6 +24,7 @@
 #include <linux/tracehook.h>
 #include <linux/context_tracking.h>
 #include <linux/sched/task_stack.h>
+#include <linux/isolation.h>
 
 #include <asm/traps.h>
 #include <arch/chip.h>
@@ -261,6 +262,15 @@ int do_syscall_trace_enter(struct pt_regs *regs)
 	    tracehook_report_syscall_entry(regs)) {
 		regs->regs[TREG_SYSCALL_NR] = -1;
 		return -1;
+	}
+
+	/*
+	 * In task isolation mode, we may prevent the syscall from
+	 * running, and if so we also deliver a signal to the process.
+	 */
+	if (work & _TIF_TASK_ISOLATION) {
+		if (task_isolation_syscall(regs->regs[TREG_SYSCALL_NR]) == -1)
+			return -1;
 	}
 
 	if (secure_computing(NULL) == -1)

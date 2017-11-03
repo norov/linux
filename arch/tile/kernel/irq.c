@@ -18,6 +18,7 @@
 #include <linux/irq.h>
 #include <linux/kernel_stat.h>
 #include <linux/uaccess.h>
+#include <linux/isolation.h>
 #include <hv/drv_pcie_rc_intf.h>
 #include <arch/spr_def.h>
 #include <asm/traps.h>
@@ -100,6 +101,8 @@ void tile_dev_intr(struct pt_regs *regs, int intnum)
 
 	/* Track time spent here in an interrupt context. */
 	old_regs = set_irq_regs(regs);
+
+	task_isolation_interrupt("IPI: IRQ mask %#lx", remaining_irqs);
 	irq_enter();
 
 #ifdef CONFIG_DEBUG_STACKOVERFLOW
