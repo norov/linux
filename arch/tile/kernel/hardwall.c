@@ -23,6 +23,7 @@
 #include <linux/smp.h>
 #include <linux/cdev.h>
 #include <linux/compat.h>
+#include <linux/isolation.h>
 #include <asm/hardwall.h>
 #include <asm/traps.h>
 #include <asm/siginfo.h>
@@ -328,6 +329,7 @@ void __kprobes do_hardwall_trap(struct pt_regs* regs, int fault_num)
 	int found_processes;
 	struct pt_regs *old_regs = set_irq_regs(regs);
 
+	task_isolation_interrupt("hardwall trap");
 	irq_enter();
 
 	/* Figure out which network trapped. */

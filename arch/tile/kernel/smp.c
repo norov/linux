@@ -20,6 +20,7 @@
 #include <linux/irq.h>
 #include <linux/irq_work.h>
 #include <linux/module.h>
+#include <linux/isolation.h>
 #include <asm/cacheflush.h>
 #include <asm/homecache.h>
 
@@ -258,10 +259,8 @@ void __init ipi_init(void)
 
 #if CHIP_HAS_IPI()
 
-void smp_send_reschedule(int cpu)
+static void __smp_send_reschedule(int cpu)
 {
-	WARN_ON(cpu_is_offline(cpu));
-
 	/*
 	 * We just want to do an MMIO store.  The traditional writeq()
 	 * functions aren't really correct here, since they're always
@@ -273,15 +272,17 @@ void smp_send_reschedule(int cpu)
 
 #else
 
-void smp_send_reschedule(int cpu)
+static void __smp_send_reschedule(int cpu)
 {
-	HV_Coord coord;
-
-	WARN_ON(cpu_is_offline(cpu));
-
-	coord.y = cpu_y(cpu);
-	coord.x = cpu_x(cpu);
+	HV_Coord coord = { .y = cpu_y(cpu), .x = cpu_x(cpu) };
 	hv_trigger_ipi(coord, IRQ_RESCHEDULE);
 }
 
 #endif /* CHIP_HAS_IPI() */
+
+void smp_send_reschedule(int cpu)
+{
+	WARN_ON(cpu_is_offline(cpu));
+	task_isolation_remote(cpu, "reschedule IPI");
+	__smp_send_reschedule(cpu);
+}
