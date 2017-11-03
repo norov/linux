@@ -2,6 +2,7 @@
 #define _ASM_X86_APIC_H
 
 #include <linux/cpumask.h>
+#include <linux/isolation.h>
 
 #include <asm/alternative.h>
 #include <asm/cpufeature.h>
@@ -618,6 +619,7 @@ extern void irq_exit(void);
 
 static inline void entering_irq(void)
 {
+	task_isolation_interrupt("irq");
 	irq_enter();
 }
 
@@ -629,6 +631,7 @@ static inline void entering_ack_irq(void)
 
 static inline void ipi_entering_ack_irq(void)
 {
+	task_isolation_interrupt("ack irq");
 	irq_enter();
 	ack_APIC_irq();
 }
