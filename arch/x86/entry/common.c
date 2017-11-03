@@ -24,6 +24,7 @@
 #include <linux/uprobes.h>
 #include <linux/livepatch.h>
 #include <linux/syscalls.h>
+#include <linux/isolation.h>
 
 #include <asm/desc.h>
 #include <asm/traps.h>
@@ -86,6 +87,16 @@ static long syscall_trace_enter(struct pt_regs *regs)
 
 	if (emulated)
 		return -1L;
+
+	/*
+	 * In task isolation mode, we may prevent the syscall from
+	 * running, and if so we also deliver a signal to the process.
+	 */
+	if (work & _TIF_TASK_ISOLATION) {
+		if (task_isolation_syscall(regs->orig_ax) == -1)
+			return -1L;
+		work &= ~_TIF_TASK_ISOLATION;
+	}
 
 #ifdef CONFIG_SECCOMP
 	/*
@@ -195,6 +206,9 @@ __visible inline void prepare_exit_to_usermode(struct pt_regs *regs)
 
 	if (unlikely(cached_flags & EXIT_TO_USERMODE_LOOP_FLAGS))
 		exit_to_usermode_loop(regs, cached_flags);
+
+	if (cached_flags & _TIF_TASK_ISOLATION)
+		task_isolation_start();
 
 #ifdef CONFIG_COMPAT
 	/*
