@@ -27,6 +27,7 @@
 #include <linux/audit.h>
 #include <linux/tracehook.h>
 #include <linux/unistd.h>
+#include <linux/isolation.h>
 
 #include <asm/pgtable.h>
 #include <asm/traps.h>
@@ -935,6 +936,15 @@ asmlinkage int syscall_trace_enter(struct pt_regs *regs, int scno)
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
 		tracehook_report_syscall(regs, PTRACE_SYSCALL_ENTER);
+
+	/*
+	 * In task isolation mode, we may prevent the syscall from
+	 * running, and if so we also deliver a signal to the process.
+	 */
+	if (test_thread_flag(TIF_TASK_ISOLATION)) {
+		if (task_isolation_syscall(scno) == -1)
+			return -1;
+	}
 
 	/* Do seccomp after ptrace; syscall may have changed. */
 #ifdef CONFIG_HAVE_ARCH_SECCOMP_FILTER
