@@ -16,6 +16,7 @@
 #include <linux/smp.h>
 #include <linux/hardirq.h>
 #include <linux/ptrace.h>
+#include <linux/isolation.h>
 #include <asm/hv_driver.h>
 #include <asm/irq_regs.h>
 #include <asm/traps.h>
@@ -86,6 +87,7 @@ void hv_message_intr(struct pt_regs *regs, int intnum)
 
 			tag = message[0];
 #ifdef CONFIG_SMP
+			task_isolation_interrupt("SMP message %d", tag);
 			evaluate_message(message[0]);
 #else
 			panic("Received IPI message %d in UP mode", tag);
@@ -94,6 +96,8 @@ void hv_message_intr(struct pt_regs *regs, int intnum)
 			HV_IntrMsg *him = (HV_IntrMsg *)message;
 			struct hv_driver_cb *cb =
 				(struct hv_driver_cb *)him->intarg;
+			task_isolation_interrupt("interrupt message %#lx(%#lx)",
+					   him->intarg, him->intdata);
 			cb->callback(cb, him->intdata);
 			__this_cpu_inc(irq_stat.irq_hv_msg_count);
 		}
