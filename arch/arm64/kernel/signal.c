@@ -30,6 +30,7 @@
 #include <linux/tracehook.h>
 #include <linux/ratelimit.h>
 #include <linux/syscalls.h>
+#include <linux/isolation.h>
 
 #include <asm/debug-monitors.h>
 #include <asm/elf.h>
@@ -742,6 +743,10 @@ static void do_signal(struct pt_regs *regs)
 	restore_saved_sigmask();
 }
 
+#define NOTIFY_RESUME_LOOP_FLAGS				     \
+	(_TIF_NEED_RESCHED | _TIF_SIGPENDING |  _TIF_NOTIFY_RESUME | \
+	 _TIF_FOREIGN_FPSTATE | _TIF_UPROBE | _TIF_FSCHECK)
+
 asmlinkage void do_notify_resume(struct pt_regs *regs,
 				 unsigned int thread_flags)
 {
@@ -778,5 +783,8 @@ asmlinkage void do_notify_resume(struct pt_regs *regs,
 
 		local_irq_disable();
 		thread_flags = READ_ONCE(current_thread_info()->flags);
-	} while (thread_flags & _TIF_WORK_MASK);
+	} while (thread_flags & NOTIFY_RESUME_LOOP_FLAGS);
+
+	if (thread_flags & _TIF_TASK_ISOLATION)
+		task_isolation_start();
 }
