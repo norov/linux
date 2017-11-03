@@ -31,6 +31,7 @@ TARGETS += splice
 TARGETS += static_keys
 TARGETS += sync
 TARGETS += sysctl
+TARGETS += task_isolation
 ifneq (1, $(quicktest))
 TARGETS += timers
 endif
