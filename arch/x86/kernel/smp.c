@@ -23,6 +23,7 @@
 #include <linux/interrupt.h>
 #include <linux/cpu.h>
 #include <linux/gfp.h>
+#include <linux/isolation.h>
 
 #include <asm/mtrr.h>
 #include <asm/tlbflush.h>
@@ -128,6 +129,7 @@ static void native_smp_send_reschedule(int cpu)
 		WARN(1, "sched: Unexpected reschedule of offline CPU#%d!\n", cpu);
 		return;
 	}
+	task_isolation_remote(cpu, "reschedule IPI");
 	apic->send_IPI(cpu, RESCHEDULE_VECTOR);
 }
 
