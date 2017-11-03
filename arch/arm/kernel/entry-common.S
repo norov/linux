@@ -53,7 +53,8 @@ ret_fast_syscall:
 	cmp	r2, #TASK_SIZE
 	blne	addr_limit_check_failed
 	ldr	r1, [tsk, #TI_FLAGS]		@ re-check for syscall tracing
-	tst	r1, #_TIF_SYSCALL_WORK | _TIF_WORK_MASK
+	ldr	r2, =_TIF_SYSCALL_WORK | _TIF_WORK_MASK
+	tst	r1, r2
 	bne	fast_work_pending
 
 
@@ -83,7 +84,8 @@ ret_fast_syscall:
 	cmp	r2, #TASK_SIZE
 	blne	addr_limit_check_failed
 	ldr	r1, [tsk, #TI_FLAGS]		@ re-check for syscall tracing
-	tst	r1, #_TIF_SYSCALL_WORK | _TIF_WORK_MASK
+	ldr	r2, =_TIF_SYSCALL_WORK | _TIF_WORK_MASK
+	tst	r1, r2
 	beq	no_work_pending
  UNWIND(.fnend		)
 ENDPROC(ret_fast_syscall)
@@ -91,7 +93,8 @@ ENDPROC(ret_fast_syscall)
 	/* Slower path - fall through to work_pending */
 #endif
 
-	tst	r1, #_TIF_SYSCALL_WORK
+	ldr	r2, =_TIF_SYSCALL_WORK
+	tst	r1, r2
 	bne	__sys_trace_return_nosave
 slow_work_pending:
 	mov	r0, sp				@ 'regs'
@@ -238,7 +241,8 @@ local_restart:
 	ldr	r10, [tsk, #TI_FLAGS]		@ check for syscall tracing
 	stmdb	sp!, {r4, r5}			@ push fifth and sixth args
 
-	tst	r10, #_TIF_SYSCALL_WORK		@ are we tracing syscalls?
+	ldr	r11, =_TIF_SYSCALL_WORK		@ are we tracing syscalls?
+	tst	r10, r11
 	bne	__sys_trace
 
 	cmp	scno, #NR_syscalls		@ check upper syscall limit
