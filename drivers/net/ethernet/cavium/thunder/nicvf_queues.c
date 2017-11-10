@@ -1977,6 +1977,12 @@ int nicvf_check_cqe_tx_errs(struct nicvf *nic, struct cqe_send_t *cqe_tx)
 	case CQ_TX_ERROP_CK_OFLOW:
 		this_cpu_inc(nic->drv_stats->tx_csum_overflow);
 		break;
+	case CQ_TX_ERROP_CK_DERR:
+		this_cpu_inc(nic->drv_stats->tx_csum_derr);
+		break;
+	case CQ_TX_ERROP_CK_PERR:
+		this_cpu_inc(nic->drv_stats->tx_csum_perr);
+		break;
 	}
 
 	return 1;
