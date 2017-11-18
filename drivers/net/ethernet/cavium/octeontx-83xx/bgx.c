@@ -223,7 +223,7 @@ static int bgx_port_initial_config(struct octtx_bgx_port *port)
 	switch (port->lmac_type) {
 	case OCTTX_BGX_LMAC_TYPE_40GR:
 		reg = 0x400;
-		thr = 0x300;
+		thr = 0x200;
 		break;
 	case OCTTX_BGX_LMAC_TYPE_XAUI:
 	case OCTTX_BGX_LMAC_TYPE_RXAUI:
