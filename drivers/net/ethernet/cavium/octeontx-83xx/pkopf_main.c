@@ -737,6 +737,7 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 {
 	u64 reg, fifo;
 	int ptgf;
+	u64 bgx_txfifo_sz = 0xC000; /* BGX(x)_CONST[tx_fifosz] */
 	u64 fifo_size = 2500; /* 2.5KB */
 	u64 size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
 	u64 skid = 0x0; /* 16 */
@@ -780,14 +781,17 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 			size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
 			rate = 0x2; /* 25.0 Gpbs (24 inflight packets) */
 			skid = 0x1; /* 32 */
+			bgx_txfifo_sz /= 2;
 			break;
 		case OCTTX_BGX_LMAC_TYPE_10GR: /* XFI */
 			fifo_size = 2500; /* 2.5KB */
 			size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
 			rate = 0x1; /* 12.5 Gpbs (12 inflight packets) */
 			skid = 0x1; /* 32 */
+			bgx_txfifo_sz /= 4;
 			break;
 		default: /* SGMII, ... */
+			bgx_txfifo_sz /= 4;
 			break;
 		}
 	} else if (mac_num >= 0 && mac_num <= 2) { /* LBK */
@@ -800,13 +804,9 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 		return -EINVAL;
 	}
 	reg = fifo | (skid << 5) | (0x0 << 15) | (0x1 << 16);
-	dev_dbg(&pko->pdev->dev, "  write %016llx PKO_MAC%d_CFG\n",
-		reg, mac_num);
 	pko_reg_write(pko, PKO_PF_MACX_CFG(mac_num), reg);
 
-	reg = fifo_size / 16; /* MAX_CRED_LIM */
-	dev_dbg(&pko->pdev->dev, "  write %016llx PKO_MCI1_MAX_CRED%d\n",
-		reg, mac_num);
+	reg = bgx_txfifo_sz / 16; /* MAX_CRED_LIM */
 	pko_reg_write(pko, PKO_PF_MCI1_MAX_CREDX(mac_num), reg);
 
 	reg = (rate << 3) | size;
@@ -823,7 +823,6 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 		* "underflow" condition in the BGX TX FIFO. If this happens,
 		* use value = 3..6.
 		*/
-
 	pko_reg_write(pko, PKO_PF_PTF_IOBP_CFG, reg);
 
 	return 0;
