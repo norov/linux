@@ -1130,6 +1130,10 @@ static inline void sso_configure_on_chip_res(struct ssopf *sso, u16 ssogrps)
 			      (taq_rsvd_cnt & SSO_TAQ_CNT_RSVD_CNT_MASK) <<
 				SSO_TAQ_CNT_RSVD_CNT_SHIFT);
 	}
+	/* Turn off SSO conditional clocking (Errata SSO-29000) */
+	tmp = sso_reg_read(sso, SSO_PF_WS_CFG);
+	tmp |= 0x1; /*SSO_CCLK_DIS*/
+	sso_reg_write(sso, SSO_PF_WS_CFG, tmp);
 }
 
 static inline void sso_max_grps_update(struct ssopf *sso)
