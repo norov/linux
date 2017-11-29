@@ -1417,6 +1417,60 @@ static void nic_poll_for_link(struct work_struct *work)
 	queue_delayed_work(nic->check_link, &nic->dwork, HZ * 2);
 }
 
+ssize_t sriov_sqs_assignment_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	struct pci_dev *vf_dev;
+	struct pci_driver *vf_drv;
+	struct nicpf *nic = pci_get_drvdata(pdev);
+	size_t vf, off, svf_idx;
+
+	off = scnprintf(buf, PAGE_SIZE, "%u\n", nic->num_vf_en);
+
+	for (vf = 0; vf < nic->num_vf_en; vf++) {
+		vf_dev = nic->vf_pdev[vf];
+		vf_drv = vf_dev ? pci_dev_driver(vf_dev) : NULL;
+		if (off >= PAGE_SIZE)
+			break;
+		off += scnprintf(&buf[off], PAGE_SIZE - off,
+				 "%zu %04x:%02x:%02x.%d %s %c:",
+				 vf, pci_domain_nr(vf_dev->bus),
+				 vf_dev->bus->number, PCI_SLOT(vf_dev->devfn),
+				 PCI_FUNC(vf_dev->devfn),
+				 vf_drv ? vf_drv->name : "no-driver",
+				 nic->vf_enabled[vf] ? '+' : '-');
+		for (svf_idx = 0; svf_idx < MAX_SQS_PER_VF; svf_idx++) {
+			if (off >= PAGE_SIZE)
+				break;
+			if (nic->vf_sqs[vf][svf_idx] == NIC_VF_UNASSIGNED)
+				break;
+			off += scnprintf(&buf[off], PAGE_SIZE - off, " %d",
+					 nic->vf_sqs[vf][svf_idx]);
+		}
+		if (off >= PAGE_SIZE)
+			break;
+		off += scnprintf(&buf[off], PAGE_SIZE - off, "\n");
+	}
+
+	for (vf = nic->num_vf_en; vf < nic->num_vf_en + nic->num_sqs_en; vf++) {
+		vf_dev = nic->vf_pdev[vf];
+		vf_drv = vf_dev ? pci_dev_driver(vf_dev) : NULL;
+		if (off >= PAGE_SIZE)
+			break;
+		off += scnprintf(&buf[off], PAGE_SIZE - off,
+				 "%zu %04x:%02x:%02x.%d %s: %u\n",
+				 vf, pci_domain_nr(vf_dev->bus),
+				 vf_dev->bus->number, PCI_SLOT(vf_dev->devfn),
+				 PCI_FUNC(vf_dev->devfn),
+				 vf_drv ? vf_drv->name : "no-driver",
+				 nic->pqs_vf[vf]);
+	}
+
+	return off;
+}
+DEVICE_ATTR_RO(sriov_sqs_assignment);
+
 static int nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct device *dev = &pdev->dev;
@@ -1519,12 +1573,18 @@ static int nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err)
 		goto err_unregister_interrupts;
 
+	err = device_create_file(dev, &dev_attr_sriov_sqs_assignment);
+	if (err) {
+		err = -ENOMEM;
+		goto err_disable_sriov;
+	}
+
 	/* Register a physical link status poll fn() */
 	nic->check_link = alloc_workqueue("check_link_status",
 					  WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
 	if (!nic->check_link) {
 		err = -ENOMEM;
-		goto err_disable_sriov;
+		goto err_remove_sysfs_attr;
 	}
 
 	INIT_DELAYED_WORK(&nic->dwork, nic_poll_for_link);
@@ -1532,6 +1592,8 @@ static int nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	return 0;
 
+err_remove_sysfs_attr:
+	device_remove_file(dev, &dev_attr_sriov_sqs_assignment);
 err_disable_sriov:
 	if (nic->flags & NIC_SRIOV_ENABLED) {
 		nic_put_vf_pdev(nic);
@@ -1550,6 +1612,9 @@ err_disable_device:
 static void nic_remove(struct pci_dev *pdev)
 {
 	struct nicpf *nic = pci_get_drvdata(pdev);
+	struct device *dev = &pdev->dev;
+
+	device_remove_file(dev, &dev_attr_sriov_sqs_assignment);
 
 	if (nic->flags & NIC_SRIOV_ENABLED) {
 		nic_put_vf_pdev(nic);
