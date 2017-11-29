@@ -624,11 +624,15 @@ static int bgx_lmac_xaui_init(struct bgx *bgx, struct lmac *lmac)
 	cfg &= ~SPU_FEC_CTL_FEC_EN;
 	bgx_reg_write(bgx, lmacid, BGX_SPUX_FEC_CONTROL, cfg);
 
-	/* Disable autoneg */
+	/* Enable autoneg for KR interfaces */
 	cfg = bgx_reg_read(bgx, lmacid, BGX_SPUX_AN_CONTROL);
-	cfg = cfg & ~(SPU_AN_CTL_AN_EN | SPU_AN_CTL_XNP_EN);
-	bgx_reg_write(bgx, lmacid, BGX_SPUX_AN_CONTROL, cfg);
+	cfg = cfg & ~SPU_AN_CTL_XNP_EN;
+	if (lmac->use_training)
+		cfg |= SPU_AN_CTL_AN_EN;
+	else
+		cfg &= ~SPU_AN_CTL_AN_EN;
 
+	bgx_reg_write(bgx, lmacid, BGX_SPUX_AN_CONTROL, cfg);
 	cfg = bgx_reg_read(bgx, lmacid, BGX_SPUX_AN_ADV);
 	if (lmac->lmac_type == BGX_MODE_10G_KR)
 		cfg |= (1 << 23);
@@ -640,7 +644,12 @@ static int bgx_lmac_xaui_init(struct bgx *bgx, struct lmac *lmac)
 	bgx_reg_write(bgx, lmacid, BGX_SPUX_AN_ADV, cfg);
 
 	cfg = bgx_reg_read(bgx, 0, BGX_SPU_DBG_CONTROL);
-	cfg &= ~SPU_DBG_CTL_AN_ARB_LINK_CHK_EN;
+
+	if (lmac->use_training)
+		cfg |= SPU_DBG_CTL_AN_ARB_LINK_CHK_EN;
+	else
+		cfg &= ~SPU_DBG_CTL_AN_ARB_LINK_CHK_EN;
+
 	bgx_reg_write(bgx, 0, BGX_SPU_DBG_CONTROL, cfg);
 
 	/* Enable lmac */
