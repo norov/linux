@@ -1080,6 +1080,7 @@ static irqreturn_t nicvf_qs_err_intr_handler(int irq, void *nicvf_irq)
 static void nicvf_set_irq_affinity(struct nicvf *nic)
 {
 	int vec, cpu;
+	int irqnum;
 
 	for (vec = 0; vec < nic->num_vec; vec++) {
 		if (!nic->irq_allocated[vec])
@@ -1096,8 +1097,11 @@ static void nicvf_set_irq_affinity(struct nicvf *nic)
 
 		cpumask_set_cpu(cpumask_local_spread(cpu, nic->node),
 				nic->affinity_mask[vec]);
-		irq_set_affinity_hint(pci_irq_vector(nic->pdev, vec),
-				      nic->affinity_mask[vec]);
+		irqnum = pci_irq_vector(nic->pdev, vec);
+		irq_set_affinity_hint(irqnum, nic->affinity_mask[vec]);
+		if (irq_can_set_affinity(irqnum))
+			__irq_set_affinity(irqnum,
+					   nic->affinity_mask[vec], false);
 	}
 }
 
