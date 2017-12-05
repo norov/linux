@@ -19,7 +19,8 @@ enum coproc_t {
 	BGX_COPROC = 6,
 	LBK_COPROC = 7,
 	TIM_COPROC = 8,
-	DPI_COPROC = 9
+	DPI_COPROC = 9,
+	ZIP_COPROC = 10
 };
 
 /*req messages*/
