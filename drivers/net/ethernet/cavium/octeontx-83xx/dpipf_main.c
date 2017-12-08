@@ -418,14 +418,17 @@ static irqreturn_t dpi_pf_intr_handler (int irq, void *dpi_irq)
 			i, reg_val);
 		dpi_reg_write(dpi, DPI_DMA_CCX_INT(i), 0x1ULL);
 	} else if (i < DPI_DMA_INT_REG) {
-		reg_val = dpi_reg_read(dpi, DPI_REQQX_INT(i - DPI_REQQ_INT));
-		dev_err(&dpi->pdev->dev, "DPI_REQQ_INT raised for q:%d: 0x%016llx\n",
+		reg_val = dpi_reg_read(
+			dpi, DPI_REQQX_INT(i - DPI_DMA_REQQ_INT));
+		dev_err(&dpi->pdev->dev,
+			"DPI_REQQ_INT raised for q:%d: 0x%016llx\n",
 			(i - 0x40), reg_val);
 
-		dpi_reg_write(dpi, DPI_REQQX_INT(i - DPI_REQQ_INT), reg_val);
+		dpi_reg_write(
+			dpi, DPI_REQQX_INT(i - DPI_DMA_REQQ_INT), reg_val);
 
 		if (reg_val & (0x71ULL))
-			dpi_queue_reset(dpi, (i - DPI_REQQ_INT));
+			dpi_queue_reset(dpi, (i - DPI_DMA_REQQ_INT));
 	} else if (i == DPI_DMA_INT_REG) {
 		reg_val = dpi_reg_read(dpi, DPI_INT_REG);
 		dev_err(&dpi->pdev->dev, "DPI_INT_REG raised: 0x%016llx\n",
@@ -839,4 +842,3 @@ static void __exit dpi_cleanup_module(void)
 
 module_init(dpi_init_module);
 module_exit(dpi_cleanup_module);
-
