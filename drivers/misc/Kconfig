@@ -487,6 +487,24 @@ config VEXPRESS_SYSCFG
 	  ARM Ltd. Versatile Express uses specialised platform configuration
 	  bus. System Configuration interface is one of the possible means
 	  of generating transactions on this bus.
+
+config CAVIUM_TDM
+	tristate "Cavium Networks telephony support"
+	depends on CAVIUM_OCTEON_SOC || ARCH_THUNDER
+	help
+	  This driver supports TDM controller on some Cavium
+	  SoC products in the Octeon/OcteonTx families.
+	  Time-Division-Multiplex DMA supports byte-mask gated DMA
+	  to a r/w bus suitable for T1/E1 interface or SLIC adapter
+	  for POTS telephony
+
+	  To compile this driver as a module, choose M here. The module
+	  will be called octeon-tdm.
+
+	  Usermode tools in staging/cavium/tdm/usr are kept with this
+	  driver as it evolves in staging, but would move elsewhere
+	  when this finds a permanent home in the drivers hierarchy.
+
 config PANEL
 	tristate "Parallel port LCD/Keypad Panel support"
 	depends on PARPORT

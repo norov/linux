@@ -2965,6 +2965,12 @@ W:     http://www.cavium.com
 S:     Supported
 F:     drivers/net/ethernet/cavium/liquidio/
 
+CAVIUM TDM DRIVER
+M:	Peter Swain <pswain@cavium.com>
+W:	http://www.cavium.com
+S:	Supported
+F:	drivers/misc/cavium-tdm.c
+
 CC2520 IEEE-802.15.4 RADIO DRIVER
 M:	Varka Bhadram <varkabhadram@gmail.com>
 L:	linux-wpan@vger.kernel.org
