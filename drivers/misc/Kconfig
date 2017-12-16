@@ -491,19 +491,48 @@ config VEXPRESS_SYSCFG
 config CAVIUM_TDM
 	tristate "Cavium Networks telephony support"
 	depends on CAVIUM_OCTEON_SOC || ARCH_THUNDER
-	help
+	select CONFIG_DMA_CMA
+	---help---
 	  This driver supports TDM controller on some Cavium
 	  SoC products in the Octeon/OcteonTx families.
 	  Time-Division-Multiplex DMA supports byte-mask gated DMA
 	  to a r/w bus suitable for T1/E1 interface or SLIC adapter
-	  for POTS telephony
+	  for POTS telephony. 4 512-slot devices available.
+	  See Documentation/misc-devices/cavium-tdm.txt
+
+	  Usermode tdm-utils package configures/tests this device,
+	  and provides example ioctl() setup to configure TDM frame,
+	  and bind individual chardev openers with an N-octet-wide
+	  PCM channel in read, write, or read/write mode connection
+	  with N consecutive TDM slots. FIFO buffering configurable
+	  to balance overhead/latency. Device close unmaps TDM slot(s)
 
 	  To compile this driver as a module, choose M here. The module
-	  will be called octeon-tdm.
+	  will be called cavium-tdm.
 
-	  Usermode tools in staging/cavium/tdm/usr are kept with this
-	  driver as it evolves in staging, but would move elsewhere
-	  when this finds a permanent home in the drivers hierarchy.
+config CAVIUM_TDM_MAX_SLOTS
+	int "Maximum slots in TDM frame"
+	#range 0 512
+	range 1 512
+	default 256
+	depends on CAVIUM_TDM
+	---help---
+	  Dimension internal data structures according to the largest
+	  frame size the will be used.
+
+	  Selecting 0 here allocates per-slot storage only as
+	  needed, freeing it only on device close.
+	  Useful in a few-channel VoIP application.
+	  (but zero is currently unsafe).
+
+config CAVIUM_TDM_DEBUG
+	bool "Cavium Networks telephony tracing"
+	depends on CAVIUM_TDM
+	select CONFIG_TRACING
+	---help---
+	  Enables tuning/tracing chatter for cavium-tdm.
+	  Just say N.
+
 
 config PANEL
 	tristate "Parallel port LCD/Keypad Panel support"
