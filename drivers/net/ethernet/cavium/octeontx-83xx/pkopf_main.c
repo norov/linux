@@ -30,6 +30,16 @@
 #define BGX_CHAN_BASE	0x800
 #define BGX_CHAN_RANGE	BIT(8)
 
+#define PKO_BUFFERS	4096
+#define PKO_MAX_PORTS	16 /* Maximum number simultaneously used ports.*/
+#define PKO_MAX_DQ_BUFS	(PKO_BUFFERS / PKO_MAX_PORTS)
+
+/* SKID value should be synchronized with DQ setting in RM user program.
+ * Each DQ has maxiumum depth of PKO_MAX_DQ_BUFS FPA 4KB buffers.
+ * SKID is half of this value.
+ */
+#define PKO_FC_SKID	(PKO_MAX_DQ_BUFS / 2)
+
 static atomic_t pko_count = ATOMIC_INIT(0);
 static DEFINE_MUTEX(octeontx_pko_devices_lock);
 static LIST_HEAD(octeontx_pko_devices);
@@ -1088,9 +1098,7 @@ static int pko_disable(struct pkopf *pko)
 
 static int setup_dpfi(struct pkopf *pko)
 {
-	int err;
-	int buffers;
-	int retry = 0;
+	int err, retry = 0;
 	u64 reg;
 
 	err = fpapf->create_domain(pko->id, FPA_PKO_DPFI_GMID, 1, NULL);
@@ -1107,10 +1115,8 @@ static int setup_dpfi(struct pkopf *pko)
 		symbol_put(fpavf_com);
 		return -ENODEV;
 	}
-	buffers = 4096;
-
-	err = fpavf->setup(fpa, buffers, pko->pdm_buf_size,
-			FPA_VF_FLAG_CONT_MEM);
+	err = fpavf->setup(fpa, PKO_BUFFERS, pko->pdm_buf_size,
+			   FPA_VF_FLAG_CONT_MEM);
 	if (err) {
 		dev_err(&pko->pdev->dev, "failed to setup fpavf\n");
 		symbol_put(fpapf_com);
@@ -1122,6 +1128,7 @@ static int setup_dpfi(struct pkopf *pko)
 	pko_reg_write(pko, PKO_PF_DPFI_GMCTL, FPA_PKO_DPFI_GMID);
 	pko_reg_write(pko, PKO_PF_DPFI_FLUSH, 0);
 	pko_reg_write(pko, PKO_PF_DPFI_ENA, 0x1);
+
 	while (true) {
 		reg = pko_reg_read(pko, PKO_PF_DPFI_STATUS);
 		if (!(reg & 0x2))
@@ -1169,7 +1176,7 @@ static int pko_init(struct pkopf *pko)
 {
 	u64 reg;
 	int retry = 0;
-	int n = 1023;
+	int n;
 	int i;
 
 	reg = pko_reg_read(pko, PKO_PF_CONST);
@@ -1190,9 +1197,9 @@ static int pko_init(struct pkopf *pko)
 			return -ENODEV;
 	}
 
-	reg = 0;
 	reg = PKO_PDM_CFG_SET_PAD_MINLEN(PKO_PAD_MINLEN) |
-		PKO_PDM_CFG_SET_DQ_FC_SKID(n) | PKO_PDM_CFG_SET_EN(1);
+		PKO_PDM_CFG_SET_DQ_FC_SKID(PKO_FC_SKID) |
+		PKO_PDM_CFG_SET_EN(1);
 	pko_reg_write(pko, PKO_PF_PDM_CFG, reg);
 
 	pko_reg_write(pko, PKO_PF_SHAPER_CFG, 0x1);
