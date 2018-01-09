@@ -214,6 +214,10 @@ static inline int cvm_enc_dec(struct ablkcipher_request *req, u32 enc)
 	create_output_list(req, enc_iv_len);
 	store_cb_info(req, req_info);
 	cpu = get_cpu();
+	if (cpu >= se_dev_handle.count) {
+		put_cpu();
+		return -ENODEV;
+	}
 	cptvf = se_dev_handle.dev[cpu];
 	put_cpu();
 	status = cptvf_do_request(cptvf, req_info);
@@ -692,6 +696,10 @@ u32 cvm_aead_enc_dec(struct aead_request *req, u32 enc)
 	req_info->callback = (void *)cvm_callback;
 	req_info->callback_arg = (void *)&req->base;
 	cpu = get_cpu();
+	if (cpu >= se_dev_handle.count) {
+		put_cpu();
+		return -ENODEV;
+	}
 	cptvf = se_dev_handle.dev[cpu];
 	put_cpu();
 	status = cptvf_do_request(cptvf, req_info);
@@ -860,14 +868,31 @@ struct aead_alg cvm_aeads[] = { {
 	.maxauthsize = SHA1_DIGEST_SIZE,
 } };
 
+static inline int is_any_alg_used(void)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(algs); i++)
+		if (atomic_read(&algs[i].cra_refcnt) != 1)
+			return true;
+	for (i = 0; i < ARRAY_SIZE(cvm_aeads); i++)
+		if (atomic_read(&cvm_aeads[i].base.cra_refcnt) != 1)
+			return true;
+	return false;
+}
+
 static inline int cav_register_algs(void)
 {
-	int err = 0;
+	int i, err = 0;
 
+	for (i = 0; i < ARRAY_SIZE(algs); i++)
+		algs[i].cra_flags &= ~CRYPTO_ALG_DEAD;
 	err = crypto_register_algs(algs, ARRAY_SIZE(algs));
 	if (err)
 		return err;
 
+	for (i = 0; i < ARRAY_SIZE(cvm_aeads); i++)
+		cvm_aeads[i].base.cra_flags &= ~CRYPTO_ALG_DEAD;
 	err = crypto_register_aeads(cvm_aeads, ARRAY_SIZE(cvm_aeads));
 	if (err) {
 		crypto_unregister_algs(algs, ARRAY_SIZE(algs));
@@ -892,12 +917,14 @@ int cvm_crypto_init(struct cpt_vf *cptvf)
 		se_dev_handle.dev[se_dev_handle.count] = cptvf;
 		se_dev_handle.count++;
 
-		if (se_dev_handle.count == (num_online_cpus() - 1)) {
+		if (se_dev_handle.count == 1 &&
+		    !is_any_alg_used()) {
 			if (cav_register_algs()) {
 				dev_err(&pdev->dev,
 				   "Error in registering crypto algorithms\n");
 				return -EINVAL;
 			}
+			try_module_get(THIS_MODULE);
 		}
 	} else if (cptvf->vftype == AE_TYPES) {
 
@@ -913,6 +940,8 @@ void cvm_crypto_exit(void)
 {
 	se_dev_handle.count--;
 	if (!se_dev_handle.count &&
-	    module_refcount(THIS_MODULE) <= 0)
+	    !is_any_alg_used()) {
 		cav_unregister_algs();
+		module_put(THIS_MODULE);
+	}
 }

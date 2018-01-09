@@ -10,6 +10,7 @@
 #include <linux/module.h>
 
 #include "cptvf.h"
+#include "cptpf.h"
 #include "request_manager.h"
 
 #define DRV_NAME	"thunder-cptvf"
@@ -780,7 +781,7 @@ static int cptvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct device *dev = &pdev->dev;
 	struct cpt_vf *cptvf;
-	int    err;
+	int err;
 
 	cptvf = devm_kzalloc(dev, sizeof(*cptvf), GFP_KERNEL);
 	if (!cptvf)
@@ -886,7 +887,7 @@ static int cptvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			  cptvf);
 	if (err) {
 		dev_err(dev, "Request done irq failed\n");
-		goto cptvf_free_misc_irq;
+		goto cptvf_free_done_irq;
 	}
 
 	/* Enable mailbox interrupt */
@@ -919,6 +920,8 @@ static int cptvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 cptvf_free_irq_affinity:
 	cptvf_free_irq_affinity(cptvf, CPT_VF_INT_VEC_E_DONE);
 	cptvf_free_irq_affinity(cptvf, CPT_VF_INT_VEC_E_MISC);
+cptvf_free_done_irq:
+	free_irq(pci_irq_vector(pdev, CPT_VF_INT_VEC_E_DONE), cptvf);
 cptvf_free_misc_irq:
 	free_irq(pci_irq_vector(pdev, CPT_VF_INT_VEC_E_MISC), cptvf);
 cptvf_free_vectors:
@@ -959,13 +962,6 @@ static void cptvf_remove(struct pci_dev *pdev)
 	}
 }
 
-static void cptvf_shutdown(struct pci_dev *pdev)
-{
-	cptvf_remove(pdev);
-}
-
-
-
 /* Supported devices */
 static const struct pci_device_id cptvf_id_table[] = {
 	{PCI_VDEVICE(CAVIUM, CPT_PCI_VF_DEVICE_ID), 0},
@@ -977,7 +973,6 @@ static struct pci_driver cptvf_pci_driver = {
 	.id_table = cptvf_id_table,
 	.probe = cptvf_probe,
 	.remove = cptvf_remove,
-	.shutdown = cptvf_shutdown,
 };
 
 module_pci_driver(cptvf_pci_driver);

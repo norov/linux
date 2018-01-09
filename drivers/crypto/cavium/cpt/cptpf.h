@@ -50,11 +50,11 @@ struct cptpf_vf {
 struct cpt_device {
 	struct cptpf_vf vf[CPT_MAX_VF_NUM]; /* Per VF info */
 	struct list_head list;
-	u16 flags;	/* Flags to hold device status bits */
-	u8 num_vf_en; /* Number of VFs enabled (0...CPT_MAX_VF_NUM) */
-	u8 max_vfs;	/* Maximum number of VQs supported by the CPT */
 	u8 pf_type; /* PF type 83xx_SE or 83xx_AE */
-	int vfs_in_use;
+	u8 max_vfs; /* Maximum number of VFs supported by the CPT */
+	u8 vfs_enabled; /* Number of enabled VFs */
+	u8 vfs_in_use; /* Number of VFs in use */
+	u32 flags; /* Flags to hold device status bits */
 	int node;
 
 	void __iomem *reg_base; /* Register start address */
@@ -68,4 +68,5 @@ struct cpt_device {
 };
 
 void cpt_mbox_intr_handler(struct cpt_device *cpt, int mbx);
+
 #endif /* __CPTPF_H */

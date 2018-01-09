@@ -477,8 +477,10 @@ static int cpt_device_init(struct cpt_device *cpt)
 		cpt->pf_type = CPT_SE_83XX;
 	}
 
-	/*Get max VQs/VFs supported by the device*/
+	/* Get max VQs/VFs supported by the device */
 	cpt->max_vfs = pci_sriov_get_totalvfs(cpt->pdev);
+	/* Get number of VQs/VFs to be enabled */
+	cpt->vfs_enabled = min_t(u64, num_online_cpus(), cpt->max_vfs);
 
 	/*TODO: Get CLK frequency*/
 	/*Disable all cores*/
@@ -538,38 +540,6 @@ static void cpt_unregister_interrupts(struct cpt_device *cpt)
 	pci_disable_msix(cpt->pdev);
 }
 
-static int cpt_sriov_init(struct cpt_device *cpt)
-{
-	int pos = 0;
-	int err;
-	struct pci_dev *pdev = cpt->pdev;
-
-	pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_SRIOV);
-	if (!pos) {
-		dev_err(&pdev->dev, "SRIOV capability is not found in PCIe config space\n");
-		return -ENODEV;
-	}
-
-	/*Enable the minimum possible VFs */
-	cpt->num_vf_en = min_t(u64, num_online_cpus(), cpt->max_vfs);
-	err = pci_enable_sriov(pdev, cpt->num_vf_en);
-	if (err) {
-		dev_err(&pdev->dev, "SRIOV enable failed, num VF is %d\n",
-			cpt->num_vf_en);
-		cpt->num_vf_en = 0;
-		return err;
-	}
-
-	/* TODO: Optionally enable static VQ priorities feature */
-
-	dev_info(&pdev->dev, "SRIOV enabled, number of VF available %d\n",
-		 cpt->num_vf_en);
-
-	cpt->flags |= CPT_FLAG_SRIOV_ENABLED;
-
-	return 0;
-}
-
 static void cpt_config_gmctl(struct cpt_device *cpt, uint8_t vq,
 			     uint8_t strm, uint16_t gmid)
 {
@@ -601,7 +571,7 @@ static int cpt_pf_remove_domain(u32 id, u16 domain_id, struct kobject *kobj)
 		return -ENODEV;
 	}
 
-	for (i = 0; i < cpt->max_vfs; i++) {
+	for (i = 0; i < cpt->vfs_enabled; i++) {
 		vf = &cpt->vf[i];
 		if (vf->domain.in_use &&
 		    vf->domain.domain_id == domain_id) {
@@ -656,7 +626,7 @@ static int cpt_pf_create_domain(u32 id, u16 domain_id,
 		goto err_unlock;
 	}
 
-	for (i = 0; i < cpt->max_vfs; i++) {
+	for (i = 0; i < cpt->vfs_enabled; i++) {
 		vf = &cpt->vf[i];
 		if (vf->domain.in_use)
 			continue;
@@ -730,7 +700,7 @@ static int cpt_reset_domain(u32 id, u16 domain_id)
 		goto err_unlock;
 	}
 
-	for (i = 0; i < cpt->max_vfs; i++) {
+	for (i = 0; i < cpt->vfs_enabled; i++) {
 		vf = &cpt->vf[i];
 		if (vf->domain.in_use &&
 		    vf->domain.domain_id == domain_id) {
@@ -756,9 +726,45 @@ err_unlock:
 struct cptpf_com_s cptpf_com = {
 	.create_domain = cpt_pf_create_domain,
 	.destroy_domain = cpt_pf_remove_domain,
-	.reset_domain = cpt_reset_domain,
+	.reset_domain = cpt_reset_domain
 };
 EXPORT_SYMBOL(cptpf_com);
+
+static int cpt_sriov_configure(struct pci_dev *pdev, int numvfs)
+{
+	struct cpt_device *cpt = pci_get_drvdata(pdev);
+	int tmp, ret = -EBUSY, disable = 0;
+
+	mutex_lock(&octeontx_cpt_devices_lock);
+	if (cpt->vfs_in_use)
+		goto exit;
+
+	ret = 0;
+	tmp = cpt->vfs_enabled;
+	if (cpt->flags & CPT_FLAG_SRIOV_ENABLED)
+		disable = 1;
+
+	if (disable) {
+		pci_disable_sriov(pdev);
+		cpt->flags &= ~CPT_FLAG_SRIOV_ENABLED;
+		cpt->vfs_enabled = 0;
+	}
+
+	if (numvfs > 0) {
+		cpt->vfs_enabled = numvfs;
+		ret = pci_enable_sriov(pdev, numvfs);
+		if (ret == 0) {
+			cpt->flags |= CPT_FLAG_SRIOV_ENABLED;
+			ret = numvfs;
+		} else
+			cpt->vfs_enabled = tmp;
+	}
+
+	dev_notice(&cpt->pdev->dev, "VFs enabled: %d\n", ret);
+exit:
+	mutex_unlock(&octeontx_cpt_devices_lock);
+	return ret;
+}
 
 static int cpt_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
@@ -816,15 +822,15 @@ static int cpt_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	/*
 	 * Currently we do not register any asymmetric algorithms therefore we
 	 * don't enable VFs for 83xx AE and we do not load ucode for 83xx AE
+	 * By default we enable 24 SE VFs
 	 */
 	if (cpt->pf_type != CPT_AE_83XX) {
 		err = cpt_ucode_load(cpt);
 		if (err)
 			goto cpt_err_unregister_interrupts;
 
-		/* Configure SRIOV */
-		err = cpt_sriov_init(cpt);
-		if (err)
+		err = cpt_sriov_configure(pdev, cpt->vfs_enabled);
+		if (err != cpt->vfs_enabled)
 			goto cpt_err_unregister_interrupts;
 	}
 
@@ -892,6 +898,7 @@ static struct pci_driver cpt_pci_driver = {
 	.id_table = cpt_id_table,
 	.probe = cpt_probe,
 	.remove = cpt_remove,
+	.sriov_configure = cpt_sriov_configure
 };
 
 module_pci_driver(cpt_pci_driver);
