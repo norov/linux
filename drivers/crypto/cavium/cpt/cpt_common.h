@@ -137,6 +137,7 @@ enum cpt_mbox_opcode {
 	CPT_MSG_QLEN,
 	CPT_MSG_QBIND_GRP,
 	CPT_MSG_VQ_PRIORITY,
+	CPT_MSG_PF_TYPE
 };
 
 /* CPT mailbox structure */

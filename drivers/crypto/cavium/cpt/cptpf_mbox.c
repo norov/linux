@@ -129,6 +129,11 @@ static void cpt_handle_mbox_intr(struct cpt_device *cpt, int vf)
 			cpt_send_msg_to_vf(cpt, vf, &mbx);
 		}
 		break;
+	case CPT_MSG_PF_TYPE:
+		mbx.msg = CPT_MSG_PF_TYPE;
+		mbx.data = cpt->pf_type;
+		cpt_send_msg_to_vf(cpt, vf, &mbx);
+		break;
 	case CPT_MSG_VQ_PRIORITY:
 		cpt_cfg_vq_priority(cpt, vf, mbx.data);
 		cpt_mbox_send_ack(cpt, vf, &mbx);
