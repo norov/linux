@@ -16,9 +16,16 @@
 #include <linux/version.h>
 
 #include "cptpf.h"
+#include "cpt.h"
 
 #define DRV_NAME	"thunder-cpt"
 #define DRV_VERSION	"1.0"
+
+static atomic_t cpt_se_count = ATOMIC_INIT(0);
+static atomic_t cpt_ae_count = ATOMIC_INIT(0);
+
+static DEFINE_MUTEX(octeontx_cpt_devices_lock);
+static LIST_HEAD(octeontx_cpt_devices);
 
 /*
  * Disable cores specified by coremask
@@ -563,6 +570,151 @@ static int cpt_sriov_init(struct cpt_device *cpt)
 	return 0;
 }
 
+static void cpt_config_gmctl(struct cpt_device *cpt, uint8_t vq,
+			     uint8_t strm, uint16_t gmid)
+{
+	union cptx_pf_qx_gmctl gmctl = {0};
+
+	gmctl.s.strm = strm;
+	gmctl.s.gmid = gmid;
+	writeq(gmctl.u, cpt->reg_base + CPTX_PF_QX_GMCTL(0, vq));
+}
+
+static int cpt_pf_remove_domain(u32 id, u16 domain_id, struct kobject *kobj)
+{
+	struct cpt_device *cpt = NULL;
+	struct cpt_device *curr;
+	struct pci_dev *virtfn;
+	struct cptpf_vf *vf;
+	int i, vf_idx = 0;
+
+	mutex_lock(&octeontx_cpt_devices_lock);
+	list_for_each_entry(curr, &octeontx_cpt_devices, list) {
+		if (curr->node == id && curr->pf_type == CPT_SE_83XX) {
+			cpt = curr;
+			break;
+		}
+	}
+
+	if (!cpt) {
+		mutex_unlock(&octeontx_cpt_devices_lock);
+		return -ENODEV;
+	}
+
+	for (i = 0; i < cpt->max_vfs; i++) {
+		vf = &cpt->vf[i];
+		if (vf->domain.in_use &&
+		    vf->domain.domain_id == domain_id) {
+			virtfn = pci_get_domain_bus_and_slot(
+				     pci_domain_nr(cpt->pdev->bus),
+				     pci_iov_virtfn_bus(cpt->pdev, i),
+				     pci_iov_virtfn_devfn(cpt->pdev, i));
+
+			if (virtfn && kobj)
+				sysfs_remove_link(kobj, virtfn->dev.kobj.name);
+
+			/* Release the VF to PF */
+			cpt_config_gmctl(cpt, i, 0, 0);
+			dev_info(&cpt->pdev->dev, "Free vf[%d] from domain_id:%d subdomain_id:%d\n",
+				 i, vf->domain.domain_id, vf_idx);
+			iounmap(vf->domain.reg_base);
+			vf->domain.in_use = false;
+			memset(vf, 0, sizeof(struct cptpf_vf));
+			vf_idx++;
+		}
+	}
+
+	cpt->vfs_in_use -= vf_idx;
+	mutex_unlock(&octeontx_cpt_devices_lock);
+	return 0;
+}
+
+static int cpt_pf_create_domain(u32 id, u16 domain_id,
+				u32 num_vfs, struct kobject *kobj)
+{
+	struct cpt_device *cpt = NULL;
+	struct cpt_device *curr;
+	struct pci_dev *virtfn;
+	struct cptpf_vf *vf;
+	resource_size_t vf_start;
+	int vf_idx = 0, ret = 0;
+	int i;
+
+	if (!kobj)
+		return -EINVAL;
+
+	mutex_lock(&octeontx_cpt_devices_lock);
+	list_for_each_entry(curr, &octeontx_cpt_devices, list) {
+		if (curr->node == id && curr->pf_type == CPT_SE_83XX) {
+			cpt = curr;
+			break;
+		}
+	}
+
+	if (!cpt) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
+
+	for (i = 0; i < cpt->max_vfs; i++) {
+		vf = &cpt->vf[i];
+		if (vf->domain.in_use)
+			continue;
+
+		virtfn = pci_get_domain_bus_and_slot(
+					pci_domain_nr(cpt->pdev->bus),
+					pci_iov_virtfn_bus(cpt->pdev, i),
+					pci_iov_virtfn_devfn(cpt->pdev, i));
+		if (!virtfn)
+			break;
+
+		ret = sysfs_create_link(kobj, &virtfn->dev.kobj,
+					virtfn->dev.kobj.name);
+		if (ret < 0)
+			goto err_unlock;
+
+		vf_start = pci_resource_start(cpt->pdev, PCI_CPT_PF_CFG_BAR);
+
+		vf_start += CPT_BAR_E_CPTX_VFX_BAR0_OFFSET(id, i);
+		vf->domain.reg_base = ioremap(vf_start,
+					      CPT_BAR_E_CPTX_VFX_BAR0_SIZE);
+		if (!vf->domain.reg_base) {
+			ret = -ENOMEM;
+			goto err_unlock;
+		}
+		vf->domain.domain_id = domain_id;
+		vf->domain.subdomain_id = vf_idx;
+		vf->domain.gmid = get_gmid(domain_id);
+		vf->domain.in_use = true;
+
+		cpt_config_gmctl(cpt, i, i + 1, vf->domain.gmid);
+
+		vf_idx++;
+		if (vf_idx == num_vfs) {
+			cpt->vfs_in_use += num_vfs;
+			break;
+		}
+	}
+
+	if (vf_idx != num_vfs) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
+	mutex_unlock(&octeontx_cpt_devices_lock);
+	return ret;
+
+err_unlock:
+	mutex_unlock(&octeontx_cpt_devices_lock);
+	cpt_pf_remove_domain(id, domain_id, kobj);
+	return ret;
+}
+
+struct cptpf_com_s cptpf_com = {
+	.create_domain = cpt_pf_create_domain,
+	.destroy_domain = cpt_pf_remove_domain,
+};
+EXPORT_SYMBOL(cptpf_com);
+
 static int cpt_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct device *dev = &pdev->dev;
@@ -631,6 +783,18 @@ static int cpt_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			goto cpt_err_unregister_interrupts;
 	}
 
+	/* Set CPT ID */
+	if (cpt->pf_type == CPT_SE_83XX)
+		cpt->node = atomic_add_return(1, &cpt_se_count);
+	else
+		cpt->node = atomic_add_return(1, &cpt_ae_count);
+	cpt->node -= 1;
+
+	INIT_LIST_HEAD(&cpt->list);
+	mutex_lock(&octeontx_cpt_devices_lock);
+	list_add(&cpt->list, &octeontx_cpt_devices);
+	mutex_unlock(&octeontx_cpt_devices_lock);
+
 	return 0;
 
 cpt_err_unregister_interrupts:
@@ -646,9 +810,19 @@ cpt_err_disable_device:
 static void cpt_remove(struct pci_dev *pdev)
 {
 	struct cpt_device *cpt = pci_get_drvdata(pdev);
+	struct cpt_device *curr;
 
 	if (!cpt)
 		return;
+
+	mutex_lock(&octeontx_cpt_devices_lock);
+	list_for_each_entry(curr, &octeontx_cpt_devices, list) {
+		if (curr == cpt) {
+			list_del(&cpt->list);
+			break;
+		}
+	}
+	mutex_unlock(&octeontx_cpt_devices_lock);
 
 	pci_disable_sriov(pdev);
 	/* Disengage SE and AE cores from all groups*/
@@ -657,31 +831,6 @@ static void cpt_remove(struct pci_dev *pdev)
 	cpt_unload_microcode(cpt);
 	/* Disable CPTPF interrupts */
 	cpt_unregister_interrupts(cpt);
-	pci_release_regions(pdev);
-	pci_disable_device(pdev);
-	pci_set_drvdata(pdev, NULL);
-}
-
-static void cpt_shutdown(struct pci_dev *pdev)
-{
-
-	struct cpt_device *cpt = pci_get_drvdata(pdev);
-
-	if (!cpt) {
-		dev_err(&pdev->dev, "Invalid CPT device to shutdown\n");
-		return;
-	}
-
-	dev_info(&pdev->dev, "Shutdown device %x:%x.\n",
-		 (u32)pdev->vendor, (u32)pdev->device);
-
-	/* Disengage SE and AE cores from all groups*/
-	cpt_disable_all_cores(cpt);
-	/* Unload microcodes */
-	cpt_unload_microcode(cpt);
-	/* Disable CPTPF interrupts */
-	cpt_unregister_interrupts(cpt);
-
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	pci_set_drvdata(pdev, NULL);
@@ -698,7 +847,6 @@ static struct pci_driver cpt_pci_driver = {
 	.id_table = cpt_id_table,
 	.probe = cpt_probe,
 	.remove = cpt_remove,
-	.shutdown = cpt_shutdown,
 };
 
 module_pci_driver(cpt_pci_driver);

@@ -11,6 +11,18 @@
 
 #include "cpt_common.h"
 
+/* Configuration and Status registers are in BAR 0 */
+#define PCI_CPT_PF_CFG_BAR	0
+
+#define CPT_BAR_E_CPTX_VFX_BAR0_OFFSET(a, b) \
+	(0x000020000000ll + 0x1000000000ll * (a) + 0x100000ll * (b))
+#define CPT_BAR_E_CPTX_VFX_BAR0_SIZE	0x400000
+
+/*
+ * Maximum number of AE and SE VFs
+ */
+#define CPT_MAX_VF_NUM	64
+
 /**
  * Enumeration cpt_comp_e
  *
@@ -656,4 +668,37 @@ union cptx_vqx_ctl {
 #endif /* Word 0 - End */
 	} s;
 };
+
+/**
+ * Register (NCB) cpt#_pf_q#_gmctl
+ *
+ * CPT Queue Guest Machine Control Register
+ * This register configures queues. This register should be changed only when
+ * quiescent, (see CPT()_VQ()_INPROG[INFLIGHT]).
+ *
+ * Word0
+ *  [23:16](R/W) Low 8 bits of the SMMU stream identifier to use when issuing
+ *  requests. Stream 0x0 corresponds to the PF, and VFs start at 0x1.
+ *  Reset such that VF0/index 0 is 0x1, VF1/index 1 is 0x2, etc.
+ *  Maximum legal value is 64.
+ *  [15:0](R/W) Guest machine identifier. The GMID to send to FPA for all
+ *  buffer free, or to SSO for all submit work operations initiated by this
+ *  queue. Must be nonzero or FPA/SSO will drop requests; see FPA_PF_MAP()
+ *  and SSO_PF_MAP().
+ */
+union cptx_pf_qx_gmctl {
+	u64 u;
+	struct cptx_pf_qx_gmctl_s {
+#if defined(__BIG_ENDIAN_BITFIELD) /* Word 0 - Big Endian */
+		uint64_t reserved_24_63		: 40;
+		uint64_t strm				: 8;
+		uint64_t gmid				: 16;
+#else /* Word 0 - Little Endian */
+		uint64_t gmid				: 16;
+		uint64_t strm				: 8;
+		uint64_t reserved_24_63		: 40;
+#endif /* Word 0 - End */
+	} s;
+};
+
 #endif /*__CPT_HW_TYPES_H*/
