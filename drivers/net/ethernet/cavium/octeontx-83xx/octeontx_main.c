@@ -1507,6 +1507,7 @@ static void __exit octeontx_cleanup_module(void)
 	symbol_put(pkopf_com);
 	symbol_put(timpf_com);
 	symbol_put(cptpf_com);
+	symbol_put(dpipf_com);
 	symbol_put(lbk_com);
 	symbol_put(thunder_bgx_com);
 	task_cleanup_handler_remove(cleanup_el3_irqs);
