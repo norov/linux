@@ -25,13 +25,21 @@
 #include "cptvf.h"
 #include "cptvf_algs.h"
 
+static DEFINE_SPINLOCK(lock);
 struct cpt_device_handle {
 	struct cpt_vf *dev[MAX_DEVICES];
-	u32 count;
+	atomic_t count;
 };
 
-static struct cpt_device_handle se_dev_handle;
-static struct cpt_device_handle ae_dev_handle;
+static struct cpt_device_handle se_dev_handle = {
+	.count = ATOMIC_INIT(0)
+};
+
+static struct cpt_device_handle ae_dev_handle = {
+	.count = ATOMIC_INIT(0)
+};
+
+static int is_crypto_registered;
 
 static void cvm_callback(int status, void *arg)
 {
@@ -214,7 +222,7 @@ static inline int cvm_enc_dec(struct ablkcipher_request *req, u32 enc)
 	create_output_list(req, enc_iv_len);
 	store_cb_info(req, req_info);
 	cpu = get_cpu();
-	if (cpu >= se_dev_handle.count) {
+	if (cpu >= atomic_read(&se_dev_handle.count)) {
 		put_cpu();
 		return -ENODEV;
 	}
@@ -696,7 +704,7 @@ u32 cvm_aead_enc_dec(struct aead_request *req, u32 enc)
 	req_info->callback = (void *)cvm_callback;
 	req_info->callback_arg = (void *)&req->base;
 	cpu = get_cpu();
-	if (cpu >= se_dev_handle.count) {
+	if (cpu >= atomic_read(&se_dev_handle.count)) {
 		put_cpu();
 		return -ENODEV;
 	}
@@ -911,25 +919,33 @@ static inline void cav_unregister_algs(void)
 int cvm_crypto_init(struct cpt_vf *cptvf)
 {
 	struct pci_dev *pdev = cptvf->pdev;
+	int count;
 
 	if (cptvf->vftype == SE_TYPES) {
 
-		se_dev_handle.dev[se_dev_handle.count] = cptvf;
-		se_dev_handle.count++;
+		spin_lock(&lock);
+		count = atomic_read(&se_dev_handle.count);
+		se_dev_handle.dev[count++] = cptvf;
+		atomic_inc(&se_dev_handle.count);
+		spin_unlock(&lock);
 
-		if (se_dev_handle.count == 1 &&
-		    !is_any_alg_used()) {
+		if (atomic_read(&se_dev_handle.count) == 1 &&
+		    is_crypto_registered == false) {
 			if (cav_register_algs()) {
 				dev_err(&pdev->dev,
 				   "Error in registering crypto algorithms\n");
 				return -EINVAL;
 			}
 			try_module_get(THIS_MODULE);
+			is_crypto_registered = true;
 		}
 	} else if (cptvf->vftype == AE_TYPES) {
 
-		ae_dev_handle.dev[ae_dev_handle.count] = cptvf;
-		ae_dev_handle.count++;
+		spin_lock(&lock);
+		count = atomic_read(&ae_dev_handle.count);
+		ae_dev_handle.dev[count++] = cptvf;
+		atomic_inc(&ae_dev_handle.count);
+		spin_unlock(&lock);
 	} else
 		dev_err(&pdev->dev, "Unknown VF type %d\n", cptvf->vftype);
 
@@ -938,10 +954,12 @@ int cvm_crypto_init(struct cpt_vf *cptvf)
 
 void cvm_crypto_exit(void)
 {
-	se_dev_handle.count--;
-	if (!se_dev_handle.count &&
+	spin_lock(&lock);
+	if (atomic_dec_and_test(&se_dev_handle.count) &&
 	    !is_any_alg_used()) {
 		cav_unregister_algs();
 		module_put(THIS_MODULE);
+		is_crypto_registered = false;
 	}
+	spin_unlock(&lock);
 }
