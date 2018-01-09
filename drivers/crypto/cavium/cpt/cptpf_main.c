@@ -550,6 +550,13 @@ static void cpt_config_gmctl(struct cpt_device *cpt, uint8_t vq,
 	writeq(gmctl.u, cpt->reg_base + CPTX_PF_QX_GMCTL(0, vq));
 }
 
+static void identify(struct cptpf_vf *vf, u16 domain_id, u16 subdomain_id)
+{
+	u64 reg = (((u64)subdomain_id << 16) | (domain_id)) << 8;
+
+	writeq(reg, vf->domain.reg_base + CPTX_VQX_SADDR(0, 0));
+}
+
 static int cpt_pf_remove_domain(u32 id, u16 domain_id, struct kobject *kobj)
 {
 	struct cpt_device *cpt = NULL;
@@ -585,6 +592,7 @@ static int cpt_pf_remove_domain(u32 id, u16 domain_id, struct kobject *kobj)
 
 			/* Release the VF to PF */
 			cpt_config_gmctl(cpt, i, 0, 0);
+			identify(vf, 0x0, 0x0);
 			dev_info(&cpt->pdev->dev, "Free vf[%d] from domain_id:%d subdomain_id:%d\n",
 				 i, vf->domain.domain_id, vf_idx);
 			iounmap(vf->domain.reg_base);
@@ -658,6 +666,7 @@ static int cpt_pf_create_domain(u32 id, u16 domain_id,
 		vf->domain.in_use = true;
 
 		cpt_config_gmctl(cpt, i, i + 1, vf->domain.gmid);
+		identify(vf, domain_id, vf_idx);
 
 		vf_idx++;
 		if (vf_idx == num_vfs) {
@@ -712,6 +721,8 @@ static int cpt_reset_domain(u32 id, u16 domain_id)
 				inflight = readq(vf->domain.reg_base +
 						 CPTX_VQX_INPROG(0, 0));
 			}
+
+			identify(vf, domain_id, vf->domain.subdomain_id);
 		}
 	}
 
