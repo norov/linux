@@ -45,8 +45,8 @@ static int init_worker_threads(struct cpt_vf *cptvf)
 		return -ENOMEM;
 
 	if (cptvf->nr_queues) {
-		dev_info(&pdev->dev, "Creating VQ worker threads (%d)\n",
-			 cptvf->nr_queues);
+		dev_dbg(&pdev->dev, "Creating VQ worker threads (%d)\n",
+			cptvf->nr_queues);
 	}
 
 	for (i = 0; i < cptvf->nr_queues; i++) {
@@ -72,8 +72,8 @@ static void cleanup_worker_threads(struct cpt_vf *cptvf)
 		return;
 
 	if (cptvf->nr_queues) {
-		dev_info(&pdev->dev, "Cleaning VQ worker threads (%u)\n",
-			 cptvf->nr_queues);
+		dev_dbg(&pdev->dev, "Cleaning VQ worker threads (%u)\n",
+			cptvf->nr_queues);
 	}
 
 	for (i = 0; i < cptvf->nr_queues; i++)
@@ -166,8 +166,8 @@ static void cleanup_pending_queues(struct cpt_vf *cptvf)
 	if (!cptvf->nr_queues)
 		return;
 
-	dev_info(&pdev->dev, "Cleaning VQ pending queue (%u)\n",
-		 cptvf->nr_queues);
+	dev_dbg(&pdev->dev, "Cleaning VQ pending queue (%u)\n",
+		cptvf->nr_queues);
 	free_pending_queues(&cptvf->pqinfo);
 }
 
@@ -308,8 +308,8 @@ static void cleanup_command_queues(struct cpt_vf *cptvf)
 	if (!cptvf->nr_queues)
 		return;
 
-	dev_info(&pdev->dev, "Cleaning VQ command queue (%u)\n",
-		 cptvf->nr_queues);
+	dev_dbg(&pdev->dev, "Cleaning VQ command queue (%u)\n",
+		cptvf->nr_queues);
 	free_command_queues(cptvf, &cptvf->cqinfo);
 }
 
