@@ -936,8 +936,8 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 			dev_err(octtx_device, "Failed to create TIM domain\n");
 			goto error;
 		}
+		domain->tim_domain_created = true;
 	}
-	domain->tim_domain_created = true;
 
 	domain->cpt_vf_count = cpt_count;
 	if (domain->cpt_vf_count > 0) {
@@ -960,8 +960,8 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 			dev_err(octtx_device, "Failed to create DPI domain\n");
 			goto error;
 		}
+		domain->dpi_domain_created = true;
 	}
-	domain->dpi_domain_created = true;
 
 	domain->zip_vf_count = zip_count;
 	if (domain->zip_vf_count) {
