@@ -709,9 +709,54 @@ err_unlock:
 	return ret;
 }
 
+static int cpt_reset_domain(u32 id, u16 domain_id)
+{
+	struct cpt_device *cpt = NULL;
+	struct cpt_device *curr;
+	struct cptpf_vf *vf;
+	u64 inflight = 0;
+	int i, ret;
+
+	mutex_lock(&octeontx_cpt_devices_lock);
+	list_for_each_entry(curr, &octeontx_cpt_devices, list) {
+		if (curr->node == id && curr->pf_type == CPT_SE_83XX) {
+			cpt = curr;
+			break;
+		}
+	}
+
+	if (!cpt) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
+
+	for (i = 0; i < cpt->max_vfs; i++) {
+		vf = &cpt->vf[i];
+		if (vf->domain.in_use &&
+		    vf->domain.domain_id == domain_id) {
+
+			/* Wait till the VQ is empty */
+			inflight = readq(vf->domain.reg_base +
+					 CPTX_VQX_INPROG(0, 0));
+			while (inflight != 0) {
+				inflight = readq(vf->domain.reg_base +
+						 CPTX_VQX_INPROG(0, 0));
+			}
+		}
+	}
+
+	mutex_unlock(&octeontx_cpt_devices_lock);
+	return 0;
+
+err_unlock:
+	mutex_unlock(&octeontx_cpt_devices_lock);
+	return ret;
+}
+
 struct cptpf_com_s cptpf_com = {
 	.create_domain = cpt_pf_create_domain,
 	.destroy_domain = cpt_pf_remove_domain,
+	.reset_domain = cpt_reset_domain,
 };
 EXPORT_SYMBOL(cptpf_com);
 

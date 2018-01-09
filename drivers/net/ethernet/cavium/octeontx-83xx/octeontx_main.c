@@ -1056,6 +1056,15 @@ static int octeontx_reset_domain(void *master_data)
 		}
 	}
 
+	if (domain->cpt_domain_created) {
+		ret = cptpf->reset_domain(node, domain->domain_id);
+		if (ret) {
+			dev_err(octtx_device,
+				"Failed to reset CPT of domain %d on node %d.\n",
+				domain->domain_id, node);
+		}
+	}
+
 	if (domain->dpi_domain_created) {
 		ret = dpipf->reset_domain(node, domain->domain_id);
 		if (ret) {
