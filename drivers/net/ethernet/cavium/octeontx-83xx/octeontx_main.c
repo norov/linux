@@ -29,6 +29,7 @@
 #include "tim.h"
 #include "pki.h"
 #include "dpi.h"
+#include "cpt.h"
 
 #define DRV_NAME "octeontx"
 #define DRV_VERSION "1.0"
@@ -55,6 +56,7 @@ static struct fpapf_com_s *fpapf;
 static struct ssopf_com_s *ssopf;
 static struct pkopf_com_s *pkopf;
 static struct timpf_com_s *timpf;
+static struct cptpf_com_s *cptpf;
 static struct ssowpf_com_s *ssowpf;
 static struct pki_com_s *pki;
 static struct dpipf_com_s *dpipf;
@@ -82,6 +84,7 @@ struct octtx_domain {
 	int ssow_vf_count;
 	int tim_vf_count;
 	int dpi_vf_count;
+	int cpt_vf_count;
 
 	u64 aura_set;
 	u64 grp_mask;
@@ -107,6 +110,7 @@ struct octtx_domain {
 	bool pko_domain_created;
 	bool tim_domain_created;
 	bool dpi_domain_created;
+	bool cpt_domain_created;
 };
 
 static int gpio_in_use;
@@ -126,7 +130,7 @@ static int octeontx_create_domain(const char *name, int type, int sso_count,
 				  int fpa_count, int ssow_count, int pko_count,
 				  int pki_count, int tim_count, int bgx_count,
 				  int lbk_count, int dpi_count,
-				  const long int *bgx_port,
+				  int cpt_count, const long int *bgx_port,
 				  const long int *lbk_port);
 
 static void octeontx_destroy_domain(const char *domain_name);
@@ -171,6 +175,7 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	long int lbk_count = 0;
 	long int dpi_count = 0;
 	long int pki_count = 0;
+	long int cpt_count = 0;
 	long int lbk_port[OCTTX_MAX_LBK_PORTS];
 	long int bgx_port[OCTTX_MAX_BGX_PORTS];
 	char *errmsg = "Wrong domain specification format.";
@@ -235,6 +240,12 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 				goto error;
 			if (kstrtol(strim(start), 10, &tim_count))
 				goto error;
+		}  else if (!strncmp(strim(start), "cpt", sizeof("cpt") - 1)) {
+			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
+			if (kstrtol(start, 10, &cpt_count))
+				goto error;
 		} else if (!strncmp(strim(start), "net", sizeof("net") - 1)) {
 			temp = strsep(&start, ":");
 			if (!start)
@@ -263,7 +274,7 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	ret = octeontx_create_domain(name, type, sso_count, fpa_count,
 				     ssow_count, pko_count, pki_count,
 				     tim_count, bgx_count, lbk_count,
-				     dpi_count,
+				     dpi_count, cpt_count,
 				     (const long int *)bgx_port,
 				     (const long int *)lbk_port);
 	if (ret) {
@@ -540,6 +551,15 @@ static void do_destroy_domain(struct octtx_domain *domain)
 		}
 	}
 
+	if (domain->cpt_domain_created) {
+		ret = cptpf->destroy_domain(node, domain_id, domain->kobj);
+		if (ret) {
+			dev_err(octtx_device,
+				"Failed to remove CPT of domain %d on node %d.\n",
+				domain->domain_id, node);
+		}
+	}
+
 	if (domain->fpa_domain_created) {
 		ret = fpapf->destroy_domain(node, domain_id, domain->kobj);
 		if (ret) {
@@ -631,7 +651,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 			   int fpa_count, int ssow_count, int pko_count,
 			   int pki_count, int tim_count, int bgx_count,
 			   int lbk_count, int dpi_count,
-			   const long int *bgx_port,
+			   int cpt_count, const long int *bgx_port,
 			   const long int *lbk_port)
 {
 	void *ssow_ram_mbox_addr = NULL;
@@ -894,6 +914,17 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		}
 	}
 	domain->tim_domain_created = true;
+
+	domain->cpt_vf_count = cpt_count;
+	if (domain->cpt_vf_count > 0) {
+		ret = cptpf->create_domain(node, domain_id,
+					   domain->cpt_vf_count, domain->kobj);
+		if (ret) {
+			dev_err(octtx_device, "Failed to create CPT domain\n");
+			goto error;
+		}
+		domain->cpt_domain_created = true;
+	}
 
 	domain->dpi_vf_count = dpi_count;
 	if (domain->dpi_vf_count > 0) {
@@ -1329,6 +1360,12 @@ static int __init octeontx_init_module(void)
 		goto timpf_err;
 	}
 
+	cptpf = try_then_request_module(symbol_get(cptpf_com), "cptpf");
+	if (!cptpf) {
+		ret = -ENODEV;
+		goto cptpf_err;
+	}
+
 	/* Register a physical link status poll fn() */
 	check_link = alloc_workqueue("octeontx_check_link_status",
 				     WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
@@ -1418,6 +1455,9 @@ cleanup_handler_err:
 	task_cleanup_handler_remove(cleanup_el3_irqs);
 
 wq_err:
+	symbol_put(cptpf_com);
+
+cptpf_err:
 	symbol_put(timpf_com);
 
 timpf_err:
@@ -1466,6 +1506,7 @@ static void __exit octeontx_cleanup_module(void)
 	symbol_put(fpapf_com);
 	symbol_put(pkopf_com);
 	symbol_put(timpf_com);
+	symbol_put(cptpf_com);
 	symbol_put(lbk_com);
 	symbol_put(thunder_bgx_com);
 	task_cleanup_handler_remove(cleanup_el3_irqs);
