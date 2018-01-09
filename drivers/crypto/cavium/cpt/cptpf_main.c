@@ -713,7 +713,7 @@ static struct pci_driver cpt_pci_driver = {
 
 module_pci_driver(cpt_pci_driver);
 
-MODULE_AUTHOR("George Cherian <george.cherian@cavium.com>");
+MODULE_AUTHOR("Cavium Inc");
 MODULE_DESCRIPTION("Cavium Thunder CPT Physical Function Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_VERSION(DRV_VERSION);
