@@ -112,12 +112,10 @@ static inline u32 create_ctx_hdr(struct ablkcipher_request *req, u32 enc,
 				 u32 *argcnt)
 {
 	struct crypto_ablkcipher *tfm = crypto_ablkcipher_reqtfm(req);
-	struct cvm_enc_ctx *ctx = crypto_ablkcipher_ctx(tfm);
 	struct cvm_req_ctx *rctx = ablkcipher_request_ctx(req);
-	struct fc_context *fctx = &rctx->fctx;
-	u64 *offset_control = &rctx->control_word;
-	u32 enc_iv_len = crypto_ablkcipher_ivsize(tfm);
+	struct cvm_enc_ctx *ctx = crypto_ablkcipher_ctx(tfm);
 	struct cpt_request_info *req_info = &rctx->cpt_req;
+	struct fc_context *fctx = &rctx->fctx;
 	u64 *ctrl_flags = NULL;
 
 	req_info->ctrl.s.grp = 0;
@@ -143,16 +141,15 @@ static inline u32 create_ctx_hdr(struct ablkcipher_request *req, u32 enc,
 	else
 		memcpy(fctx->enc.encr_key, ctx->enc_key, ctx->key_len);
 
-	memcpy(fctx->enc.encr_iv, req->info, enc_iv_len);
+	memcpy(fctx->enc.encr_iv, req->info, crypto_ablkcipher_ivsize(tfm));
 
 	ctrl_flags = (u64 *)&fctx->enc.enc_ctrl.flags;
 	*ctrl_flags = cpu_to_be64(*ctrl_flags);
 
-	*offset_control = 0;
 	/* Storing  Packet Data Information in offset
 	 * Control Word First 8 bytes
 	 */
-	req_info->in[*argcnt].vptr = (u8 *)offset_control;
+	req_info->in[*argcnt].vptr = (u8 *)&rctx->ctrl_word;
 	req_info->in[*argcnt].size = CONTROL_WORD_LEN;
 	req_info->req.dlen += CONTROL_WORD_LEN;
 	++(*argcnt);
@@ -211,13 +208,11 @@ static inline int cvm_enc_dec(struct ablkcipher_request *req, u32 enc)
 	struct crypto_ablkcipher *tfm = crypto_ablkcipher_reqtfm(req);
 	struct cvm_req_ctx *rctx = ablkcipher_request_ctx(req);
 	u32 enc_iv_len = crypto_ablkcipher_ivsize(tfm);
-	struct fc_context *fctx = &rctx->fctx;
 	struct cpt_request_info *req_info = &rctx->cpt_req;
 	struct cpt_vf *cptvf = NULL;
 	int status, cpu;
 
-	memset(req_info, 0, sizeof(struct cpt_request_info));
-	memset(fctx, 0, sizeof(struct fc_context));
+	memset(rctx, 0, sizeof(struct cvm_req_ctx));
 	create_input_list(req, enc, enc_iv_len);
 	create_output_list(req, enc_iv_len);
 	store_cb_info(req, req_info);
@@ -364,17 +359,34 @@ int cvm_enc_dec_init(struct crypto_tfm *tfm)
 	return 0;
 }
 
-static int cvm_aead_init(struct crypto_aead *tfm)
+static int cvm_aead_init(struct crypto_aead *tfm, u8 cipher_type, u8 mac_type)
 {
 	struct cvm_aead_ctx *ctx = crypto_aead_ctx(tfm);
 
-	ctx->hashalg = crypto_alloc_shash("sha1", 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(ctx->hashalg))
-		return PTR_ERR(ctx->hashalg);
+	ctx->cipher_type = cipher_type;
+	ctx->mac_type = mac_type;
+
+	switch (ctx->mac_type) {
+	case SHA1:
+		ctx->hashalg = crypto_alloc_shash("sha1", 0, CRYPTO_ALG_ASYNC);
+		if (IS_ERR(ctx->hashalg))
+			return PTR_ERR(ctx->hashalg);
+		break;
+	}
 
 	tfm->reqsize = sizeof(struct cvm_req_ctx) + sizeof(struct aead_request);
 
 	return 0;
+}
+
+static int cvm_aead_cbc_aes_sha1_init(struct crypto_aead *tfm)
+{
+	return cvm_aead_init(tfm, AES_CBC, SHA1);
+}
+
+static int cvm_aead_gcm_aes_init(struct crypto_aead *tfm)
+{
+	return cvm_aead_init(tfm, AES_GCM, MAC_NULL);
 }
 
 void cvm_aead_exit(struct crypto_aead *tfm)
@@ -388,26 +400,35 @@ void cvm_aead_exit(struct crypto_aead *tfm)
 	kfree(ctx->sdesc);
 }
 
-/* This is the Integrity Check Value (aka the authentication tag length and can
- * be 8, 12 or 16 bytes long.
+/* This is the Integrity Check Value validation (aka the authentication tag
+ * length)
  */
 static int cvm_aead_set_authsize(struct crypto_aead *tfm,
 				 unsigned int authsize)
 {
-	switch (authsize) {
-	case 12: /* SHA1 Truncated Mac len of 96 Bit =12BYTES */
-	case 16: /* MD5*/
-	case 20: /* SHA1 */
-	case 28: /* SHA224*/
-	case 32: /* SHA256*/
-	case 48: /* SHA384*/
-	case 64: /* SHA512*/
+	struct cvm_aead_ctx *ctx = crypto_aead_ctx(tfm);
+
+	switch (ctx->mac_type) {
+	case SHA1:
+		if (authsize != SHA1_DIGEST_SIZE &&
+		    authsize != SHA1_TRUNC_DIGEST_SIZE)
+			return -EINVAL;
 		break;
+
+	case MAC_NULL:
+		if (ctx->cipher_type == AES_GCM) {
+			if (authsize != AES_GCM_ICV_SIZE)
+				return -EINVAL;
+		} else
+			return -EINVAL;
+		break;
+
 	default:
 		return -EINVAL;
+		break;
 	}
-	tfm->authsize = authsize;
 
+	tfm->authsize = authsize;
 	return 0;
 }
 
@@ -439,13 +460,13 @@ inline void swap_data(u32 *buf, u32 len, u32 unit)
 static int calculateipadopad(struct crypto_aead *cipher)
 {
 	struct cvm_aead_ctx *ctx = crypto_aead_ctx(cipher);
+	u8 *ipad = NULL, *opad = NULL;
+	struct sha1_state *sha1;
 	int bs = crypto_shash_blocksize(ctx->hashalg);
 	int ds = crypto_shash_digestsize(ctx->hashalg);
 	int state_size = crypto_shash_statesize(ctx->hashalg);
-	int authkeylen = ctx->authkeylen;
+	int authkeylen = ctx->auth_key_len;
 	int err = 0, icount = 0;
-	u8 *ipad = NULL, *opad = NULL;
-	struct sha1_state *sha1;
 
 	ctx->sdesc = alloc_sdesc(ctx->hashalg);
 	if (IS_ERR(ctx->sdesc))
@@ -494,16 +515,16 @@ static int calculateipadopad(struct crypto_aead *cipher)
 	/* Partial Hash calculated from the software
 	 * algorithm is retrieved for IPAD & OPAD
 	 */
-	swap_data(sha1->state, ctx->authkeylen, sizeof(int));
-	memcpy(ctx->ipad, &sha1->state, ctx->authkeylen);
+	swap_data(sha1->state, ctx->auth_key_len, sizeof(int));
+	memcpy(ctx->ipad, &sha1->state, ctx->auth_key_len);
 
 	/* OPAD Calculation */
 	crypto_shash_init(&ctx->sdesc->shash);
 	crypto_shash_update(&ctx->sdesc->shash, opad, bs);
 	crypto_shash_export(&ctx->sdesc->shash, opad);
 	sha1 = (struct sha1_state *)opad;
-	swap_data(sha1->state, ctx->authkeylen, sizeof(int));
-	memcpy(ctx->opad, &sha1->state, ctx->authkeylen);
+	swap_data(sha1->state, ctx->auth_key_len, sizeof(int));
+	memcpy(ctx->opad, &sha1->state, ctx->auth_key_len);
 
 	kfree(ipad);
 	kfree(opad);
@@ -519,14 +540,14 @@ calc_fail:
 	return -ENOMEM;
 }
 
-int cvm_aead_setkey(struct crypto_aead *cipher, const unsigned char *key,
-		    unsigned int keylen)
+int cvm_aead_cbc_aes_sha1_setkey(struct crypto_aead *cipher,
+				 const unsigned char *key,
+				 unsigned int keylen)
 {
 	struct cvm_aead_ctx *ctx = crypto_aead_ctx(cipher);
-	struct rtattr *rta = (void *)key;
 	struct crypto_authenc_key_param *param;
-	int enckeylen = 0;
-	int authkeylen = 0;
+	struct rtattr *rta = (void *)key;
+	int enckeylen = 0, authkeylen = 0;
 	int status = -EINVAL;
 
 	if (!RTA_OK(rta, keylen))
@@ -550,9 +571,26 @@ int cvm_aead_setkey(struct crypto_aead *cipher, const unsigned char *key,
 
 	authkeylen = keylen - enckeylen;
 	memcpy(ctx->key, key, keylen);
-	ctx->keylen = keylen;
-	ctx->enckeylen = enckeylen;
-	ctx->authkeylen = authkeylen;
+
+	switch (enckeylen) {
+	case AES_KEYSIZE_128:
+		ctx->key_type = AES_128_BIT;
+		break;
+	case AES_KEYSIZE_192:
+		ctx->key_type = AES_192_BIT;
+		break;
+	case AES_KEYSIZE_256:
+		ctx->key_type = AES_256_BIT;
+		break;
+	default:
+		/* Invalid key length */
+		crypto_aead_set_flags(cipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
+		return -EINVAL;
+	}
+
+	ctx->enc_key_len = enckeylen;
+	ctx->auth_key_len = authkeylen;
+
 	status = calculateipadopad(cipher);
 	if (status)
 		goto badkey;
@@ -563,63 +601,108 @@ badkey:
 	return status;
 }
 
+int cvm_aead_gcm_aes_setkey(struct crypto_aead *cipher,
+			    const unsigned char *key,
+			    unsigned int keylen)
+{
+	struct cvm_aead_ctx *ctx = crypto_aead_ctx(cipher);
+
+	/* For aes gcm we expect to get encryption key (16, 24, 32 bytes)
+	 * and salt (4 bytes)
+	 */
+	switch (keylen) {
+	case AES_KEYSIZE_128 + AES_GCM_SALT_SIZE:
+		ctx->key_type = AES_128_BIT;
+		ctx->enc_key_len = AES_KEYSIZE_128;
+		break;
+	case AES_KEYSIZE_192 + AES_GCM_SALT_SIZE:
+		ctx->key_type = AES_192_BIT;
+		ctx->enc_key_len = AES_KEYSIZE_192;
+		break;
+	case AES_KEYSIZE_256 + AES_GCM_SALT_SIZE:
+		ctx->key_type = AES_256_BIT;
+		ctx->enc_key_len = AES_KEYSIZE_256;
+		break;
+	default:
+		/* Invalid key and salt length */
+		crypto_aead_set_flags(cipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
+		return -EINVAL;
+	}
+
+	/* Store encryption key and salt */
+	memcpy(ctx->key, key, keylen);
+
+	return 0;
+}
+
 static inline u32 create_aead_ctx_hdr(struct aead_request *req, u32 enc,
-				      u32 cipher_type, u32 aes_key_type,
-				      u32 hash_type,  u32 mac_len, u32 *argcnt)
+				      u32 *argcnt)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct cvm_aead_ctx *ctx = crypto_aead_ctx(tfm);
 	struct cvm_req_ctx *rctx = aead_request_ctx(req);
-	struct fc_context *fctx = &rctx->fctx;
 	struct cpt_request_info *req_info = &rctx->cpt_req;
-	u32 ivsize = crypto_aead_ivsize(tfm);
-	u64 *offset_control = &rctx->control_word;
-	u64 *ctrl_flags = NULL;
-	u16 encr_data_len = 0;
-	u16 encr_offset = req->assoclen;
-	u16 auth_data_len = 0;
+	struct fc_context *fctx = &rctx->fctx;
+	int mac_len = crypto_aead_authsize(tfm);
 
-	fctx->enc.enc_ctrl.e.enc_cipher = cipher_type;
-	fctx->enc.enc_ctrl.e.aes_key = aes_key_type;
-	fctx->enc.enc_ctrl.e.iv_source = FROM_CTX;
-	fctx->enc.enc_ctrl.e.hash_type = hash_type;
-	fctx->enc.enc_ctrl.e.mac_len = mac_len;
-	memcpy(fctx->enc.encr_key, ctx->key + ctx->authkeylen, ctx->enckeylen);
-	memcpy(fctx->enc.encr_iv, req->iv, ivsize);
-	if (ctx->ipad)
-		memcpy(fctx->hmac.ipad, ctx->ipad, 64);
+	rctx->ctrl_word.e.enc_data_offset = req->assoclen;
 
-	if (ctx->opad)
-		memcpy(fctx->hmac.opad, ctx->opad, 64);
+	switch (ctx->cipher_type) {
+	case AES_CBC:
+		fctx->enc.enc_ctrl.e.iv_source = FROM_CTX;
+		/* Copy encryption key to context */
+		memcpy(fctx->enc.encr_key, ctx->key + ctx->auth_key_len,
+		       ctx->enc_key_len);
+		/* Copy IV to context */
+		memcpy(fctx->enc.encr_iv, req->iv, crypto_aead_ivsize(tfm));
+		if (ctx->ipad)
+			memcpy(fctx->hmac.ipad, ctx->ipad, 64);
+		if (ctx->opad)
+			memcpy(fctx->hmac.opad, ctx->opad, 64);
+		break;
 
-	ctrl_flags = (u64 *)&(fctx->enc.enc_ctrl.flags);
-	*ctrl_flags = cpu_to_be64(*ctrl_flags);
+	case AES_GCM:
+		fctx->enc.enc_ctrl.e.iv_source = FROM_DPTR;
+		/* Copy encryption key to context */
+		memcpy(fctx->enc.encr_key, ctx->key, ctx->enc_key_len);
+		/* Copy salt to context */
+		memcpy(fctx->enc.encr_iv, ctx->key + ctx->enc_key_len,
+		       AES_GCM_SALT_SIZE);
+
+		rctx->ctrl_word.e.iv_offset = req->assoclen - AES_GCM_IV_OFFSET;
+		break;
+
+	default:
+		/* Unknown cipher type */
+		return -EINVAL;
+	}
+	rctx->ctrl_word.flags = cpu_to_be64(rctx->ctrl_word.flags);
 
 	req_info->ctrl.s.grp = 0;
 	req_info->ctrl.s.dma_mode = DMA_GATHER_SCATTER;
-	req_info->ctrl.s.se_req   = SE_CORE_REQ;
+	req_info->ctrl.s.se_req = SE_CORE_REQ;
 	req_info->req.opcode.s.major = MAJOR_OP_FC |
 				 DMA_MODE_FLAG(DMA_GATHER_SCATTER);
 	if (enc) {
 		req_info->req.opcode.s.minor = 2;
-		auth_data_len = req->cryptlen + req->assoclen;
-		encr_data_len =	req->cryptlen;
+		req_info->req.param1 = req->cryptlen;
+		req_info->req.param2 = req->cryptlen + req->assoclen;
 	} else {
 		req_info->req.opcode.s.minor = 3;
-		auth_data_len = req->cryptlen + req->assoclen - mac_len;
-		encr_data_len  = req->cryptlen - mac_len;
+		req_info->req.param1 = req->cryptlen - mac_len;
+		req_info->req.param2 = req->cryptlen + req->assoclen - mac_len;
 	}
 
-	/*GP op header */
-	req_info->req.param1 = encr_data_len;
-	req_info->req.param2 = auth_data_len;
-	*offset_control = cpu_to_be64((u64)encr_offset << 16);
+	fctx->enc.enc_ctrl.e.enc_cipher = ctx->cipher_type;
+	fctx->enc.enc_ctrl.e.aes_key = ctx->key_type;
+	fctx->enc.enc_ctrl.e.mac_type = ctx->mac_type;
+	fctx->enc.enc_ctrl.e.mac_len = mac_len;
+	fctx->enc.enc_ctrl.flags = cpu_to_be64(fctx->enc.enc_ctrl.flags);
 
-	/* input */
-	/* Storing  Packet Data Information in offset
+	/* Storing Packet Data Information in offset
 	 * Control Word First 8 bytes
 	 */
-	req_info->in[*argcnt].vptr = (u8 *)offset_control;
+	req_info->in[*argcnt].vptr = (u8 *)&rctx->ctrl_word;
 	req_info->in[*argcnt].size = CONTROL_WORD_LEN;
 	req_info->req.dlen += CONTROL_WORD_LEN;
 	++(*argcnt);
@@ -632,18 +715,14 @@ static inline u32 create_aead_ctx_hdr(struct aead_request *req, u32 enc,
 	return 0;
 }
 
-static inline u32 create_aead_input_list(struct aead_request *req, u32 enc,
-					 u32 cipher_type, u32 aes_key_type,
-					 u32 mac_len, u32 hash_type,
-					 u32 enc_iv_len)
+static inline u32 create_aead_input_list(struct aead_request *req, u32 enc)
 {
 	struct cvm_req_ctx *rctx = aead_request_ctx(req);
-	struct cpt_request_info *req_info =  &rctx->cpt_req;
-	u32 argcnt =  0;
+	struct cpt_request_info *req_info = &rctx->cpt_req;
 	u32 inputlen =  req->cryptlen + req->assoclen;
+	u32 argcnt = 0;
 
-	create_aead_ctx_hdr(req, enc, cipher_type, aes_key_type, hash_type,
-			    mac_len, &argcnt);
+	create_aead_ctx_hdr(req, enc, &argcnt);
 	update_input_data(req_info, req->src, inputlen, &argcnt);
 	req_info->incnt = argcnt;
 
@@ -651,13 +730,11 @@ static inline u32 create_aead_input_list(struct aead_request *req, u32 enc,
 }
 
 static inline void create_aead_output_list(struct aead_request *req, u32 enc,
-					   u32 cipher_type, u32 enc_iv_len,
 					   u32 mac_len)
 {
 	struct cvm_req_ctx *rctx = aead_request_ctx(req);
 	struct cpt_request_info *req_info =  &rctx->cpt_req;
-	u32 argcnt = 0;
-	u32 outputlen = 0;
+	u32 argcnt = 0, outputlen = 0;
 
 	if (enc)
 		outputlen = req->cryptlen +  req->assoclen + mac_len;
@@ -671,38 +748,17 @@ static inline void create_aead_output_list(struct aead_request *req, u32 enc,
 u32 cvm_aead_enc_dec(struct aead_request *req, u32 enc)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
-	struct cvm_aead_ctx *ctx = crypto_aead_ctx(tfm);
 	struct cvm_req_ctx *rctx = aead_request_ctx(req);
 	struct cpt_request_info *req_info = &rctx->cpt_req;
-	int mac_len = crypto_aead_authsize(tfm);
-	u32 enc_iv_len = crypto_aead_ivsize(tfm);
-	struct fc_context *fctx = &rctx->fctx;
-	u32 aes_key_type = AES_192_BIT;
 	struct cpt_vf *cptvf = NULL;
-	u32 status = 0, cpu;
+	u32 status, cpu;
 
-	switch (ctx->enckeylen) {
-	case 16:
-		aes_key_type = AES_128_BIT;
-		break;
-	case 24:
-		aes_key_type = AES_192_BIT;
-		break;
-	case 32:
-		aes_key_type = AES_256_BIT;
-		break;
-	default:
-		return -EINVAL;
-	}
+	memset(rctx, 0, sizeof(struct cvm_req_ctx));
+	create_aead_input_list(req, enc);
+	create_aead_output_list(req, enc, crypto_aead_authsize(tfm));
 
-	memset(req_info, 0, sizeof(struct cpt_request_info));
-	memset(fctx, 0, sizeof(struct fc_context));
-
-	create_aead_input_list(req, enc, AES_CBC, aes_key_type, mac_len,
-			       2, enc_iv_len);
-	create_aead_output_list(req, enc, AES_CBC, enc_iv_len, mac_len);
-	req_info->callback = (void *)cvm_callback;
-	req_info->callback_arg = (void *)&req->base;
+	req_info->callback = cvm_callback;
+	req_info->callback_arg = &req->base;
 	cpu = get_cpu();
 	if (cpu >= atomic_read(&se_dev_handle.count)) {
 		put_cpu();
@@ -866,14 +922,33 @@ struct aead_alg cvm_aeads[] = { {
 		.cra_alignmask = 0,
 		.cra_module = THIS_MODULE,
 	},
-	.init = cvm_aead_init,
+	.init = cvm_aead_cbc_aes_sha1_init,
 	.exit = cvm_aead_exit,
-	.setkey = cvm_aead_setkey,
+	.setkey = cvm_aead_cbc_aes_sha1_setkey,
 	.setauthsize = cvm_aead_set_authsize,
 	.encrypt = cvm_aead_encrypt,
 	.decrypt = cvm_aead_decrypt,
 	.ivsize = AES_BLOCK_SIZE,
 	.maxauthsize = SHA1_DIGEST_SIZE,
+},
+{
+	.base = {
+		.cra_name = "rfc4106(gcm(aes))",
+		.cra_driver_name = "rfc4106-gcm-aes-cavm",
+		.cra_blocksize = 1,
+		.cra_ctxsize = sizeof(struct cvm_aead_ctx),
+		.cra_priority = 4001,
+		.cra_alignmask = 0,
+		.cra_module = THIS_MODULE,
+	},
+	.init = cvm_aead_gcm_aes_init,
+	.exit = cvm_aead_exit,
+	.setkey = cvm_aead_gcm_aes_setkey,
+	.setauthsize = cvm_aead_set_authsize,
+	.encrypt = cvm_aead_encrypt,
+	.decrypt = cvm_aead_decrypt,
+	.ivsize = AES_GCM_IV_SIZE,
+	.maxauthsize = AES_GCM_ICV_SIZE,
 } };
 
 static inline int is_any_alg_used(void)
