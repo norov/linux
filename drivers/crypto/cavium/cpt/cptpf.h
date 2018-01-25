@@ -55,7 +55,6 @@ struct cpt_device {
 	u8 vfs_enabled; /* Number of enabled VFs */
 	u8 vfs_in_use; /* Number of VFs in use */
 	u32 flags; /* Flags to hold device status bits */
-	int node;
 
 	void __iomem *reg_base; /* Register start address */
 	struct pci_dev *pdev; /* pci device handle */

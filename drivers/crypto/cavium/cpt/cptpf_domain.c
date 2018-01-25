@@ -39,7 +39,7 @@ static int cpt_pf_remove_domain(u32 node, u16 domain_id, struct kobject *kobj)
 
 	mutex_lock(&octeontx_cpt_devices_lock);
 	list_for_each_entry(curr, &octeontx_cpt_devices, list) {
-		if (curr->node == node && curr->pf_type == CPT_SE_83XX) {
+		if (curr->pf_type == CPT_SE_83XX) {
 			cpt = curr;
 			break;
 		}
@@ -95,7 +95,7 @@ static int cpt_pf_create_domain(u32 node, u16 domain_id,
 
 	mutex_lock(&octeontx_cpt_devices_lock);
 	list_for_each_entry(curr, &octeontx_cpt_devices, list) {
-		if (curr->node == node && curr->pf_type == CPT_SE_83XX) {
+		if (curr->pf_type == CPT_SE_83XX) {
 			cpt = curr;
 			break;
 		}
@@ -170,7 +170,7 @@ static int cpt_reset_domain(u32 node, u16 domain_id)
 
 	mutex_lock(&octeontx_cpt_devices_lock);
 	list_for_each_entry(curr, &octeontx_cpt_devices, list) {
-		if (curr->node == node && curr->pf_type == CPT_SE_83XX) {
+		if (curr->pf_type == CPT_SE_83XX) {
 			cpt = curr;
 			break;
 		}

@@ -21,9 +21,6 @@
 #define DRV_NAME	"thunder-cpt"
 #define DRV_VERSION	"1.0"
 
-static atomic_t cpt_se_count = ATOMIC_INIT(0);
-static atomic_t cpt_ae_count = ATOMIC_INIT(0);
-
 DEFINE_MUTEX(octeontx_cpt_devices_lock);
 LIST_HEAD(octeontx_cpt_devices);
 
@@ -664,13 +661,6 @@ static int cpt_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		if (err != cpt->vfs_enabled)
 			goto cpt_err_unregister_interrupts;
 	}
-
-	/* Set CPT ID */
-	if (cpt->pf_type == CPT_SE_83XX)
-		cpt->node = atomic_add_return(1, &cpt_se_count);
-	else
-		cpt->node = atomic_add_return(1, &cpt_ae_count);
-	cpt->node -= 1;
 
 	INIT_LIST_HEAD(&cpt->list);
 	mutex_lock(&octeontx_cpt_devices_lock);
