@@ -164,6 +164,20 @@ struct nand_flash_dev nand_flash_ids[] = {
 	EXTENDED_ID_NAND("NAND 64GiB 1,8V 16-bit", 0x2E, 65536, LP_OPTIONS16),
 	EXTENDED_ID_NAND("NAND 64GiB 3,3V 16-bit", 0x4E, 65536, LP_OPTIONS16),
 
+	/* Micron MT29F1G01AAADD, via staging/mt29f_spinand */
+	{
+		.name = "NAND 128MiB 3,3V 1-bit",
+		.mfr_id = NAND_MFR_MICRON,
+		.dev_id = 0x12,
+		.pagesize = 2048,
+		.chipsize = 128,
+		.erasesize = SZ_128K,
+		.options = NAND_BBT_SCAN2NDPAGE | NAND_ECC_CUSTOM_PAGE_ACCESS,
+		.id_len = 2,
+		.oobsize = 64,
+		.ecc = NAND_ECC_INFO(4, 512),
+	},
+
 	{NULL}
 };
 
