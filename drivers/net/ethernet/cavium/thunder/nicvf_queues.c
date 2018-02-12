@@ -1359,10 +1359,11 @@ nicvf_sq_add_hdr_subdesc(struct nicvf *nic, struct snd_queue *sq, int qentry,
 
 	/* Offload checksum calculation to HW */
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
-		hdr->csum_l3 = 1; /* Enable IP csum calculation */
 		hdr->l3_offset = skb_network_offset(skb);
 		hdr->l4_offset = skb_transport_offset(skb);
 
+		/* Enable IP HDR csum calculation for V4 pkts */
+		hdr->csum_l3 = (ip.v4->version == 4) ? 1 : 0;
 		proto = (ip.v4->version == 4) ? ip.v4->protocol :
 			ip.v6->nexthdr;
 
