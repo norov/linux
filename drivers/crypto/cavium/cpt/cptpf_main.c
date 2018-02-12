@@ -16,7 +16,6 @@
 #include <linux/version.h>
 
 #include "cptpf.h"
-#include "cptpf_fw.h"
 
 #define DRV_NAME	"thunder-cpt"
 #define DRV_VERSION	"1.0"
@@ -261,18 +260,11 @@ static int cpt_ucode_load_fw(struct cpt_device *cpt, const u8 *fw, bool is_ae)
 	struct device *dev = &cpt->pdev->dev;
 	struct ucode_header *ucode;
 	struct microcode *mcode;
-	int use_fw_blob = 0;
 	int j, ret = 0;
-	char *str;
 
 	ret = request_firmware(&fw_entry, fw, dev);
-	if (ret) {
-		/* Try to get firmware from blob */
-		use_fw_blob = 1;
-		ret = get_fw_from_blob(&fw_entry, is_ae);
-		if (ret)
-			return ret;
-	}
+	if (ret)
+		return ret;
 
 	ucode = (struct ucode_header *)fw_entry->data;
 	mcode = &cpt->mcode[cpt->next_mc_idx];
@@ -314,14 +306,10 @@ static int cpt_ucode_load_fw(struct cpt_device *cpt, const u8 *fw, bool is_ae)
 		return ret;
 	}
 
-	str = use_fw_blob ? "Microcode loaded from blob version %s\n" :
-			    "Microcode loaded version %s\n";
-	dev_info(dev, str, &mcode->version[1]);
-
+	dev_info(dev, "Microcode Loaded %s\n", mcode->version);
 	mcode->is_mc_valid = 1;
 	cpt->next_mc_idx++;
-	if (!use_fw_blob)
-		release_firmware(fw_entry);
+	release_firmware(fw_entry);
 
 	return ret;
 }
