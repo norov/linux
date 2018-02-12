@@ -23,10 +23,6 @@
 DEFINE_MUTEX(octeontx_cpt_devices_lock);
 LIST_HEAD(octeontx_cpt_devices);
 
-static unsigned int num_vfs = 4; /* 4 VFs enabled by default */
-module_param(num_vfs, uint, 0x0);
-MODULE_PARM_DESC(num_vfs, "Number of VFs to enable(0-64)");
-
 /*
  * Disable cores specified by coremask
  */
@@ -479,13 +475,8 @@ static int cpt_device_init(struct cpt_device *cpt)
 
 	/* Get max VQs/VFs supported by the device */
 	cpt->max_vfs = pci_sriov_get_totalvfs(cpt->pdev);
-	if (num_vfs > cpt->max_vfs) {
-		dev_warn(dev, "Num of VFs to enable %d is greater than max available. Enabling %d VFs.\n",
-			 num_vfs, cpt->max_vfs);
-		num_vfs = cpt->max_vfs;
-	}
 	/* Get number of VQs/VFs to be enabled */
-	cpt->vfs_enabled = num_vfs;
+	cpt->vfs_enabled = min_t(u64, num_online_cpus(), cpt->max_vfs);
 
 	/*TODO: Get CLK frequency*/
 	/*Disable all cores*/
