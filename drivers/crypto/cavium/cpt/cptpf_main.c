@@ -23,6 +23,8 @@
 DEFINE_MUTEX(octeontx_cpt_devices_lock);
 LIST_HEAD(octeontx_cpt_devices);
 
+static bool is_ucode_loaded;
+
 /*
  * Disable cores specified by coremask
  */
@@ -302,7 +304,7 @@ static int cpt_ucode_load_fw(struct cpt_device *cpt, const u8 *fw, bool is_ae)
 		return ret;
 	}
 
-	dev_info(dev, "Microcode Loaded %s\n", mcode->version);
+	dev_info(dev, "Microcode Loaded %s\n", &mcode->version[1]);
 	mcode->is_mc_valid = 1;
 	cpt->next_mc_idx++;
 	release_firmware(fw_entry);
@@ -322,21 +324,8 @@ static int cpt_ucode_load(struct cpt_device *cpt)
 				ret);
 			return ret;
 		}
-		ret = cpt_ucode_load_fw(cpt, "cpt8x-mc-ae.out", true);
-		if (ret) {
-			dev_err(dev, "ae:cpt_ucode_load failed with ret: %d\n",
-				ret);
-			return ret;
-		}
 	} else {
-		if (cpt->pf_type == CPT_AE_83XX) {
-			ret = cpt_ucode_load_fw(cpt, "cpt8x-mc-ae.out", true);
-			if (ret) {
-				dev_err(dev, "ae:cpt_ucode_load failed with ret: %d\n",
-					ret);
-				return ret;
-			}
-		} else if (cpt->pf_type == CPT_SE_83XX) {
+		if (cpt->pf_type == CPT_SE_83XX) {
 			ret = cpt_ucode_load_fw(cpt, "cpt8x-mc-se.out", false);
 			if (ret) {
 				dev_err(dev, "se:cpt_ucode_load failed with ret: %d\n",
@@ -475,8 +464,6 @@ static int cpt_device_init(struct cpt_device *cpt)
 
 	/* Get max VQs/VFs supported by the device */
 	cpt->max_vfs = pci_sriov_get_totalvfs(cpt->pdev);
-	/* Get number of VQs/VFs to be enabled */
-	cpt->vfs_enabled = min_t(u64, num_online_cpus(), cpt->max_vfs);
 
 	/*TODO: Get CLK frequency*/
 	/*Disable all cores*/
@@ -540,14 +527,22 @@ static void cpt_unregister_interrupts(struct cpt_device *cpt)
 static int cpt_sriov_configure(struct pci_dev *pdev, int numvfs)
 {
 	struct cpt_device *cpt = pci_get_drvdata(pdev);
-	int tmp, ret = -EBUSY, disable = 0;
+	int ret = -EBUSY, disable = 0;
 
 	mutex_lock(&octeontx_cpt_devices_lock);
 	if (cpt->vfs_in_use)
 		goto exit;
 
+	/*
+	 * Currently we do not register any asymmetric algorithms
+	 * therefore we don't allow to enable VFs for 83xx AE
+	 */
+	if (cpt->pf_type == CPT_AE_83XX) {
+		ret = -EINVAL;
+		goto exit;
+	}
+
 	ret = 0;
-	tmp = cpt->vfs_enabled;
 	if (cpt->flags & CPT_FLAG_SRIOV_ENABLED)
 		disable = 1;
 
@@ -558,13 +553,19 @@ static int cpt_sriov_configure(struct pci_dev *pdev, int numvfs)
 	}
 
 	if (numvfs > 0) {
-		cpt->vfs_enabled = numvfs;
+		if (!is_ucode_loaded) {
+			ret = cpt_ucode_load(cpt);
+			if (ret != 0)
+				goto exit;
+			is_ucode_loaded = true;
+		}
+
 		ret = pci_enable_sriov(pdev, numvfs);
 		if (ret == 0) {
 			cpt->flags |= CPT_FLAG_SRIOV_ENABLED;
+			cpt->vfs_enabled = numvfs;
 			ret = numvfs;
-		} else
-			cpt->vfs_enabled = tmp;
+		}
 	}
 
 	dev_notice(&cpt->pdev->dev, "VFs enabled: %d\n", ret);
@@ -626,21 +627,6 @@ static int cpt_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err)
 		goto cpt_err_release_regions;
 
-	/*
-	 * Currently we do not register any asymmetric algorithms therefore we
-	 * don't enable VFs for 83xx AE and we do not load ucode for 83xx AE
-	 * By default we enable 24 SE VFs
-	 */
-	if (cpt->pf_type != CPT_AE_83XX) {
-		err = cpt_ucode_load(cpt);
-		if (err)
-			goto cpt_err_unregister_interrupts;
-
-		err = cpt_sriov_configure(pdev, cpt->vfs_enabled);
-		if (err != cpt->vfs_enabled)
-			goto cpt_err_unregister_interrupts;
-	}
-
 	INIT_LIST_HEAD(&cpt->list);
 	mutex_lock(&octeontx_cpt_devices_lock);
 	list_add(&cpt->list, &octeontx_cpt_devices);
@@ -648,8 +634,6 @@ static int cpt_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	return 0;
 
-cpt_err_unregister_interrupts:
-	cpt_unregister_interrupts(cpt);
 cpt_err_release_regions:
 	pci_release_regions(pdev);
 cpt_err_disable_device:
