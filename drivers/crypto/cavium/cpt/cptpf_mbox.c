@@ -30,7 +30,7 @@ static void cpt_mbox_send_ack(struct cpt_device *cpt, int vf,
 static void cpt_clear_mbox_intr(struct cpt_device *cpt, u32 vf)
 {
 	/* W1C for the VF */
-	writeq(1 << vf, cpt->reg_base + CPTX_PF_MBOX_INTX(0, 0));
+	writeq(1ull << vf, cpt->reg_base + CPTX_PF_MBOX_INTX(0, 0));
 }
 
 /*
