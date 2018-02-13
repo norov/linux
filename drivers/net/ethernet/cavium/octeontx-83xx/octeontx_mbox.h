@@ -310,6 +310,7 @@ enum {
 #define MBOX_BGX_PORT_SET_BCAST 12
 #define MBOX_BGX_PORT_SET_MCAST 13
 #define MBOX_BGX_PORT_SET_MTU 14
+#define MBOX_BGX_PORT_GET_LINK_INFO    15
 
 /* BGX port configuration parameters: */
 typedef struct mbox_bgx_port_conf {
@@ -353,6 +354,15 @@ typedef struct mbox_bgx_port_status {
 	/* 1 = LMAC is backpressured, 0 = no backpressure. */
 	u8 bp;
 } mbox_bgx_port_status_t;
+
+/* BGX port info: */
+typedef struct mbox_bgx_port_info {
+	u8 rsvd1;
+	u8 rsvd2;
+	u8 link_up;
+	u8 duplex;
+	u32 speed;
+} mbox_bgx_port_link_info_t;
 
 /* BGX port statistics: */
 typedef struct mbox_bgx_port_stats {
