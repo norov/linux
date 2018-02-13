@@ -33,6 +33,8 @@ static int bgx_port_bp_set(struct octtx_bgx_port *port, u8 on);
 static int bgx_port_bcast_set(struct octtx_bgx_port *port, u8 on);
 static int bgx_port_mcast_set(struct octtx_bgx_port *port, u8 on);
 static int bgx_port_mtu_set(struct octtx_bgx_port *port, u16 mtu);
+static int bgx_port_link_info(struct octtx_bgx_port *port,
+			      struct bgx_link_status *info);
 
 #define BGX_LMAC_NUM_CHANS 16
 #define BGX_LMAC_BASE_CHAN(__bgx, __lmac) \
@@ -154,6 +156,14 @@ static int bgx_get_link_status(int node, int bgx, int lmac)
 
 	thbgx->get_link_status(node, bgx, lmac, &link);
 	return link.link_up;
+}
+
+static struct bgx_link_status bgx_get_link_info(int node, int bgx, int lmac)
+{
+	struct bgx_link_status link;
+
+	thbgx->get_link_status(node, bgx, lmac, &link);
+	return link;
 }
 
 static struct octtx_bgx_port *bgx_get_port_by_chan(int node, u16 domain_id,
@@ -643,6 +653,13 @@ int bgx_port_link_status(struct octtx_bgx_port *port, u8 *up)
 	return 0;
 }
 
+int bgx_port_link_info(struct octtx_bgx_port *port,
+		       struct bgx_link_status *info)
+{
+	*info = bgx_get_link_info(port->node, port->bgx, port->lmac);
+	return 0;
+}
+
 int bgx_port_promisc_set(struct octtx_bgx_port *port, u8 on)
 {
 	struct bgxpf *bgx;
@@ -911,6 +928,7 @@ struct bgx_com_s bgx_com  = {
 	.get_port_by_chan = bgx_get_port_by_chan,
 	.set_pkind = bgx_set_pkind,
 	.get_port_stats = bgx_get_port_stats,
+	.get_link_info = bgx_get_link_info
 };
 EXPORT_SYMBOL(bgx_com);
 
