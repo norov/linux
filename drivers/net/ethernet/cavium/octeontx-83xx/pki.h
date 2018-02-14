@@ -580,7 +580,7 @@ int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 		     mbox_pki_hash_cfg_t *cfg);
 
 int pki_port_set_pcam_dmach(struct pkipf_vf *vf, u16 vf_id,
-			    mbox_pki_pcam_entry_t *cfg);
+			    struct mbox_pki_port_pcam_entry *cfg);
 int pki_port_set_pcam_dmacl(struct pkipf_vf *vf, u16 vf_id,
-			    mbox_pki_pcam_entry_t *cfg);
+			    struct mbox_pki_port_pcam_entry *cfg);
 #endif
