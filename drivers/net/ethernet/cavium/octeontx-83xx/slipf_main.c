@@ -97,15 +97,15 @@ static int sdp_port_close(struct octtx_sdp_port *port);
 static int sdp_port_start(struct octtx_sdp_port *port);
 static int sdp_port_stop(struct octtx_sdp_port *port);
 static int sdp_port_config(struct octtx_sdp_port *port,
-			   mbox_sdp_port_conf_t *conf);
+			   struct mbox_sdp_port_conf *conf);
 static int sdp_port_status(struct octtx_sdp_port *port,
-			   mbox_sdp_port_status_t *stat);
+			   struct mbox_sdp_port_status *stat);
 static int sdp_port_stats_get(struct octtx_sdp_port *port,
-			      mbox_sdp_port_stats_t *stat);
+			      struct mbox_sdp_port_stats *stat);
 static int sdp_port_stats_clr(struct octtx_sdp_port *port);
 static int sdp_port_link_status(struct octtx_sdp_port *port, u8 *up);
-static void sdp_reg_read(mbox_sdp_reg_t *reg);
-static void sdp_reg_write(mbox_sdp_reg_t *reg);
+static void sdp_reg_read(struct mbox_sdp_reg *reg);
+static void sdp_reg_write(struct mbox_sdp_reg *reg);
 
 static int sli_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 			       union mbox_data *req,
@@ -126,7 +126,7 @@ static int sli_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 	case MBOX_SDP_PORT_OPEN:
 		sdp_port_open(sdp_port);
 		sdp_port_config(sdp_port, mdata);
-		resp->data = sizeof(mbox_sdp_port_conf_t);
+		resp->data = sizeof(struct mbox_sdp_port_conf);
 		break;
 
 	case MBOX_SDP_PORT_CLOSE:
@@ -146,17 +146,17 @@ static int sli_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 
 	case MBOX_SDP_PORT_GET_CONFIG:
 		sdp_port_config(sdp_port, mdata);
-		resp->data = sizeof(mbox_sdp_port_conf_t);
+		resp->data = sizeof(struct mbox_sdp_port_conf);
 		break;
 
 	case MBOX_SDP_PORT_GET_STATUS:
 		sdp_port_status(sdp_port, mdata);
-		resp->data = sizeof(mbox_sdp_port_status_t);
+		resp->data = sizeof(struct mbox_sdp_port_status);
 		break;
 
 	case MBOX_SDP_PORT_GET_STATS:
 		sdp_port_stats_get(sdp_port, mdata);
-		resp->data = sizeof(mbox_sdp_port_stats_t);
+		resp->data = sizeof(struct mbox_sdp_port_stats);
 		break;
 
 	case MBOX_SDP_PORT_CLR_STATS:
@@ -171,7 +171,7 @@ static int sli_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 
 	case MBOX_SDP_REG_READ:
 		sdp_reg_read(mdata);
-		resp->data = sizeof(mbox_sdp_reg_t);
+		resp->data = sizeof(struct mbox_sdp_reg);
 		break;
 
 	case MBOX_SDP_REG_WRITE:
@@ -209,7 +209,8 @@ int sdp_port_stop(struct octtx_sdp_port *port __maybe_unused)
 	return 0;
 }
 
-int sdp_port_config(struct octtx_sdp_port *sdp_port, mbox_sdp_port_conf_t *conf)
+int sdp_port_config(struct octtx_sdp_port *sdp_port,
+		    struct mbox_sdp_port_conf *conf)
 {
 	conf->node  = sdp_port->node;
 	conf->sdp   = sdp_port->sdp;
@@ -221,13 +222,13 @@ int sdp_port_config(struct octtx_sdp_port *sdp_port, mbox_sdp_port_conf_t *conf)
 }
 
 int sdp_port_status(struct octtx_sdp_port *port __maybe_unused,
-		    mbox_sdp_port_status_t *stat __maybe_unused)
+		    struct mbox_sdp_port_status *stat __maybe_unused)
 {
 	return 0;
 }
 
 int sdp_port_stats_get(struct octtx_sdp_port *port __maybe_unused,
-		       mbox_sdp_port_stats_t *stats __maybe_unused)
+		       struct mbox_sdp_port_stats *stats __maybe_unused)
 {
 	return 0;
 }
@@ -243,14 +244,14 @@ int sdp_port_link_status(struct octtx_sdp_port *port __maybe_unused,
 	return 0;
 }
 
-void sdp_reg_read(mbox_sdp_reg_t *reg)
+void sdp_reg_read(struct mbox_sdp_reg *reg)
 {
 	struct slipf *sli = get_sli_dev(0, 0); /* Hard coding for now */
 
 	reg->val = sli_reg_read(sli, reg->addr);
 }
 
-void sdp_reg_write(mbox_sdp_reg_t *reg)
+void sdp_reg_write(struct mbox_sdp_reg *reg)
 {
 	struct slipf *sli = get_sli_dev(0, 0); /* Hard coding for now */
 
