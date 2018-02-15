@@ -162,13 +162,22 @@ config OCTEONTX_ZIP_PF
 	  Select this option to enable ZIP Physical function.
 	  ZIP provides hardware compression/decompression support.
 
+config OCTEONTX_SLI_PF
+	tristate "OcteonTX SLI physical function driver(SLI_PF)"
+	depends on 64BIT && OCTEONTX_DPI
+	default y
+	help
+	  Select this option to enable SLI.
+          SLI interfaces PEM(PCIe) blocks to the cores and memory.
+          SLI needs to be configured when OcteonTX is connected
+          in EP mode to a host.
 
 config OCTEONTX
 	tristate "OcteonTX coprocessor maintanier"
 	depends on THUNDER_NIC_BGX && OCTEONTX_FPA_PF && OCTEONTX_SSO_PF
 	depends on OCTEONTX_PKO_PF && OCTEONTX_SSOW_PF && OCTEONTX_PKI
 	depends on OCTEONTX_DPI && OCTEONTX_LBK && OCTEONTX_TIM_PF
-	depends on CRYPTO_ZIP_PF && CRYPTO_DEV_CPT
+	depends on OCTEONTX_ZIP_PF && CRYPTO_DEV_CPT && OCTEONTX_SLI_PF
 
 	default y
 	help
