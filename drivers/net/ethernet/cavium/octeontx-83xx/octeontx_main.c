@@ -29,6 +29,7 @@
 #include "tim.h"
 #include "pki.h"
 #include "dpi.h"
+#include "zip.h"
 #include "cpt.h"
 
 #define DRV_NAME "octeontx"
@@ -60,6 +61,7 @@ static struct cptpf_com_s *cptpf;
 static struct ssowpf_com_s *ssowpf;
 static struct pki_com_s *pki;
 static struct dpipf_com_s *dpipf;
+static struct zippf_com_s *zippf;
 
 struct delayed_work dwork;
 struct delayed_work dwork_reset;
@@ -84,6 +86,7 @@ struct octtx_domain {
 	int ssow_vf_count;
 	int tim_vf_count;
 	int dpi_vf_count;
+	int zip_vf_count;
 	int cpt_vf_count;
 
 	u64 aura_set;
@@ -110,6 +113,7 @@ struct octtx_domain {
 	bool pko_domain_created;
 	bool tim_domain_created;
 	bool dpi_domain_created;
+	bool zip_domain_created;
 	bool cpt_domain_created;
 };
 
@@ -129,7 +133,7 @@ MODULE_VERSION(DRV_VERSION);
 static int octeontx_create_domain(const char *name, int type, int sso_count,
 				  int fpa_count, int ssow_count, int pko_count,
 				  int pki_count, int tim_count, int bgx_count,
-				  int lbk_count, int dpi_count,
+				  int lbk_count, int dpi_count, int zip_count,
 				  int cpt_count, const long int *bgx_port,
 				  const long int *lbk_port);
 
@@ -174,6 +178,7 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	long int bgx_count = 0;
 	long int lbk_count = 0;
 	long int dpi_count = 0;
+	long int zip_count = 0;
 	long int pki_count = 0;
 	long int cpt_count = 0;
 	long int lbk_port[OCTTX_MAX_LBK_PORTS];
@@ -266,6 +271,12 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 				goto error;
 			if (kstrtol(start, 10, &dpi_count))
 				goto error;
+		} else if (!strncmp(start, "zip", sizeof("zip") - 1)) {
+			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
+			if (kstrtol(start, 10, &zip_count))
+				goto error;
 		} else {
 			goto error;
 		}
@@ -274,7 +285,8 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	ret = octeontx_create_domain(name, type, sso_count, fpa_count,
 				     ssow_count, pko_count, pki_count,
 				     tim_count, bgx_count, lbk_count,
-				     dpi_count, cpt_count,
+				     dpi_count, zip_count, cpt_count,
+				     dpi_count, zip_count,
 				     (const long int *)bgx_port,
 				     (const long int *)lbk_port);
 	if (ret) {
@@ -420,6 +432,10 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 	case DPI_COPROC:
 		dpipf->receive_message(0, domain->domain_id, hdr,
 				       req, resp, add_data);
+		break;
+	case ZIP_COPROC:
+		zippf->receive_message(0, domain->domain_id, hdr,
+				req, resp, add_data);
 		break;
 	case NO_COPROC:
 		rm_receive_message(domain, hdr, resp, add_data);
@@ -578,6 +594,15 @@ static void do_destroy_domain(struct octtx_domain *domain)
 		}
 	}
 
+	if (domain->zip_domain_created) {
+		ret = zippf->destroy_domain(node, domain_id, domain->kobj);
+		if (ret) {
+			dev_err(octtx_device,
+				"Failed to remove zip of domain %d on node %d.\n",
+				domain->domain_id, node);
+		}
+	}
+
 	if (domain->sysfs_domain_in_use_created)
 		sysfs_remove_file(domain->kobj,
 				  &domain->sysfs_domain_in_use.attr);
@@ -650,8 +675,9 @@ static ssize_t octtx_netport_stats_show(struct kobject *kobj,
 int octeontx_create_domain(const char *name, int type, int sso_count,
 			   int fpa_count, int ssow_count, int pko_count,
 			   int pki_count, int tim_count, int bgx_count,
-			   int lbk_count, int dpi_count,
-			   int cpt_count, const long int *bgx_port,
+			   int lbk_count, int dpi_count, int zip_count,
+			   int cpt_count,
+			   const long int *bgx_port,
 			   const long int *lbk_port)
 {
 	void *ssow_ram_mbox_addr = NULL;
@@ -939,6 +965,18 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		domain->dpi_domain_created = true;
 	}
 
+	domain->zip_vf_count = zip_count;
+	if (domain->zip_vf_count) {
+		ret = zippf->create_domain(node, domain_id,
+			domain->zip_vf_count, &octtx_master_com, domain,
+			domain->kobj);
+		if (ret) {
+			dev_err(octtx_device, "Failed to create ZIP domain\n");
+			goto error;
+		}
+		domain->zip_domain_created = true;
+	}
+
 	domain->sysfs_domain_id.show = octtx_domain_id_show;
 	domain->sysfs_domain_id.attr.name = "domain_id";
 	domain->sysfs_domain_id.attr.mode = 0444;
@@ -1070,6 +1108,15 @@ static int octeontx_reset_domain(void *master_data)
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to reset DPI of domain %d on node %d.\n",
+				domain->domain_id, node);
+		}
+	}
+
+	if (domain->zip_domain_created) {
+		ret = zippf->reset_domain(node, domain->domain_id);
+		if (ret) {
+			dev_err(octtx_device,
+				"Failed to reset ZIP of domain %d on node %d.\n",
 				domain->domain_id, node);
 		}
 	}
@@ -1275,6 +1322,7 @@ static long octtx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 void cleanup_el3_irqs(struct task_struct *task)
 {
 	int i;
+
 	for (i = 0; i < MAX_GPIO; i++) {
 		if (gpio_installed[i] &&
 		    gpio_installed_tasks[i] &&
@@ -1361,6 +1409,12 @@ static int __init octeontx_init_module(void)
 	if (!dpipf) {
 		ret = -ENODEV;
 		goto dpipf_err;
+	}
+
+	zippf = try_then_request_module(symbol_get(zippf_com), "zippf");
+	if (!zippf) {
+		ret = -ENODEV;
+		goto zippf_err;
 	}
 
 	timpf = try_then_request_module(symbol_get(timpf_com), "timpf");
@@ -1470,6 +1524,9 @@ cptpf_err:
 	symbol_put(timpf_com);
 
 timpf_err:
+	symbol_put(zippf_com);
+
+zippf_err:
 	symbol_put(dpipf_com);
 
 dpipf_err:
@@ -1515,6 +1572,7 @@ static void __exit octeontx_cleanup_module(void)
 	symbol_put(fpapf_com);
 	symbol_put(pkopf_com);
 	symbol_put(timpf_com);
+	symbol_put(zippf_com);
 	symbol_put(cptpf_com);
 	symbol_put(dpipf_com);
 	symbol_put(lbk_com);
