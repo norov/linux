@@ -4291,9 +4291,8 @@ int pci_reset_function(struct pci_dev *dev)
 {
 	int rc;
 
-	rc = pci_probe_reset_function(dev);
-	if (rc)
-		return rc;
+	if (!dev->reset_fn)
+		return -ENOTTY;
 
 	pci_dev_lock(dev);
 	pci_dev_save_and_disable(dev);
@@ -4328,9 +4327,8 @@ int pci_reset_function_locked(struct pci_dev *dev)
 {
 	int rc;
 
-	rc = pci_probe_reset_function(dev);
-	if (rc)
-		return rc;
+	if (!dev->reset_fn)
+		return -ENOTTY;
 
 	pci_dev_save_and_disable(dev);
 
@@ -4352,9 +4350,8 @@ int pci_try_reset_function(struct pci_dev *dev)
 {
 	int rc;
 
-	rc = pci_probe_reset_function(dev);
-	if (rc)
-		return rc;
+	if (!dev->reset_fn)
+		return -ENOTTY;
 
 	if (!pci_dev_trylock(dev))
 		return -EAGAIN;
