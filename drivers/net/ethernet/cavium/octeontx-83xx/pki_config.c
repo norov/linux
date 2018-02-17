@@ -753,7 +753,7 @@ int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 #define PCAM_TERM_E_DMACL  0xbULL
 
 int pki_port_set_pcam_dmach(struct pkipf_vf *vf, u16 vf_id,
-			    struct mbox_pki_port_pcam_entry *cfg)
+			    mbox_pki_pcam_entry_t *cfg)
 {
 	struct pki_port *port;
 
@@ -860,7 +860,7 @@ int pki_port_set_pcam_dmach(struct pkipf_vf *vf, u16 vf_id,
 }
 
 int pki_port_set_pcam_dmacl(struct pkipf_vf *vf, u16 vf_id,
-			    struct mbox_pki_port_pcam_entry *cfg)
+			    mbox_pki_pcam_entry_t *cfg)
 {
 	struct pki_port *port;
 	union pki_clx_pcamx_termx_u   pcam_term;
