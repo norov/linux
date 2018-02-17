@@ -495,8 +495,7 @@ static int dpi_irq_init(struct dpipf *dpi)
 		if (ret)
 			goto free_irq;
 	}
-#define ENABLE_DPI_INTERRUPTS 0
-#if ENABLE_DPI_INTERRUPTS
+
 	/*Enable All Interrupts */
 	dpi_reg_write(dpi, DPI_INT_ENA_W1S, DPI_INT_REG_NFOVR |
 		      DPI_INT_REG_NDERR);
@@ -505,7 +504,7 @@ static int dpi_irq_init(struct dpipf *dpi)
 
 	for (i = 0; i < 8; i++)
 		dpi_reg_write(dpi, DPI_REQQX_INT_ENA_W1S(i), DPI_REQQ_INT);
-#endif
+
 	return 0;
 free_irq:
 	for (; i >= 0; i--)
