@@ -358,13 +358,13 @@ typedef struct mbox_bgx_port_status {
 } mbox_bgx_port_status_t;
 
 /* BGX port info: */
-struct mbox_bgx_port_link_info {
+typedef struct mbox_bgx_port_info {
 	u8 rsvd1;
 	u8 rsvd2;
 	u8 link_up;
 	u8 duplex;
 	u32 speed;
-};
+} mbox_bgx_port_link_info_t;
 
 /* BGX port statistics: */
 typedef struct mbox_bgx_port_stats {
@@ -528,7 +528,7 @@ struct mbox_sso_get_dump {
 #define MBOX_SDP_REG_WRITE        10
 
 /* SDP port configuration parameters: */
-struct mbox_sdp_port_conf {
+typedef struct mbox_sdp_port_conf {
 	/* 1 = port activated, 0 = port is idle.*/
 	u8 enable;
 	/* 1 = backpressure enabled, 0 = disabled.*/
@@ -546,18 +546,18 @@ struct mbox_sdp_port_conf {
 	u8 lmac;
 	/* PF value of PKIND (PKI port: BGX[]_CMR[]_RX_ID_MAP[pknd]).*/
 	u8 pkind;
-};
+} mbox_sdp_port_conf_t;
 
 /* SDP port status: */
-struct mbox_sdp_port_status {
+typedef struct mbox_sdp_port_status {
 	/* 1 = link is up, 0 = link is down. */
 	u8 link_up;
 	/* 1 = LMAC is backpressured, 0 = no backpressure. */
 	u8 bp;
-};
+} mbox_sdp_port_status_t;
 
 /* SDP port statistics: */
-struct mbox_sdp_port_stats {
+typedef struct mbox_sdp_port_stats {
 	u64 rx_packets;
 	u64 tx_packets;
 	u64 rx_bytes;
@@ -599,12 +599,12 @@ struct mbox_sdp_port_stats {
 	u64 tx_512_to_1023_packets;
 	u64 tx_1024_to_1522_packets;
 	u64 tx_1523_to_max_packets;
-};
+} mbox_sdp_port_stats_t;
 
-struct mbox_sdp_reg {
+typedef struct mbox_sdp_reg {
 	u64 addr;
 	u64 val;
-};
+} mbox_sdp_reg_t;
 
 /*----------------------------------------------------------------------------*/
 /* TIM messages:                                                              */
@@ -898,10 +898,10 @@ typedef struct mbox_pki_port_modify_qos_entry {
 	} mmask;
 	struct mbox_pki_qos_entry qos_entry;
 } mbox_pki_mod_qos_t;
-struct mbox_pki_port_pcam_entry {
+typedef struct mbox_pki_port_pcam_entry {
 	u8 port_type;
 	u64 mac_addr;
 	u64 q_no;
-};
+} mbox_pki_pcam_entry_t;
 
 #endif

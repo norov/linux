@@ -413,7 +413,7 @@ static int bgx_receive_message(u32 id, u16 domain_id, struct mbox_hdr *hdr,
 	case MBOX_BGX_PORT_GET_LINK_INFO:
 		/* TODO: update the ret variable */
 		bgx_port_link_info(port, mdata);
-		resp->data = sizeof(struct mbox_bgx_port_link_info);
+		resp->data = sizeof(mbox_bgx_port_link_info_t);
 		break;
 	case MBOX_BGX_PORT_SET_PROMISC:
 		ret = bgx_port_promisc_set(port, *(u8 *)mdata);
