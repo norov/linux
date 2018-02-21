@@ -32,7 +32,7 @@ struct cavium_ptp {
 	struct ptp_clock *ptp_clock;
 };
 
-#ifdef CONFIG_CAVIUM_PTP
+#if IS_ENABLED(CONFIG_CAVIUM_PTP)
 
 struct cavium_ptp *cavium_ptp_get(void);
 void cavium_ptp_put(struct cavium_ptp *ptp);
