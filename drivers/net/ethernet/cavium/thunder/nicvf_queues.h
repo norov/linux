@@ -90,8 +90,22 @@
 #define MAX_RCV_BUF_COUNT	(1ULL << (RBDR_SIZE6 + 13))
 #define RBDR_THRESH		(RCV_BUF_COUNT / 2)
 #define DMA_BUFFER_LEN		1536 /* In multiples of 128bytes */
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+
+/* Extra 128 bytes in skb headroom to accommodate protocol headers like ppp */
+#define CAVIUM_IPFWD_OFFLOAD_HEADROOM        128
+
+#define RCV_FRAG_LEN    (SKB_DATA_ALIGN(DMA_BUFFER_LEN + NET_SKB_PAD) + \
+			SKB_DATA_ALIGN(sizeof(struct skb_shared_info)) + \
+					CAVIUM_IPFWD_OFFLOAD_HEADROOM)
+
+#else
+
 #define RCV_FRAG_LEN	 (SKB_DATA_ALIGN(DMA_BUFFER_LEN + NET_SKB_PAD) + \
 			 SKB_DATA_ALIGN(sizeof(struct skb_shared_info)))
+
+#endif
 
 #define RCV_BUF_HEADROOM	128 /* To store dma address for XDP redirect */
 #define XDP_HEADROOM		(XDP_PACKET_HEADROOM + RCV_BUF_HEADROOM)
