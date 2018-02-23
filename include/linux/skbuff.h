@@ -582,6 +582,186 @@ typedef unsigned int sk_buff_data_t;
 typedef unsigned char *sk_buff_data_t;
 #endif
 
+#if defined(CONFIG_CAVIUM_IPFWD_OFFLOAD)
+
+struct iphdr_new {
+#if defined(__LITTLE_ENDIAN_BITFIELD)
+	__u8    ihl:4,
+			version:4;
+#elif defined(__BIG_ENDIAN_BITFIELD)
+	__u8    version:4,
+			ihl:4;
+#else
+#error  "Please fix <asm/byteorder.h>"
+#endif
+	__u8    tos;
+	__be16  tot_len;
+	__be16  id;
+	__be16  frag_off;
+	__u8    ttl;
+	__u8    protocol;
+	__sum16 check;
+	__be32  saddr;
+	__be32  daddr;
+	/*The options start here. */
+};
+
+struct ipv6hdr_new {
+#if defined(__LITTLE_ENDIAN_BITFIELD)
+	__u8                    priority:4,
+							version:4;
+#elif defined(__BIG_ENDIAN_BITFIELD)
+	__u8                    version:4,
+							priority:4;
+#else
+#error "Please fix <asm/byteorder.h>"
+#endif
+	__u8                    flow_lbl[3];
+
+	__be16                  payload_len;
+	__u8                    nexthdr;
+	__u8                    hop_limit;
+
+	uint64_t                saddrhi;
+	uint64_t                saddrlo;
+	uint64_t                daddrhi;
+	uint64_t                daddrlo;
+};
+
+struct cvm_udphdr {
+	__be16  source;
+	__be16  dest;
+	__be16  len;
+	__sum16 check;
+};
+
+struct cvm_pppoe_hdr {
+#if defined(__LITTLE_ENDIAN_BITFIELD)
+	__u8 ver : 4;
+	__u8 type : 4;
+#elif defined(__BIG_ENDIAN_BITFIELD)
+	__u8 type : 4;
+	__u8 ver : 4;
+#else
+#error  "Please fix <asm/byteorder.h>"
+#endif
+	__u8 code;
+	__be16 sid;
+	__be16 length;
+};
+
+struct cvm_vlan_hdr {
+	__be16 h_vlan_TCI;
+	__be16 h_vlan_encapsulated_proto;
+};
+
+struct cvm_vxlan_hdr {
+	__be32 vx_flags;
+	__be32 vx_vni;
+};
+
+struct gre_hdr_info {
+	__be16 flags;
+	__be16 protocol;
+	__be32 key;
+	__be32 headroom;
+};
+
+
+struct cvm_packet_info {
+	unsigned long           rx_pkt_flags;
+	unsigned long           tx_pkt_flags;
+	u32                     cookie;         /* magic number */
+	void                    *bucket;        /* bucket ptr */
+	void                    *frag_bucket;   /* Frag bucket ptr */
+	u32                     seq;            /* TCP sequence number */
+	u32                     ack_seq;        /* TCP ack seq number */
+	int                     qos_level;
+	struct cvm_vlan_hdr     vlan;
+	struct cvm_vxlan_hdr    vxlan;
+	struct cvm_pppoe_hdr    pppoe;
+	struct gre_hdr_info     gre;
+	union {
+		struct iphdr_new        outer_ip4;      /* IP header */
+		struct ipv6hdr_new      outer_ip6;
+	};
+	struct cvm_udphdr       outer_udp;
+	union {
+		struct {
+			u32                     old_reserved1;
+			struct iphdr_new        cvm_ip; /* IP header */
+			u64                     reserved2[2];
+		} cvm_ip4;
+		struct ipv6hdr_new  cvm_ip6;
+	} cvm_ip4_ip6_u;
+	u64     reserved2[2];   /* L4 ports and reserved */
+#define cvmip                            cvm_ip4_ip6_u.cvm_ip4.cvm_ip
+#define cvmip6                           cvm_ip4_ip6_u.cvm_ip6
+};
+#endif
+
+
+
+/**
+ * struct skb_mstamp - multi resolution time stamps
+ * @stamp_us: timestamp in us resolution
+ * @stamp_jiffies: timestamp in jiffies
+ */
+struct skb_mstamp {
+	union {
+		u64		v64;
+		struct {
+			u32	stamp_us;
+			u32	stamp_jiffies;
+		};
+	};
+};
+
+/**
+ * skb_mstamp_get - get current timestamp
+ * @cl: place to store timestamps
+ */
+static inline void skb_mstamp_get(struct skb_mstamp *cl)
+{
+	u64 val = local_clock();
+
+	do_div(val, NSEC_PER_USEC);
+	cl->stamp_us = (u32)val;
+	cl->stamp_jiffies = (u32)jiffies;
+}
+
+/**
+ * skb_mstamp_delta - compute the difference in usec between two skb_mstamp
+ * @t1: pointer to newest sample
+ * @t0: pointer to oldest sample
+ */
+static inline u32 skb_mstamp_us_delta(const struct skb_mstamp *t1,
+				      const struct skb_mstamp *t0)
+{
+	s32 delta_us = t1->stamp_us - t0->stamp_us;
+	u32 delta_jiffies = t1->stamp_jiffies - t0->stamp_jiffies;
+
+	/* If delta_us is negative, this might be because interval is too big,
+	 * or local_clock() drift is too big : fallback using jiffies.
+	 */
+	if (delta_us <= 0 ||
+	    delta_jiffies >= (INT_MAX / (USEC_PER_SEC / HZ)))
+
+		delta_us = jiffies_to_usecs(delta_jiffies);
+
+	return delta_us;
+}
+
+static inline bool skb_mstamp_after(const struct skb_mstamp *t1,
+				    const struct skb_mstamp *t0)
+{
+	s32 diff = t1->stamp_jiffies - t0->stamp_jiffies;
+
+	if (!diff)
+		diff = t1->stamp_us - t0->stamp_us;
+	return diff > 0;
+}
+
 /** 
  *	struct sk_buff - socket buffer
  *	@next: Next buffer in list
@@ -822,6 +1002,11 @@ struct sk_buff {
 	__u16			transport_header;
 	__u16			network_header;
 	__u16			mac_header;
+
+#if defined(CONFIG_CAVIUM_IPFWD_OFFLOAD)
+	struct cvm_packet_info	cvm_info;
+#endif
+
 
 	/* private: */
 	__u32			headers_end[0];
