@@ -1911,6 +1911,11 @@ struct net_device {
 	struct lock_class_key	*qdisc_running_key;
 	bool			proto_down;
 	struct bpf_prog __rcu	*xdp_prog;
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+	u8 is_cvm_dev;
+#endif
+
 };
 #define to_net_dev(d) container_of(d, struct net_device, dev)
 
@@ -4475,5 +4480,17 @@ do {								\
  */
 #define PTYPE_HASH_SIZE	(16)
 #define PTYPE_HASH_MASK	(PTYPE_HASH_SIZE - 1)
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+
+int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
+		       struct rps_dev_flow **rflowp);
+int enqueue_to_backlog(struct sk_buff *skb, int cpu,
+			      unsigned int *qtail);
+
+/* Cavium fast-path rx/tx hooks */
+extern u32 (*cvm_ipfwd_rx_hook)(struct sk_buff *);
+extern int (*cvm_ipfwd_tx_hook)(struct sk_buff *);
+#endif
 
 #endif	/* _LINUX_NETDEVICE_H */

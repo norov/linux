@@ -451,4 +451,10 @@ config FUJITSU_ES
 
 source "drivers/net/hyperv/Kconfig"
 
+config CAVIUM_IPFWD_OFFLOAD
+	bool "Enable Cavium Octeon ip-offload module"
+	default "n"
+	help
+	  This enables Cavium Octeon ip-offload module.
+
 endif # NETDEVICES

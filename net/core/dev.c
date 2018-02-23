@@ -353,6 +353,15 @@ static inline void netdev_set_addr_lockdep_class(struct net_device *dev)
 }
 #endif
 
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+/* Cavium fast-path rx/tx hooks */
+u32 (*cvm_ipfwd_rx_hook)(struct sk_buff *);
+EXPORT_SYMBOL(cvm_ipfwd_rx_hook);
+
+int (*cvm_ipfwd_tx_hook)(struct sk_buff *);
+EXPORT_SYMBOL(cvm_ipfwd_tx_hook);
+#endif
+
 /*******************************************************************************
 
 		Protocol management and registration routines
@@ -3323,6 +3332,13 @@ static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
 
 	skb_reset_mac_header(skb);
 
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+	if (cvm_ipfwd_tx_hook) {
+		if (cvm_ipfwd_tx_hook(skb) == (-ENOMEM))
+			goto out_kfree_skb;
+	}
+#endif
+
 	if (unlikely(skb_shinfo(skb)->tx_flags & SKBTX_SCHED_TSTAMP))
 		__skb_tstamp_tx(skb, NULL, skb->sk, SCM_TSTAMP_SCHED);
 
@@ -3411,6 +3427,10 @@ recursion_alert:
 
 	rc = -ENETDOWN;
 	rcu_read_unlock_bh();
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+out_kfree_skb:
+#endif
 
 	atomic_long_inc(&dev->tx_dropped);
 	kfree_skb_list(skb);
@@ -3513,8 +3533,13 @@ out:
  * CPU from the RPS map of the receiving queue for a given skb.
  * rcu_read_lock must be held on entry.
  */
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
+		struct rps_dev_flow **rflowp)
+#else
 static int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
 		       struct rps_dev_flow **rflowp)
+#endif
 {
 	const struct rps_sock_flow_table *sock_flow_table;
 	struct netdev_rx_queue *rxqueue = dev->_rx;
@@ -3724,8 +3749,12 @@ static bool skb_flow_limit(struct sk_buff *skb, unsigned int qlen)
  * enqueue_to_backlog is called to queue an skb to a per CPU backlog
  * queue (may be a remote CPU queue).
  */
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+int enqueue_to_backlog(struct sk_buff *skb, int cpu, unsigned int *qtail)
+#else
 static int enqueue_to_backlog(struct sk_buff *skb, int cpu,
 			      unsigned int *qtail)
+#endif
 {
 	struct softnet_data *sd;
 	unsigned long flags;
@@ -4197,6 +4226,13 @@ static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 	bool deliver_exact = false;
 	int ret = NET_RX_DROP;
 	__be16 type;
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+	if (cvm_ipfwd_rx_hook) {
+		if (!cvm_ipfwd_rx_hook(skb))
+			return NET_RX_SUCCESS;
+	}
+#endif
 
 	net_timestamp_check(!netdev_tstamp_prequeue, skb);
 
@@ -8529,3 +8565,4 @@ out:
 }
 
 subsys_initcall(net_dev_init);
+

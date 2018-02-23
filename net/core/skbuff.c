@@ -882,6 +882,9 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	CHECK_SKB_FIELD(tc_verd);
 #endif
 #endif
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+	CHECK_SKB_FIELD(cvm_info);
+#endif
 
 }
 
