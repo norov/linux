@@ -214,10 +214,19 @@ ret:
 		*rbuf = pgcache->dma_addr;
 	} else {
 		/* HW will ensure data coherency, CPU sync not required */
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+		*rbuf = (u64)dma_map_page_attrs(&nic->pdev->dev, nic->rb_page,
+			nic->rb_page_offset + CAVIUM_IPFWD_OFFLOAD_HEADROOM,
+						buf_len,
+						DMA_FROM_DEVICE,
+						DMA_ATTR_SKIP_CPU_SYNC);
+#else
 		*rbuf = (u64)dma_map_page_attrs(&nic->pdev->dev, nic->rb_page,
 						nic->rb_page_offset, buf_len,
 						DMA_FROM_DEVICE,
 						DMA_ATTR_SKIP_CPU_SYNC);
+#endif
 		if (dma_mapping_error(&nic->pdev->dev, (dma_addr_t)*rbuf)) {
 			if (!nic->rb_page_offset)
 				__free_pages(nic->rb_page, 0);
@@ -242,12 +251,24 @@ static struct sk_buff *nicvf_rb_ptr_to_skb(struct nicvf *nic,
 
 	data = phys_to_virt(rb_ptr);
 
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+	/* This extra headroom has been allocated in nicvf_alloc_rcv_buffer
+	 * and memory pointer has been moved up already.
+	 * Move the pointer down so extra headroom can be usd.
+	 */
+	data -= CAVIUM_IPFWD_OFFLOAD_HEADROOM;
+#endif
+
 	/* Now build an skb to give to stack */
 	skb = build_skb(data, RCV_FRAG_LEN);
 	if (!skb) {
 		put_page(virt_to_page(data));
 		return NULL;
 	}
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+	skb_reserve(skb, CAVIUM_IPFWD_OFFLOAD_HEADROOM);
+#endif
 
 	prefetch(skb->data);
 	return skb;
@@ -752,6 +773,14 @@ static void nicvf_rcv_queue_config(struct nicvf *nic, struct queue_set *qs,
 	struct rcv_queue *rq;
 	struct rq_cfg rq_cfg;
 
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+#ifdef CONFIG_RPS
+	struct netdev_rx_queue *rxqueue;
+	struct rps_map *map, *oldmap;
+	struct cpumask rps_mask;
+	int i, cpu;
+#endif
+#endif
 	rq = &qs->rq[qidx];
 	rq->enable = enable;
 
@@ -802,7 +831,7 @@ static void nicvf_rcv_queue_config(struct nicvf *nic, struct queue_set *qs,
 		 * Also allow IPv6 pkts with zero UDP checksum.
 		 */
 		nicvf_queue_reg_write(nic, NIC_QSET_RQ_GEN_CFG, 0,
-				      (BIT(24) | BIT(23) | BIT(21) | BIT(20)));
+				(BIT(24) | BIT(23) | BIT(21) | BIT(20)));
 		nicvf_config_vlan_stripping(nic, nic->netdev->features);
 	}
 
@@ -811,6 +840,35 @@ static void nicvf_rcv_queue_config(struct nicvf *nic, struct queue_set *qs,
 	rq_cfg.ena = 1;
 	rq_cfg.tcp_ena = 0;
 	nicvf_queue_reg_write(nic, NIC_QSET_RQ_0_7_CFG, qidx, *(u64 *)&rq_cfg);
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+#ifdef CONFIG_RPS
+	/* Set RPS CPU map */
+	cpumask_copy(&rps_mask, cpu_online_mask);
+	cpumask_clear_cpu(cpumask_first(nic->affinity_mask[0]), &rps_mask);
+
+	rxqueue = nic->netdev->_rx + qidx;
+	oldmap = rcu_dereference(rxqueue->rps_map);
+	map = kzalloc(max_t(unsigned int,
+			    RPS_MAP_SIZE(cpumask_weight(&rps_mask)),
+			    L1_CACHE_BYTES), GFP_KERNEL);
+	if (!map)
+		return;
+
+	i = 0;
+	for_each_cpu_and(cpu, &rps_mask, cpu_online_mask)
+		map->cpus[i++] = cpu;
+	map->len = i;
+
+	static_key_slow_inc(&rps_needed);
+	rcu_assign_pointer(rxqueue->rps_map, map);
+
+	if (oldmap) {
+		kfree_rcu(oldmap, rcu);
+		static_key_slow_dec(&rps_needed);
+	}
+#endif
+#endif
 }
 
 /* Configures completion queue */
