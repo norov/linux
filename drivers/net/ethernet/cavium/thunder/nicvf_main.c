@@ -873,6 +873,25 @@ static void nicvf_rcv_pkt_handler(struct net_device *netdev,
 		__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q),
 				       ntohs((__force __be16)cqe_rx->vlan_tci));
 
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+	/* apply rps for packets that do not have l4 hash */
+#ifdef CONFIG_RPS
+	if (!skb->l4_hash && static_key_false(&rps_needed)) {
+		struct rps_dev_flow voidflow, *rflow = &voidflow;
+		int cpu = get_rps_cpu(skb->dev, skb, &rflow);
+
+		if (cpu >= 0) {
+			enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
+			return;
+		}
+	}
+#endif
+	if (cvm_ipfwd_rx_hook) {
+		if (!cvm_ipfwd_rx_hook(skb))
+			return;
+	}
+#endif
+
 	if (napi && (netdev->features & NETIF_F_GRO))
 		napi_gro_receive(napi, skb);
 	else
@@ -2260,6 +2279,9 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		if (!err && i < NIC_MAX_PKIND)
 			netdev_ethx[i] = netdev;
 	}
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+	netdev->is_cvm_dev = 1;
+#endif
 	return 0;
 
 err_unregister_interrupts:
