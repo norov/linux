@@ -153,7 +153,7 @@ ENDPROC(cpu_do_switch_mm)
 
 	.pushsection ".idmap.text", "awx"
 
-.macro	__idmap_cpu_set_reserved_ttbr1, tmp1, tmp2
+.macro	__idmap_cpu_set_reserved_ttbr1, tmp1
 	adrp	\tmp1, empty_zero_page
 	msr	ttbr1_el1, \tmp1
 	isb
@@ -172,7 +172,7 @@ ENTRY(idmap_cpu_replace_ttbr1)
 	mrs	x2, daif
 	msr	daifset, #0xf
 
-	__idmap_cpu_set_reserved_ttbr1 x1, x3
+	__idmap_cpu_set_reserved_ttbr1 x1
 
 	msr	ttbr1_el1, x0
 	isb
@@ -330,7 +330,7 @@ skip_pte:
 	/* Secondary CPUs end up here */
 __idmap_kpti_secondary:
 	/* Uninstall swapper before surgery begins */
-	__idmap_cpu_set_reserved_ttbr1 x18, x17
+	__idmap_cpu_set_reserved_ttbr1 x18
 
 	/* Increment the flag to let the boot CPU we're ready */
 1:	ldxr	w18, [flag_ptr]
