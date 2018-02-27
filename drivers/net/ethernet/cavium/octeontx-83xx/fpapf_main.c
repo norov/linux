@@ -250,7 +250,7 @@ static ssize_t pool_maxcnt_show(struct device *dev,
 {
 	struct fpapf *curr, *fpa = NULL;
 	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	int i, n, vfid = pdev->devfn;
+	int i, n, vfid = pdev->devfn - 1;
 	u64 cnt;
 	char info[512];
 
@@ -282,7 +282,7 @@ static ssize_t pool_curcnt_show(struct device *dev,
 {
 	struct fpapf *curr, *fpa = NULL;
 	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	int i, n, vfid = pdev->devfn;
+	int i, n, vfid = pdev->devfn - 1;
 	u64 cnt;
 	char info[512];
 
@@ -314,7 +314,7 @@ static ssize_t pool_redcnt_show(struct device *dev,
 {
 	struct fpapf *curr, *fpa = NULL;
 	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	int i, n, vfid = pdev->devfn;
+	int i, n, vfid = pdev->devfn - 1;
 	u64 reg, ena, lvl, pass, drop, aura;
 	char *info;
 
