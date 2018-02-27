@@ -2965,6 +2965,12 @@ W:     http://www.cavium.com
 S:     Supported
 F:     drivers/net/ethernet/cavium/liquidio/
 
+CAVIUM NAND DRIVER
+M:	Peter Swain <pswain@cavium.com>
+W:	http://www.cavium.com
+S:	Supported
+F:	drivers/mtd/nand/cavium_nand.c
+
 CAVIUM TDM DRIVER
 M:	Peter Swain <pswain@cavium.com>
 W:	http://www.cavium.com
