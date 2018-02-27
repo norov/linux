@@ -3232,6 +3232,12 @@ S:	Maintained
 F:	arch/arm64/boot/dts/cavium/thunder2-99xx*
 F:	Documentation/devicetree/bindings/arm/cavium-thunder2.txt
 
+CAVIUM NAND DRIVER
+M:	Peter Swain <pswain@cavium.com>
+W:	http://www.cavium.com
+S:	Supported
+F:	drivers/mtd/nand/cavium_nand.c
+
 CAVIUM TDM DRIVER
 M:	Peter Swain <peter.swain@marvell.com>
 W:	http://www.cavium.com
