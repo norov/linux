@@ -523,6 +523,10 @@ void init_styles(struct pki_t *pki);
 int pki_port_open(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
 int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 			mbox_pki_qos_cfg_t *qcfg);
+int pki_port_alloc_qpg(struct pkipf_vf *vf, u16 vf_id,
+		       struct mbox_pki_port_qpg_attr *qpg_attr);
+int pki_port_free_qpg(struct pkipf_vf *vf, u16 vf_id,
+		      struct mbox_pki_port_qpg_attr *qpg_attr);
 int pki_port_start(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
 int pki_port_stop(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
 int pki_port_close(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
