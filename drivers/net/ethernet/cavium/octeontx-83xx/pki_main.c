@@ -576,6 +576,10 @@ static int pki_receive_message(u32 id, u16 domain_id,
 		hdr->res_code = pki_port_free_qpg(vf, hdr->vfid,
 						  mdata);
 		break;
+	case MBOX_PKI_SET_PORT_CONFIG:
+		hdr->res_code = pki_set_port_config(vf, hdr->vfid,
+						    mdata);
+		break;
 	case MBOX_PKI_PORT_START:
 		hdr->res_code = pki_port_start(vf, hdr->vfid, mdata);
 		break;

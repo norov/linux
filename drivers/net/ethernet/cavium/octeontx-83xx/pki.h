@@ -178,9 +178,32 @@
 #define PKI_CONST2_STATS_MASK		0xffff
 #define PKI_CONST2_STATS_SHIFT		48
 
+#define PKI_PKIND_SKIP_FCS_MASK		0xffULL
+#define PKI_PKIND_SKIP_FCS_SHIFT	8
+#define PKI_PKIND_SKIP_INST_MASK	0xffULL
+#define PKI_PKIND_SKIP_INST_SHIFT	0
+
+#define PKI_PKIND_STYLE_PM_MASK		0x7fULL
+#define PKI_PKIND_STYLE_PM_SHIFT	8
 #define PKI_PKIND_STYLE_MASK		0xffULL
 #define PKI_PKIND_STYLE_SHIFT		0
+
+#define PKI_PKIND_CFG_FCS_MASK		0x1
 #define PKI_PKIND_CFG_FCS_SHIFT		7
+#define PKI_PKIND_CFG_MPLS_MASK		0x1
+#define PKI_PKIND_CFG_MPLS_SHIFT	6
+#define PKI_PKIND_CFG_INST_MASK		0x1
+#define PKI_PKIND_CFG_INST_SHIFT	5
+#define PKI_PKIND_CFG_FULC_MASK		0x1
+#define PKI_PKIND_CFG_FULC_SHIFT	3
+#define PKI_PKIND_CFG_DSA_MASK		0x1
+#define PKI_PKIND_CFG_DSA_SHIFT		2
+#define PKI_PKIND_CFG_HG2_MASK		0x1
+#define PKI_PKIND_CFG_HG2_SHIFT		1
+#define PKI_PKIND_CFG_HG_MASK		0x1
+#define PKI_PKIND_CFG_HG_SHIFT		0
+#define PKI_PKIND_CFG_FULC_DSA_HG_MASK	0xf
+#define PKI_PKIND_CFG_FULC_DSA_HG_SHIFT	0
 
 #define PKI_STYLE_ALG_TT_MASK			0x3
 #define PKI_STLYE_ALG_TT_SHIFT			30
@@ -527,6 +550,8 @@ int pki_port_alloc_qpg(struct pkipf_vf *vf, u16 vf_id,
 		       struct mbox_pki_port_qpg_attr *qpg_attr);
 int pki_port_free_qpg(struct pkipf_vf *vf, u16 vf_id,
 		      struct mbox_pki_port_qpg_attr *qpg_attr);
+int pki_set_port_config(struct pkipf_vf *vf, u16 vf_id,
+			mbox_pki_prt_cfg_t *port_cfg);
 int pki_port_start(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
 int pki_port_stop(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
 int pki_port_close(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
