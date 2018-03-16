@@ -568,6 +568,14 @@ static int pki_receive_message(u32 id, u16 domain_id,
 		hdr->res_code = pki_port_create_qos(vf, hdr->vfid,
 						    mdata);
 		break;
+	case MBOX_PKI_PORT_ALLOC_QPG:
+		hdr->res_code = pki_port_alloc_qpg(vf, hdr->vfid,
+						   mdata);
+		break;
+	case MBOX_PKI_PORT_FREE_QPG:
+		hdr->res_code = pki_port_free_qpg(vf, hdr->vfid,
+						  mdata);
+		break;
 	case MBOX_PKI_PORT_START:
 		hdr->res_code = pki_port_start(vf, hdr->vfid, mdata);
 		break;
