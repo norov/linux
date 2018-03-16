@@ -744,10 +744,11 @@ free_irq:
 	return ret;
 }
 
-static void pki_init(struct pki_t *pki)
+static int pki_init(struct pki_t *pki)
 {
 	u64 reg;
 	u32 delay;
+	int res = 0;
 
 	/* wait till SFT rest is feasable*/
 	while (true) {
@@ -783,6 +784,13 @@ static void pki_init(struct pki_t *pki)
 	pki->max_stats = (reg >> PKI_CONST2_STATS_SHIFT) &
 			PKI_CONST2_STATS_MASK;
 
+	pki->qpg_domain = vmalloc(sizeof(*pki->qpg_domain) * pki->max_qpgs);
+	if (!pki->qpg_domain) {
+		res = -ENOMEM;
+		goto err;
+	}
+	memset(pki->qpg_domain, 0, sizeof(*pki->qpg_domain) * pki->max_qpgs);
+
 	load_ucode(pki);
 	delay = max(0xa0, (800 / pki->max_cls));
 	reg = PKI_ICG_CFG_MAXIPE_USE(0x14) | PKI_ICG_CFG_CLUSTERS(0x3) |
@@ -796,6 +804,8 @@ static void pki_init(struct pki_t *pki)
 	reg = pki_reg_read(pki, PKI_BUF_CTL);
 	reg |= 0x1;
 	pki_reg_write(pki, PKI_BUF_CTL, reg);
+err:
+	return res;
 }
 
 static int pki_sriov_configure(struct pci_dev *pdev, int numvfs)
@@ -867,7 +877,12 @@ static int pki_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	pki->id = atomic_add_return(1, &pki_count);
 	pki->id -= 1;
 
-	pki_init(pki);
+	err = pki_init(pki);
+	if (err) {
+		dev_err(dev, "failed init pki\n");
+		err = -ENOMEM;
+		return err;
+	}
 
 	err = pki_irq_init(pki);
 	if (err) {
@@ -902,6 +917,7 @@ static void pki_remove(struct pci_dev *pdev)
 	mutex_unlock(&octeontx_pki_devices_lock);
 
 	pki_sriov_configure(pdev, 0);
+	vfree(pki->qpg_domain);
 	pki_irq_free(pki);
 }
 
