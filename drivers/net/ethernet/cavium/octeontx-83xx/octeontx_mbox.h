@@ -690,6 +690,7 @@ struct __attribute__((__packed__)) mbox_tim_ring_conf {
 #define MBOX_PKI_GET_PORT_QOS_CONFIG		20
 #define MBOX_PKI_PORT_ALLOC_QPG			21
 #define MBOX_PKI_PORT_FREE_QPG			22
+#define MBOX_PKI_SET_PORT_CONFIG		23
 
 /* pki pkind parse mode */
 enum  {
@@ -719,6 +720,7 @@ typedef struct mbox_pki_port_cfg {
 		/* modify mask 1=modify 0=dont modify*/
 		u8 fcs_pres:1;
 		u8 fcs_skip:1;
+		u8 inst_skip:1;
 		u8 parse_mode:1;
 		u8 mpls_parse:1;
 		u8 inst_hdr_parse:1;
@@ -729,6 +731,7 @@ typedef struct mbox_pki_port_cfg {
 	} mmask;
 	u8 fcs_pres;
 	u8 fcs_skip;
+	u8 inst_skip;
 	u8 parse_mode;
 	u8 mpls_parse;
 	u8 inst_hdr_parse;
