@@ -591,6 +591,8 @@ struct __attribute__((__packed__)) mbox_tim_ring_conf {
 #define MBOX_PKI_PORT_RESET_STATS		18
 #define MBOX_PKI_GET_PORT_CONFIG		19
 #define MBOX_PKI_GET_PORT_QOS_CONFIG		20
+#define MBOX_PKI_PORT_ALLOC_QPG			21
+#define MBOX_PKI_PORT_FREE_QPG			22
 
 /* pki pkind parse mode */
 enum  {
@@ -605,6 +607,13 @@ enum  {
 typedef struct mbox_pki_port_type {
 	u8 port_type;
 } mbox_pki_port_t;
+
+/* pki port qpg config */
+struct mbox_pki_port_qpg_attr {
+	u8 port_type; /* [in] port type, lbk or bgx */
+	u32 qpg_base; /* [out/in] QPG base that was allocated to the port */
+	u32 qpg_num;  /* [in] number of QPG entries to allocate/free */
+};
 
 /* pki port config */
 typedef struct mbox_pki_port_cfg {
