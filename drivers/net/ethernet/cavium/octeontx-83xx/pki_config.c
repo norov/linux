@@ -16,7 +16,8 @@
 #define LBK_PKIND_BASE	20
 #define SDP_PKIND_BASE	40
 #define PKI_DROP_STYLE	0
-#define QPG_NOT_INIT	((uint32_t)-88)
+
+#define QPG_INVALID	((u32)-1)
 
 enum PKI_PORT_STATE {
 	PKI_PORT_CLOSE	 = 0,
@@ -147,6 +148,64 @@ void init_styles(struct pki_t *pki)
 	}
 }
 
+static u32 qpg_range_lookup_by_domain(struct pki_t *pki, u32 qpg_base,
+				      u32 qpg_num, u16 domain_id)
+{
+	u32 curr_num = 0;
+
+	while (curr_num < qpg_num && (qpg_base + curr_num) < pki->max_qpgs) {
+		if (pki->qpg_domain[qpg_base + curr_num] == (u16)(~domain_id)) {
+			curr_num++;
+		} else {
+			qpg_base = qpg_base + curr_num + 1;
+			curr_num = 0;
+			continue;
+		}
+	}
+
+	if (curr_num == qpg_num)
+		return qpg_base;
+
+	return QPG_INVALID;
+}
+
+static void qpg_range_assign_to_domain(struct pki_t *pki, u32 qpg_base,
+				       u32 qpg_num, u16 domain_id)
+{
+	u32 qpg_id = qpg_base;
+
+	while (qpg_id < qpg_base + qpg_num) {
+		pki->qpg_domain[qpg_id] = ~domain_id;
+		qpg_id++;
+	}
+}
+
+static u32 qpg_range_alloc(struct pki_t *pki, u16 qpg_num, u16 domain_id)
+{
+	u16 null_domain = ~((u16)0u);
+	u32 qpg_base = qpg_range_lookup_by_domain(pki, 0, qpg_num, null_domain);
+
+	if (qpg_base == QPG_INVALID)
+		goto exit;
+	qpg_range_assign_to_domain(pki, qpg_base, qpg_num, domain_id);
+exit:
+	return qpg_base;
+}
+
+static int qpg_range_free(struct pki_t *pki, u32 qpg_base, u32 qpg_num,
+			  u16 domain_id)
+{
+	u16 null_domain = ~((u16)0u);
+	u32 qpg_id = qpg_range_lookup_by_domain(pki, qpg_base, qpg_num,
+						domain_id);
+
+	if (qpg_id != qpg_base)
+		return -1;
+	qpg_range_assign_to_domain(pki, qpg_base, qpg_num, null_domain);
+
+	return 0;
+}
+
 int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 		  mbox_pki_port_t *port_data)
 {
@@ -204,7 +263,7 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 			      cfg);
 
 	port->state = PKI_PORT_OPEN;
-	port->qpg_base = QPG_NOT_INIT;
+	port->qpg_base = QPG_INVALID;
 	cfg = pki_reg_read(pki, PKI_FRM_LEN_CHKX(0));
 	port->min_frame_len = cfg & 0xff;
 	port->max_frame_len = (cfg >> 15) & 0xff;
@@ -233,13 +292,13 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 		return MBOX_RET_INVALID;
 	}
 	if ((port->state != PKI_PORT_OPEN && port->state != PKI_PORT_STOP) ||
-	    port->qpg_base != QPG_NOT_INIT)
+	    port->qpg_base != QPG_INVALID)
 		return MBOX_RET_INVALID;
 	style = port->init_style;
 	/* TO_DO add support for alloc qpg, for now use pkind*64 */
-	qpg_base = port->pkind * 64;
-	if ((qpg_base + qcfg->num_entry) >= vf->max_qpgs)
-		return MBOX_RET_INTERNAL_ERR; /*TO_DO send errcode out of rsrc*/
+	qpg_base = qpg_range_alloc(pki, qcfg->num_entry, vf->domain.domain_id);
+	if (qpg_base == QPG_INVALID)
+		return MBOX_RET_INVALID;
 	port->qpg_base = qpg_base;
 	port->num_entry = qcfg->num_entry;
 	for (i = 0; i < pki->max_cls; i++) {
@@ -302,7 +361,7 @@ int pki_port_start(struct pkipf_vf *vf, u16 vf_id,
 	default:
 		return MBOX_RET_INVALID;
 	}
-	if (port->state != PKI_PORT_STOP || port->qpg_base == QPG_NOT_INIT)
+	if (port->state != PKI_PORT_STOP || port->qpg_base == QPG_INVALID)
 		return MBOX_RET_INVALID;
 	for (i = 0; i < pki->max_cls; i++) {
 		cfg = pki_reg_read(pki, PKI_CLX_STYLEX_CFG(i,
@@ -361,13 +420,16 @@ int pki_port_close(struct pkipf_vf *vf, u16 vf_id,
 	default:
 		return MBOX_RET_INVALID;
 	}
+	if (qpg_range_free(vf->pki, port->qpg_base, port->num_entry,
+			   vf->domain.domain_id) < 0)
+		return MBOX_RET_INVALID;
 	/*TO_DO free up all the resources*/
 	/* TO_DO should we write all the register with reset
 	 * values at this point?
 	 */
 	pki_port_reset_regs(vf->pki, port);
 	port->init_style = PKI_DROP_STYLE;
-	port->qpg_base = QPG_NOT_INIT;
+	port->qpg_base = QPG_INVALID;
 	port->num_entry = 0;
 	port->shared_mask = 0;
 	port->state = PKI_PORT_CLOSE;
