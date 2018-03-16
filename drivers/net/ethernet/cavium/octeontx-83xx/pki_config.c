@@ -423,6 +423,131 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 	return MBOX_RET_SUCCESS;
 }
 
+int pki_set_port_config(struct pkipf_vf *vf, u16 vf_id,
+			mbox_pki_prt_cfg_t *port_cfg)
+{
+	struct pki_port *port;
+	struct pki_t	*pki = vf->pki;
+	u64 cfg, skip, style;
+	bool cfg_change, skip_change, style_change;
+	int i = 0;
+	int ret = MBOX_RET_SUCCESS;
+
+	switch (port_cfg->port_type) {
+	case OCTTX_PORT_TYPE_NET:
+		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_INT:
+		port = &vf->lbk_port[vf_id];
+		break;
+	default:
+		return MBOX_RET_INVALID;
+	}
+	if (port->state != PKI_PORT_STOP && port->state != PKI_PORT_OPEN)
+		return MBOX_RET_INVALID;
+
+	cfg = pki_reg_read(pki, PKI_CLX_PKINDX_CFG(i, port->pkind));
+	skip = pki_reg_read(pki, PKI_CLX_PKINDX_SKIP(i, port->pkind));
+	style = pki_reg_read(pki, PKI_CLX_PKINDX_STYLE(i, port->pkind));
+
+	cfg_change = false;
+	skip_change = false;
+	style_change = false;
+
+	if (port_cfg->mmask.parse_mode) {
+		switch (port_cfg->parse_mode) {
+		case 0x0:
+		case 0x1:
+		case 0x3:
+		case 0x7f:
+			break;
+		default:
+			return MBOX_RET_INVALID;
+		}
+		set_field(&style, PKI_PKIND_STYLE_PM_MASK,
+			  PKI_PKIND_STYLE_PM_SHIFT, port_cfg->parse_mode);
+		style_change = true;
+	}
+
+	if (port_cfg->mmask.fcs_skip) {
+		if (port_cfg->fcs_skip & 0x1)
+			return MBOX_RET_INVALID;
+		set_field(&skip, PKI_PKIND_SKIP_FCS_MASK,
+			  PKI_PKIND_SKIP_FCS_SHIFT, port_cfg->fcs_skip);
+		skip_change = true;
+	}
+	if (port_cfg->mmask.inst_skip) {
+		if (port_cfg->inst_skip & 0x1)
+			return MBOX_RET_INVALID;
+		set_field(&skip, PKI_PKIND_SKIP_INST_MASK,
+			  PKI_PKIND_SKIP_INST_SHIFT, port_cfg->inst_skip);
+		skip_change = true;
+	}
+
+	if (port_cfg->mmask.fcs_pres) {
+		set_field(&cfg, PKI_PKIND_CFG_FCS_MASK,
+			  PKI_PKIND_CFG_FCS_SHIFT, port_cfg->fcs_pres);
+		cfg_change = true;
+	}
+	if (port_cfg->mmask.fulc_parse) {
+		set_field(&cfg, PKI_PKIND_CFG_FULC_MASK,
+			  PKI_PKIND_CFG_FULC_SHIFT, port_cfg->fulc_parse);
+		cfg_change = true;
+	}
+	if (port_cfg->mmask.inst_hdr_parse) {
+		set_field(&cfg, PKI_PKIND_CFG_INST_MASK,
+			  PKI_PKIND_CFG_INST_SHIFT, port_cfg->inst_hdr_parse);
+		cfg_change = true;
+	}
+	if (port_cfg->mmask.mpls_parse) {
+		set_field(&cfg, PKI_PKIND_CFG_MPLS_MASK,
+			  PKI_PKIND_CFG_MPLS_SHIFT, port_cfg->mpls_parse);
+		cfg_change = true;
+	}
+	if (port_cfg->mmask.hg2_parse) {
+		set_field(&cfg, PKI_PKIND_CFG_HG2_MASK, PKI_PKIND_CFG_HG2_SHIFT,
+			  port_cfg->hg2_parse);
+		cfg_change = true;
+	}
+	if (port_cfg->mmask.hg_parse) {
+		set_field(&cfg, PKI_PKIND_CFG_HG_MASK, PKI_PKIND_CFG_HG_SHIFT,
+			  port_cfg->hg_parse);
+		cfg_change = true;
+	}
+	if (port_cfg->mmask.dsa_parse) {
+		set_field(&cfg, PKI_PKIND_CFG_DSA_MASK, PKI_PKIND_CFG_DSA_SHIFT,
+			  port_cfg->dsa_parse);
+		cfg_change = true;
+	}
+
+	if (cfg_change) {
+		switch ((cfg >> PKI_PKIND_CFG_FULC_DSA_HG_SHIFT) &
+			PKI_PKIND_CFG_FULC_DSA_HG_MASK) {
+		case 0:
+		case (PKI_PKIND_CFG_FULC_MASK << PKI_PKIND_CFG_FULC_SHIFT):
+		case (PKI_PKIND_CFG_DSA_MASK << PKI_PKIND_CFG_DSA_SHIFT):
+		case (PKI_PKIND_CFG_HG_MASK << PKI_PKIND_CFG_HG_SHIFT):
+		case (PKI_PKIND_CFG_HG_MASK << PKI_PKIND_CFG_HG2_SHIFT):
+			break;
+		default:
+			return MBOX_RET_INVALID;
+		}
+		for (i = 0; i < pki->max_cls; i++)
+			pki_reg_write(pki, PKI_CLX_PKINDX_CFG(i, port->pkind),
+				      cfg);
+	}
+	if (style_change)
+		for (i = 0; i < pki->max_cls; i++)
+			pki_reg_write(pki, PKI_CLX_PKINDX_STYLE(i, port->pkind),
+				      style);
+	if (skip_change)
+		for (i = 0; i < pki->max_cls; i++)
+			pki_reg_write(pki, PKI_CLX_PKINDX_SKIP(i, port->pkind),
+				      skip);
+
+	return ret;
+}
+
 int pki_port_start(struct pkipf_vf *vf, u16 vf_id,
 		   mbox_pki_port_t *port_data)
 {
