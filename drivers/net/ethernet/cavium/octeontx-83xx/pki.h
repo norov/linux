@@ -464,6 +464,7 @@ struct pki_t {
 #define PKI_SRIOV_ENABLED	0x1
 	u32			flags;
 	struct pkipf_vf		vf[PKI_MAX_VF];
+	u16			*qpg_domain;
 };
 
 struct pki_com_s {
