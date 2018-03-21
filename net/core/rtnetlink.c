@@ -2209,6 +2209,7 @@ errout:
 		if (status & DO_SETLINK_NOTIFY)
 			netdev_state_change(dev);
 
+		if (err < 0)
 			net_warn_ratelimited("A link change request failed with some changes committed already. Interface %s may have been left with an inconsistent configuration, please check.\n",
 					     dev->name);
 	}
