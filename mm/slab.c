@@ -3879,8 +3879,7 @@ static int __do_tune_cpucache(struct kmem_cache *cachep, int limit,
 
 	prev = cachep->cpu_cache;
 	cachep->cpu_cache = cpu_cache;
-	kick_all_cpus_sync();
-
+	smp_mb_sync();
 	check_irq_on();
 	cachep->batchcount = batchcount;
 	cachep->limit = limit;
