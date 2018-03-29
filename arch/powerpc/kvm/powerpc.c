@@ -463,12 +463,12 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 
 #ifdef CONFIG_KVM_XICS
 	/*
-	 * We call kick_all_cpus_sync() to ensure that all
+	 * We call smp_mb_sync() to ensure that all
 	 * CPUs have executed any pending IPIs before we
 	 * continue and free VCPUs structures below.
 	 */
 	if (is_kvmppc_hv_enabled(kvm))
-		kick_all_cpus_sync();
+		smp_mb_sync();
 #endif
 
 	kvm_for_each_vcpu(i, vcpu, kvm)
