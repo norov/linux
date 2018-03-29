@@ -715,12 +715,22 @@ static void do_nothing(void *unused)
  * smp_mb_sync - Force all online CPUs synchronize memory.
  *
  * - on current CPU call smp_mb() explicitly;
+ * - on CPUs in extended quiescent state (idle or nohz_full userspace), memory
+ *   is synchronized at the exit of that mode, so do nothing (it's safe to delay
+ *   syncronization because EQS CPUs don't run kernel code);
  * - on other CPUs fire IPI for syncronization.
  */
 void smp_mb_sync(void)
 {
+	struct cpumask active_cpus;
+
 	smp_mb();
-	smp_call_function(do_nothing, NULL, 1);
+
+	cpumask_clear(&active_cpus);
+	preempt_disable();
+	rcu_get_eqs_cpus(&active_cpus, 0);
+	smp_call_function_many(&active_cpus, do_nothing, NULL, 1);
+	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(smp_mb_sync);
 
