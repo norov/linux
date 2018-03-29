@@ -706,7 +706,7 @@ static void do_nothing(void *unused)
 }
 
 /**
- * kick_all_cpus_sync - Force all cpus out of idle
+ * smp_mb_sync - Force all online CPUs synchronize memory.
  *
  * - on current CPU call smp_mb() explicitly;
  * - on CPUs in extended quiescent state (idle or nohz_full userspace), memory
@@ -714,11 +714,10 @@ static void do_nothing(void *unused)
  *   syncronization because EQS CPUs don't run kernel code);
  * - on other CPUs fire IPI for syncronization, which implies barrier.
  */
-void kick_all_cpus_sync(void)
+void smp_mb_sync(void)
 {
 	struct cpumask active_cpus;
 
-	/* Make sure the change is visible before we kick the cpus */
 	smp_mb();
 
 	cpumask_clear(&active_cpus);
@@ -727,7 +726,7 @@ void kick_all_cpus_sync(void)
 	smp_call_function_many(&active_cpus, do_nothing, NULL, 1);
 	preempt_enable();
 }
-EXPORT_SYMBOL_GPL(kick_all_cpus_sync);
+EXPORT_SYMBOL_GPL(smp_mb_sync);
 
 /**
  * wake_up_all_idle_cpus - break all cpus out of idle

@@ -266,7 +266,7 @@ irqreturn_t smp_ipi_demux_relaxed(void)
 		/*
 		 * Must check for PPC_MSG_RM_HOST_ACTION messages
 		 * before PPC_MSG_CALL_FUNCTION messages because when
-		 * a VM is destroyed, we call kick_all_cpus_sync()
+		 * a VM is destroyed, we call smp_mb_sync()
 		 * to ensure that any pending PPC_MSG_RM_HOST_ACTION
 		 * messages have completed before we free any VCPUs.
 		 */
