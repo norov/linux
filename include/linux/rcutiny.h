@@ -27,6 +27,8 @@
 
 #include <linux/cache.h>
 
+void rcu_get_eqs_cpus(struct cpumask *cpus, int choose_eqs);
+
 static inline unsigned long get_state_synchronize_rcu(void)
 {
 	return 0;
