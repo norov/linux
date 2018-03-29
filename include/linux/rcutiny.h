@@ -36,6 +36,8 @@ static inline int rcu_dynticks_snap(struct rcu_dynticks *rdtp)
 /* Never flag non-existent other CPUs! */
 static inline bool rcu_eqs_special_set(int cpu) { return false; }
 
+void rcu_get_eqs_cpus(struct cpumask *cpus, int choose_eqs);
+
 static inline unsigned long get_state_synchronize_rcu(void)
 {
 	return 0;
