@@ -712,19 +712,24 @@ static void do_nothing(void *unused)
 /**
  * kick_all_cpus_sync - Force all cpus out of idle
  *
- * Used to synchronize the update of pm_idle function pointer. It's
- * called after the pointer is updated and returns after the dummy
- * callback function has been executed on all cpus. The execution of
- * the function can only happen on the remote cpus after they have
- * left the idle function which had been called via pm_idle function
- * pointer. So it's guaranteed that nothing uses the previous pointer
- * anymore.
+ * - on current CPU call smp_mb() explicitly;
+ * - on CPUs in extended quiescent state (idle or nohz_full userspace), memory
+ *   is synchronized at the exit of that mode, so do nothing (it's safe to delay
+ *   syncronization because EQS CPUs don't run kernel code);
+ * - on other CPUs fire IPI for syncronization, which implies barrier.
  */
 void kick_all_cpus_sync(void)
 {
+	struct cpumask active_cpus;
+
 	/* Make sure the change is visible before we kick the cpus */
 	smp_mb();
-	smp_call_function(do_nothing, NULL, 1);
+
+	cpumask_clear(&active_cpus);
+	preempt_disable();
+	rcu_get_eqs_cpus(&active_cpus, 0);
+	smp_call_function_many(&active_cpus, do_nothing, NULL, 1);
+	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(kick_all_cpus_sync);
 
