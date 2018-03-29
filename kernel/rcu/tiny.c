@@ -129,6 +129,15 @@ void rcu_check_callbacks(int user)
 }
 
 /*
+ * For tiny RCU, all CPUs are active (non-EQS)
+ */
+void rcu_get_eqs_cpus(struct cpumask *cpus, int choose_eqs)
+{
+	if (!choose_eqs)
+		cpumask_copy(cpus, cpu_online_mask);
+}
+
+/*
  * Invoke the RCU callbacks on the specified rcu_ctrlkblk structure
  * whose grace period has elapsed.
  */
