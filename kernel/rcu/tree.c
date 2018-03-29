@@ -429,6 +429,29 @@ bool rcu_eqs_special_set(int cpu)
 }
 
 /*
+ * Return set of EQS CPUs. If choose_eqs is 0, set of active (non-EQS)
+ * CPUs is returned.
+ *
+ * Call with disabled preemptions.
+ */
+void rcu_get_eqs_cpus(struct cpumask *cpus, int choose_eqs)
+{
+	int cpu, in_eqs;
+	struct rcu_dynticks *rdtp;
+
+	for_each_online_cpu(cpu) {
+		rdtp = &per_cpu(rcu_dynticks, cpu);
+		in_eqs = rcu_dynticks_in_eqs(atomic_read(&rdtp->dynticks));
+
+		if (in_eqs && choose_eqs)
+			cpumask_set_cpu(cpu, cpus);
+
+		if (!in_eqs && !choose_eqs)
+			cpumask_set_cpu(cpu, cpus);
+	}
+}
+
+/*
  * Let the RCU core know that this CPU has gone through the scheduler,
  * which is a quiescent state.  This is called when the need for a
  * quiescent state is urgent, so we burn an atomic operation and full
