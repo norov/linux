@@ -712,23 +712,17 @@ static void do_nothing(void *unused)
 }
 
 /**
- * kick_all_cpus_sync - Force all cpus out of idle
+ * smp_mb_sync - Force all online CPUs synchronize memory.
  *
- * Used to synchronize the update of pm_idle function pointer. It's
- * called after the pointer is updated and returns after the dummy
- * callback function has been executed on all cpus. The execution of
- * the function can only happen on the remote cpus after they have
- * left the idle function which had been called via pm_idle function
- * pointer. So it's guaranteed that nothing uses the previous pointer
- * anymore.
+ * - on current CPU call smp_mb() explicitly;
+ * - on other CPUs fire IPI for syncronization.
  */
-void kick_all_cpus_sync(void)
+void smp_mb_sync(void)
 {
-	/* Make sure the change is visible before we kick the cpus */
 	smp_mb();
 	smp_call_function(do_nothing, NULL, 1);
 }
-EXPORT_SYMBOL_GPL(kick_all_cpus_sync);
+EXPORT_SYMBOL_GPL(smp_mb_sync);
 
 /**
  * wake_up_all_idle_cpus - break all cpus out of idle
