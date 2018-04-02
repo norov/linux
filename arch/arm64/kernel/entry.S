@@ -37,22 +37,29 @@
 #include <asm/unistd.h>
 
 /*
- * Context tracking subsystem.  Used to instrument transitions
- * between user and kernel mode.
+ * Save/restore needed during syscalls.  Restore syscall arguments from
+ * the values already saved on stack during kernel_entry.
  */
-	.macro ct_user_exit, syscall = 0
-#ifdef CONFIG_CONTEXT_TRACKING
-	bl	context_tracking_user_exit
-	.if \syscall == 1
-	/*
-	 * Save/restore needed during syscalls.  Restore syscall arguments from
-	 * the values already saved on stack during kernel_entry.
-	 */
+	.macro restore_syscall_args
 	ldp	x0, x1, [sp]
 	ldp	x2, x3, [sp, #S_X2]
 	ldp	x4, x5, [sp, #S_X4]
 	ldp	x6, x7, [sp, #S_X6]
-	.endif
+	.endm
+
+	.macro el0_svc_restore_syscall_args
+#if defined(CONFIG_CONTEXT_TRACKING)
+	restore_syscall_args
+#endif
+	.endm
+
+/*
+ * Context tracking subsystem.  Used to instrument transitions
+ * between user and kernel mode.
+ */
+	.macro ct_user_exit
+#ifdef CONFIG_CONTEXT_TRACKING
+	bl	context_tracking_user_exit
 #endif
 	.endm
 
@@ -887,7 +894,8 @@ el0_svc:
 el0_svc_naked:					// compat entry point
 	stp	x0, xscno, [sp, #S_ORIG_X0]	// save the original x0 and syscall number
 	enable_dbg_and_irq
-	ct_user_exit 1
+	ct_user_exit
+	el0_svc_restore_syscall_args
 
 	ldr	x16, [tsk, #TSK_TI_FLAGS]	// check for syscall hooks
 	tst	x16, #_TIF_SYSCALL_WORK
@@ -921,10 +929,7 @@ __sys_trace:
 	mov	x1, sp				// pointer to regs
 	cmp	wscno, wsc_nr			// check upper syscall limit
 	b.hs	__ni_sys_trace
-	ldp	x0, x1, [sp]			// restore the syscall args
-	ldp	x2, x3, [sp, #S_X2]
-	ldp	x4, x5, [sp, #S_X4]
-	ldp	x6, x7, [sp, #S_X6]
+	restore_syscall_args
 	ldr	x16, [stbl, xscno, lsl #3]	// address in the syscall table
 	blr	x16				// call sys_* routine
 
