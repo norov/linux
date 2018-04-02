@@ -46,7 +46,7 @@
 	.endm
 
 	.macro el0_svc_restore_syscall_args
-#if defined(CONFIG_CONTEXT_TRACKING)
+#if !defined(CONFIG_TINY_RCU) || defined(CONFIG_CONTEXT_TRACKING)
 	restore_syscall_args
 #endif
 	.endm
@@ -440,6 +440,19 @@ __bad_stack:
 	ASM_BUG()
 	.endm
 
+/*
+ * If CPU is in extended quiescent state we need isb to ensure that
+ * possible change of kernel text is visible by the core.
+ */
+	.macro	isb_if_eqs
+#ifndef CONFIG_TINY_RCU
+	bl	rcu_is_watching
+	cbnz	x0, 1f
+	isb 					// pairs with aarch64_insn_patch_text
+1:
+#endif
+	.endm
+
 el0_sync_invalid:
 	inv_entry 0, BAD_SYNC
 ENDPROC(el0_sync_invalid)
@@ -567,6 +580,7 @@ ENDPROC(el1_sync)
 
 	.align	6
 el1_irq:
+	isb					// pairs with aarch64_insn_patch_text
 	kernel_entry 1
 	enable_dbg
 #ifdef CONFIG_TRACE_IRQFLAGS
@@ -847,6 +861,7 @@ el0_svc:
 	mov	wsc_nr, #__NR_syscalls
 el0_svc_naked:					// compat entry point
 	stp	x0, xscno, [sp, #S_ORIG_X0]	// save the original x0 and syscall number
+	isb_if_eqs
 	enable_dbg_and_irq
 	ct_user_exit
 	el0_svc_restore_syscall_args
