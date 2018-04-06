@@ -3751,6 +3751,10 @@ done:
 	return cpu;
 }
 
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+EXPORT_SYMBOL(get_rps_cpu);
+#endif
+
 #ifdef CONFIG_RFS_ACCEL
 
 /**
@@ -3916,6 +3920,10 @@ drop:
 	kfree_skb(skb);
 	return NET_RX_DROP;
 }
+
+#ifdef CONFIG_CAVIUM_IPFWD_OFFLOAD
+EXPORT_SYMBOL(enqueue_to_backlog);
+#endif
 
 static u32 netif_receive_generic_xdp(struct sk_buff *skb,
 				     struct bpf_prog *xdp_prog)
