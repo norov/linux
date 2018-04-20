@@ -91,6 +91,7 @@ struct xlp9xx_i2c_dev {
 	bool msg_read;
 	bool len_recv;
 	bool client_pec;
+	int rlen_err;
 	u32 __iomem *base;
 	u32 msg_buf_remaining;
 	u32 msg_len;
@@ -158,13 +159,30 @@ static void xlp9xx_i2c_fill_tx_fifo(struct xlp9xx_i2c_dev *priv)
 	priv->msg_buf += len;
 }
 
-static void xlp9xx_i2c_update_rlen(struct xlp9xx_i2c_dev *priv)
+static int xlp9xx_i2c_update_rlen(struct xlp9xx_i2c_dev *priv)
 {
 	u8  *buf = priv->msg_buf;
 	u32 val, len, rlen;
 
 	/* read length byte */
 	rlen = xlp9xx_read_i2c_reg(priv, XLP9XX_I2C_MRXFIFO);
+	if (rlen > I2C_SMBUS_BLOCK_MAX || rlen == 0) {
+		val = xlp9xx_read_i2c_reg(priv, XLP9XX_I2C_CTRL);
+		len = xlp9xx_read_i2c_reg(priv, XLP9XX_I2C_FIFOWCNT) &
+					  XLP9XX_I2C_FIFO_WCNT_MASK;
+		/*
+		 * We received an invalid len byte, stop the transfer
+		 * by updating fifocount + 2
+		 */
+		val = (val & ~XLP9XX_I2C_CTRL_MCTLEN_MASK) |
+			((len + 2) << XLP9XX_I2C_CTRL_MCTLEN_SHIFT);
+		xlp9xx_write_i2c_reg(priv, XLP9XX_I2C_CTRL, val);
+		priv->msg_buf_remaining = 0;
+		priv->msg_len = 0;
+		priv->len_recv = false;
+		return -EPROTO;
+	}
+
 	*buf++ = rlen;
 	if (priv->client_pec)
 		++rlen;
@@ -189,19 +207,24 @@ static void xlp9xx_i2c_update_rlen(struct xlp9xx_i2c_dev *priv)
 	xlp9xx_write_i2c_reg(priv, XLP9XX_I2C_CTRL, val);
 
 	priv->msg_buf = buf;
+
+	return 0;
 }
 
-static void xlp9xx_i2c_drain_rx_fifo(struct xlp9xx_i2c_dev *priv)
+static int xlp9xx_i2c_drain_rx_fifo(struct xlp9xx_i2c_dev *priv)
 {
 	u32 len, i;
 	u8 *buf = priv->msg_buf;
+	int res;
 
 	len = xlp9xx_read_i2c_reg(priv, XLP9XX_I2C_FIFOWCNT) &
 				  XLP9XX_I2C_FIFO_WCNT_MASK;
 	if (!len)
-		return;
+		return 0;
 	if (priv->len_recv) {
-		xlp9xx_i2c_update_rlen(priv);
+		res = xlp9xx_i2c_update_rlen(priv);
+		if (res)
+			return res;
 	} else {
 		len = min(priv->msg_buf_remaining, len);
 		for (i = 0; i < len; i++, buf++)
@@ -213,12 +236,15 @@ static void xlp9xx_i2c_drain_rx_fifo(struct xlp9xx_i2c_dev *priv)
 
 	if (priv->msg_buf_remaining)
 		xlp9xx_i2c_update_rx_fifo_thres(priv);
+
+	return 0;
 }
 
 static irqreturn_t xlp9xx_i2c_isr(int irq, void *dev_id)
 {
 	struct xlp9xx_i2c_dev *priv = dev_id;
 	u32 status;
+	int res;
 
 	status = xlp9xx_read_i2c_reg(priv, XLP9XX_I2C_INTST);
 	if (status == 0)
@@ -248,7 +274,11 @@ static irqreturn_t xlp9xx_i2c_isr(int irq, void *dev_id)
 			      XLP9XX_I2C_INTEN_MFIFOHI)) {
 			/* data is in FIFO, read it */
 			if (priv->msg_buf_remaining)
-				xlp9xx_i2c_drain_rx_fifo(priv);
+				res = xlp9xx_i2c_drain_rx_fifo(priv);
+				if (res) {
+					priv->rlen_err = res;
+					goto xfer_done;
+				}
 		}
 	}
 
@@ -312,16 +342,13 @@ static int xlp9xx_i2c_xfer_msg(struct xlp9xx_i2c_dev *priv, struct i2c_msg *msg,
 	priv->msg_buf = msg->buf;
 	priv->msg_buf_remaining = priv->msg_len = msg->len;
 	priv->msg_err = 0;
+	priv->rlen_err = 0;
 	priv->msg_read = (msg->flags & I2C_M_RD);
 	reinit_completion(&priv->msg_complete);
 
 	/* Reset FIFO */
 	xlp9xx_write_i2c_reg(priv, XLP9XX_I2C_MFIFOCTRL,
 			     XLP9XX_I2C_MFIFOCTRL_RST);
-
-	/* set FIFO threshold if reading */
-	if (priv->msg_read)
-		xlp9xx_i2c_update_rx_fifo_thres(priv);
 
 	/* set slave addr */
 	xlp9xx_write_i2c_reg(priv, XLP9XX_I2C_SLAVEADDR,
@@ -343,6 +370,9 @@ static int xlp9xx_i2c_xfer_msg(struct xlp9xx_i2c_dev *priv, struct i2c_msg *msg,
 	priv->len_recv = msg->flags & I2C_M_RECV_LEN;
 	len = priv->len_recv ? XLP9XX_I2C_FIFO_SIZE : msg->len;
 	priv->client_pec = msg->flags & I2C_CLIENT_PEC;
+	/* set FIFO threshold if reading */
+	if (priv->msg_read)
+		xlp9xx_i2c_update_rx_fifo_thres(priv);
 
 	/* set data length to be transferred */
 	val = (val & ~XLP9XX_I2C_CTRL_MCTLEN_MASK) |
@@ -381,6 +411,9 @@ static int xlp9xx_i2c_xfer_msg(struct xlp9xx_i2c_dev *priv, struct i2c_msg *msg,
 
 	timeleft = msecs_to_jiffies(XLP9XX_I2C_TIMEOUT_MS);
 	timeleft = wait_for_completion_timeout(&priv->msg_complete, timeleft);
+
+	if (priv->rlen_err)
+		return priv->rlen_err;
 
 	if (priv->msg_err & XLP9XX_I2C_INTEN_BUSERR) {
 		dev_dbg(priv->dev, "transfer error %x!\n", priv->msg_err);
