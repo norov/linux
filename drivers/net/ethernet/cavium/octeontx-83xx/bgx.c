@@ -529,14 +529,20 @@ int bgx_port_config(struct octtx_bgx_port *port, mbox_bgx_port_conf_t *conf)
 int bgx_port_status(struct octtx_bgx_port *port, mbox_bgx_port_status_t *stat)
 {
 	struct bgxpf *bgx;
+	struct bgx_link_status link;
 	u64 reg;
 
 	bgx = get_bgx_dev(port->node, port->bgx);
 	if (!bgx)
 		return -EINVAL;
+
 	reg = bgx_reg_read(bgx, port->lmac, BGX_CMR_RX_BP_STATUS);
 	stat->bp = reg & 0x1; /* BP */
-	stat->link_up = bgx_get_link_status(port->node, port->bgx, port->lmac);
+
+	thbgx->get_link_status(port->node, port->bgx, port->lmac, &link);
+	stat->link_up = link.link_up;
+	stat->duplex = link.duplex;
+	stat->speed = link.speed;
 	return 0;
 }
 
