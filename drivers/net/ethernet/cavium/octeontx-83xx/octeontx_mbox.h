@@ -268,7 +268,7 @@ struct mbox_intf_ver {
 static const struct mbox_intf_ver MBOX_INTERFACE_VERSION = {
 	.platform = 0x01,
 	.major = 0x00,
-	.minor = 0x00
+	.minor = 0x01
 };
 
 /* FIXME: This union is temporary until we agree to move all messages to RAM */
@@ -352,6 +352,10 @@ typedef struct mbox_bgx_port_status {
 	u8 link_up;
 	/* 1 = LMAC is backpressured, 0 = no backpressure. */
 	u8 bp;
+	/* Duplex mode: 1 = full duplex, 0 = half duplex */
+	u8 duplex;
+	/* Link speed in Mbps */
+	u32 speed;
 } mbox_bgx_port_status_t;
 
 /* BGX port statistics: */
