@@ -710,9 +710,8 @@ static void nicvf_get_channels(struct net_device *dev,
 	struct nicvf *nic = netdev_priv(dev);
 
 	memset(channel, 0, sizeof(*channel));
-
-	channel->max_rx = nic->max_queues;
-	channel->max_tx = nic->max_queues;
+	channel->max_rx = nic->xdp_prog ? nic->max_queues / 2 : nic->max_queues;
+	channel->max_tx = nic->xdp_prog ? nic->max_queues / 2 : nic->max_queues;
 
 	channel->rx_count = nic->rx_queues;
 	channel->tx_count = nic->tx_queues;
@@ -722,16 +721,17 @@ static void nicvf_get_channels(struct net_device *dev,
 static int nicvf_set_channels(struct net_device *dev,
 			      struct ethtool_channels *channel)
 {
+	u8 cqcount, txq_count, max_queues = 0;
 	struct nicvf *nic = netdev_priv(dev);
-	int err = 0;
 	bool if_up = netif_running(dev);
-	u8 cqcount, txq_count;
+	int err = 0;
 
+	max_queues = nic->xdp_prog ? nic->max_queues / 2 : nic->max_queues;
 	if (!channel->rx_count || !channel->tx_count)
 		return -EINVAL;
-	if (channel->rx_count > nic->max_queues)
+	if (channel->rx_count > max_queues)
 		return -EINVAL;
-	if (channel->tx_count > nic->max_queues)
+	if (channel->tx_count > max_queues)
 		return -EINVAL;
 
 	if (nic->xdp_prog &&
