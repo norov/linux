@@ -1912,6 +1912,17 @@ static int nicvf_xdp_setup(struct nicvf *nic, struct bpf_prog *prog)
 		return -EOPNOTSUPP;
 	}
 
+	if (if_up)
+		nicvf_stop(nic->netdev);
+
+	old_prog = xchg(&nic->xdp_prog, prog);
+	/* Detach old prog, if any */
+	if (old_prog) {
+		bpf_prog_put(old_prog);
+		if (!nic->t88)
+			nic->max_queues = nic->max_queues / 2;
+	}
+
 	/* ALL SQs attached to CQs i.e same as RQs, are treated as
 	 * XDP Tx queues and more Tx queues are allocated for
 	 * network stack to send pkts out.
@@ -1919,23 +1930,17 @@ static int nicvf_xdp_setup(struct nicvf *nic, struct bpf_prog *prog)
 	 * No of Tx queues are either same as Rx queues or whatever
 	 * is left in max no of queues possible.
 	 */
-	if ((nic->rx_queues + nic->tx_queues) > nic->max_queues) {
+	if ((nic->rx_queues + nic->tx_queues) > nic->max_queues * 2) {
 		netdev_warn(dev,
 			    "Failed to attach BPF prog, RXQs + TXQs > Max %d\n",
-			    nic->max_queues);
+			    nic->max_queues * 2);
 		return -ENOMEM;
 	}
 
-	if (if_up)
-		nicvf_stop(nic->netdev);
-
-	old_prog = xchg(&nic->xdp_prog, prog);
-	/* Detach old prog, if any */
-	if (old_prog)
-		bpf_prog_put(old_prog);
-
 	if (nic->xdp_prog) {
 		/* Attach BPF program */
+		if (!nic->t88)
+			nic->max_queues = nic->max_queues * 2;
 		nic->xdp_prog = bpf_prog_add(nic->xdp_prog, nic->rx_queues - 1);
 		if (!IS_ERR(nic->xdp_prog))
 			bpf_attached = true;
@@ -2174,8 +2179,6 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	/* If no of CPUs are too low, there won't be any queues left
 	 * for XDP_TX, hence double it.
 	 */
-	if (!nic->t88)
-		nic->max_queues *= 2;
 	nic->ptp_clock = ptp_clock;
 
 	/* MAP VF's configuration registers */
