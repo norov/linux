@@ -145,6 +145,9 @@ static irqreturn_t pko_peb_err_intr_handler(int irq, void *pko_irq)
 	struct pkopf *pko = (struct pkopf *)pko_irq;
 	u64 reg;
 
+	reg = pko_reg_read(pko, PKO_PF_PEB_ERR_INT_W1C);
+	dev_err(&pko->pdev->dev, "val @PKO_PEB_ERR_INT_W1C: %llx\n", reg);
+
 	dev_err(&pko->pdev->dev, "peb err received\n");
 	reg = pko_reg_read(pko, PKO_PF_PEB_PAD_ERR_INFO);
 	dev_err(&pko->pdev->dev, "peb pad err info:%llx\n", reg);
@@ -350,6 +353,7 @@ static void pko_pf_gmctl_init(struct pkopf *pf, int vf, u16 gmid)
 static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 				struct octtx_bgx_port *bgx_port, int bgx_count,
 				struct octtx_lbk_port *lbk_port, int lbk_count,
+				struct octtx_sdp_port *sdp_port, int sdp_count,
 				void *master, void *master_data,
 				struct kobject *kobj)
 {
@@ -357,7 +361,7 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 	struct pkopf *curr;
 	struct pci_dev *virtfn;
 	resource_size_t vf_start;
-	int i, pko_mac = PKO_MAC_BGX;
+	int i, pko_mac = sdp_count ? PKO_MAC_HOST : PKO_MAC_BGX;
 	int vf_idx = 0, port_idx = 0;
 	int mac_num, mac_mode, chan, ret = 0;
 	const u32 max_frame = 0xffff;
@@ -378,6 +382,13 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 		goto err_unlock;
 	}
 
+	/**
+	 * pko_vfs are partitioned among SDP, BGX and LBK as:
+	 *   SDP <= PKO_VF[(0) .. (sdp_count-1)]
+	 *   BGX <= PKO_VF[(sdp_count) .. (sdp_count + bgx_count - 1)]
+	 *   LBK <= PKO_VF[(sdp_count + bgx_count) .. (sdp_count + bgx_count +
+	 *                                             lbk_count- 1)]
+	 */
 	for (i = 0; i < pko->total_vfs; i++) {
 		if (pko->vf[i].domain.in_use) {
 			continue;
@@ -417,7 +428,21 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 
 			/* Setup the PKO Scheduling tree: PQ/SQ/DQ.
 			 */
-			if (pko_mac == PKO_MAC_BGX) {
+			if (pko_mac == PKO_MAC_HOST) {
+				mac_num = pko_get_sdp_mac(
+						sdp_port[port_idx].sdp,
+						sdp_port[port_idx].lmac);
+				chan = pko_get_sdp_chan(
+						sdp_port[port_idx].sdp,
+						sdp_port[port_idx].lmac, 0);
+				mac_mode = sdp_port[port_idx].lmac_type;
+				port_idx++;
+				if (port_idx >= sdp_count) {
+					pko_mac = bgx_count ? PKO_MAC_BGX :
+						  PKO_MAC_LBK;
+					port_idx = 0;
+				}
+			} else if (pko_mac == PKO_MAC_BGX) {
 				mac_num = pko_get_bgx_mac(
 						bgx_port[port_idx].bgx,
 						bgx_port[port_idx].lmac);
@@ -442,6 +467,10 @@ static int pko_pf_create_domain(u32 id, u16 domain_id, u32 pko_vf_count,
 			}
 			pko->vf[i].mac_num = mac_num;
 			pko->vf[i].chan = chan;
+
+			dev_dbg(&pko->pdev->dev,
+				"i: %d, max_frame: %d, mac_num: %d, mac_mode: %d, chan: %d\n",
+				i, max_frame, mac_num, mac_mode, chan);
 
 			pko_pstree_setup(pko, i, max_frame,
 					 mac_num, mac_mode, chan);

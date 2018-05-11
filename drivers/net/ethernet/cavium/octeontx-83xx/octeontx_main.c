@@ -24,6 +24,7 @@
 #include "fpa.h"
 #include "sso.h"
 #include "bgx.h"
+#include "sli.h"
 #include "pko.h"
 #include "lbk.h"
 #include "tim.h"
@@ -51,6 +52,7 @@ static dev_t octtx_dev;
 static atomic_t gbl_domain_id = ATOMIC_INIT(MIN_DOMAIN_ID);
 
 static struct bgx_com_s *bgx;
+static struct slipf_com_s *slipf;
 static struct lbk_com_s *lbk;
 static struct fpapf_com_s *fpapf;
 static struct ssopf_com_s *ssopf;
@@ -91,8 +93,10 @@ struct octtx_domain {
 
 	int bgx_count;
 	int lbk_count;
+	int sdp_count;
 	struct octtx_bgx_port bgx_port[OCTTX_MAX_BGX_PORTS];
 	struct octtx_lbk_port lbk_port[OCTTX_MAX_LBK_PORTS];
+	struct octtx_sdp_port sdp_port[OCTTX_MAX_SDP_PORTS];
 
 	struct kobject *kobj;
 	struct kobject *ports_kobj;
@@ -111,6 +115,7 @@ struct octtx_domain {
 	bool tim_domain_created;
 	bool dpi_domain_created;
 	bool zip_domain_created;
+	bool sdp_domain_created;
 };
 
 static int gpio_in_use;
@@ -130,8 +135,10 @@ static int octeontx_create_domain(const char *name, int type, int sso_count,
 				  int fpa_count, int ssow_count, int pko_count,
 				  int pki_count, int tim_count, int bgx_count,
 				  int lbk_count, int dpi_count, int zip_count,
+				  int sdp_count,
 				  const long int *bgx_port,
-				  const long int *lbk_port);
+				  const long int *lbk_port,
+				  const long int *sdp_port);
 
 static void octeontx_destroy_domain(const char *domain_name);
 
@@ -176,8 +183,10 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 	long int dpi_count = 0;
 	long int zip_count = 0;
 	long int pki_count = 0;
+	long int sdp_count = 0;
 	long int lbk_port[OCTTX_MAX_LBK_PORTS];
 	long int bgx_port[OCTTX_MAX_BGX_PORTS];
+	long int sdp_port[OCTTX_MAX_SDP_PORTS];
 	char *errmsg = "Wrong domain specification format.";
 
 	end = kzalloc(PAGE_SIZE, GFP_KERNEL);
@@ -260,6 +269,13 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 				goto error;
 			if (kstrtol(start, 10, &dpi_count))
 				goto error;
+		} else if (!strncmp(strim(start), "sdp", sizeof("sdp") - 1)) {
+			temp = strsep(&start, ":");
+			if (!start)
+				goto error;
+			if (kstrtol(strim(start), 10, &sdp_port[sdp_count]))
+				goto error;
+			sdp_count++;
 		} else if (!strncmp(start, "zip", sizeof("zip") - 1)) {
 			temp = strsep(&start, ":");
 			if (!start)
@@ -275,8 +291,9 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 				     ssow_count, pko_count, pki_count,
 				     tim_count, bgx_count, lbk_count,
 				     dpi_count, zip_count,
-				     (const long int *)bgx_port,
-				     (const long int *)lbk_port);
+				     sdp_count, (const long int *)bgx_port,
+				     (const long int *)lbk_port,
+				     (const long int *)sdp_port);
 	if (ret) {
 		errmsg = "Failed to create application domain.";
 		goto error;
@@ -413,6 +430,7 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 			dcfg->tim_count = domain->tim_vf_count;
 			dcfg->net_port_count = domain->bgx_count;
 			dcfg->virt_port_count = domain->lbk_count;
+			dcfg->host_port_count = domain->sdp_count;
 			resp->data = sizeof(struct dcfg_resp);
 			hdr->res_code = MBOX_RET_SUCCESS;
 			break;
@@ -420,6 +438,10 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 	case DPI_COPROC:
 		dpipf->receive_message(0, domain->domain_id, hdr,
 				       req, resp, add_data);
+		break;
+	case SDP_COPROC:
+		slipf->receive_message(0, domain->domain_id, hdr,
+				req, resp, add_data);
 		break;
 	case ZIP_COPROC:
 		zippf->receive_message(0, domain->domain_id, hdr,
@@ -582,6 +604,15 @@ static void do_destroy_domain(struct octtx_domain *domain)
 		}
 	}
 
+	if (domain->sdp_domain_created) {
+		ret = slipf->destroy_domain(node, domain_id, domain->kobj);
+		if (ret) {
+			dev_err(octtx_device,
+				"Failed to remove sdp of domain %d on node %d.\n",
+				domain->domain_id, node);
+		}
+	}
+
 	if (domain->sysfs_domain_in_use_created)
 		sysfs_remove_file(domain->kobj,
 				  &domain->sysfs_domain_in_use.attr);
@@ -655,8 +686,10 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 			   int fpa_count, int ssow_count, int pko_count,
 			   int pki_count, int tim_count, int bgx_count,
 			   int lbk_count, int dpi_count, int zip_count,
+			   int sdp_count,
 			   const long int *bgx_port,
-			   const long int *lbk_port)
+			   const long int *lbk_port,
+			   const long int *sdp_port)
 {
 	void *ssow_ram_mbox_addr = NULL;
 	struct octtx_domain *domain;
@@ -665,7 +698,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	int ret = -EINVAL;
 	int node = 0;
 	bool found = false;
-	int i, port_count = bgx_count + lbk_count;
+	int i, port_count = bgx_count + lbk_count + sdp_count;
 
 	list_for_each_entry(domain, &octeontx_domains, list) {
 		if (!strcmp(name, domain->name)) {
@@ -687,12 +720,12 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	}
 
 	if (port_count != 0 && pki_count != 1) {
-		dev_err(octtx_device, "Domain has to include exactly 1 PKI if there are BGX or LBK ports\n");
+		dev_err(octtx_device, "Domain has to include exactly 1 PKI if there are BGX or LBK or SDP ports\n");
 		return -EINVAL;
 	}
 
 	if (pko_count != port_count) {
-		dev_err(octtx_device, "Domain has to include as many PKOs as there are BGX and LBK ports\n");
+		dev_err(octtx_device, "Domain has to include as many PKOs as there are BGX and LBK and SDP ports\n");
 		return -EINVAL;
 	}
 
@@ -891,6 +924,52 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		if (ret < 0)
 			goto error;
 	}
+
+	domain->sdp_count = sdp_count;
+	if (domain->sdp_count) {
+		for (i = 0; i < domain->sdp_count; i++) {
+			domain->sdp_port[i].domain_id = domain_id;
+			domain->sdp_port[i].dom_port_idx = i;
+			domain->sdp_port[i].glb_port_idx = sdp_port[i];
+		}
+		ret = slipf->create_domain(node, domain_id, domain->sdp_port, i,
+				&octtx_master_com, domain, domain->ports_kobj);
+		if (ret) {
+			dev_err(octtx_device, "Failed to create SDP domain\n");
+			goto error;
+		}
+		domain->sdp_domain_created = true;
+	}
+
+	/* Now that we know which exact ports we have, set pkinds for them. */
+	for (i = 0; i < domain->sdp_count; i++) {
+		ret = pki->add_sdp_port(node, domain_id, &domain->sdp_port[i]);
+		if (ret < 0) {
+			dev_err(octtx_device,
+				"SDP::Failed to allocate PKIND for port l%d(g%d)\n",
+				domain->sdp_port[i].dom_port_idx,
+				domain->sdp_port[i].glb_port_idx);
+			goto error;
+		}
+
+		domain->sdp_port[i].pkind = ret;
+		ret = slipf->set_pkind(node, domain_id,
+				     domain->sdp_port[i].dom_port_idx,
+				     domain->sdp_port[i].pkind);
+		if (ret < 0) {
+			dev_err(octtx_device,
+				"SDP::Failed to set PKIND for port l%d(g%d)\n",
+				domain->sdp_port[i].dom_port_idx,
+				domain->sdp_port[i].glb_port_idx);
+			goto error;
+		}
+		/* TODO: setup sysfs entry for sdp port*/
+	}
+	if (ret) {
+		dev_err(octtx_device, "Failed to create SDP domain\n");
+		goto error;
+	}
+
 	/* remove this once PKO init extends for LBK. */
 	domain->pko_vf_count = port_count;
 	if (domain->pko_vf_count) {
@@ -898,6 +977,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 					domain->pko_vf_count,
 					domain->bgx_port, domain->bgx_count,
 					domain->lbk_port, domain->lbk_count,
+					domain->sdp_port, domain->sdp_count,
 					&octtx_master_com, domain,
 					domain->kobj);
 		if (ret) {
@@ -992,6 +1072,15 @@ static int octeontx_reset_domain(void *master_data)
 		if (ret) {
 			dev_err(octtx_device,
 				"Failed to reset BGX of domain %d on node %d.\n",
+				domain->domain_id, node);
+		}
+	}
+
+	if (domain->sdp_domain_created) {
+		ret = slipf->reset_domain(node, domain->domain_id);
+		if (ret) {
+			dev_err(octtx_device,
+				"Failed to reset SDP of domain %d on node %d.\n",
 				domain->domain_id, node);
 		}
 	}
@@ -1334,6 +1423,9 @@ static int __init octeontx_init_module(void)
 	bgx = bgx_octeontx_init();
 	if (!bgx)
 		return -ENODEV;
+	slipf = try_then_request_module(symbol_get(slipf_com), "slipf");
+	if (!slipf)
+		return -ENODEV;
 	lbk = try_then_request_module(symbol_get(lbk_com), "lbk");
 	if (!lbk)
 		return -ENODEV;
@@ -1363,7 +1455,7 @@ static int __init octeontx_init_module(void)
 		goto pkopf_err;
 	}
 
-	dpipf = try_then_request_module(symbol_get(dpipf_com), "dpipf");
+	dpipf = try_then_request_module(symbol_get(dpipf_com), "dpi");
 	if (!dpipf) {
 		ret = -ENODEV;
 		goto dpipf_err;
@@ -1495,6 +1587,7 @@ ssopf_err:
 
 fpapf_err:
 	symbol_put(lbk_com);
+	symbol_put(slipf_com);
 
 	return ret;
 }
@@ -1523,6 +1616,7 @@ static void __exit octeontx_cleanup_module(void)
 	symbol_put(timpf_com);
 	symbol_put(zippf_com);
 	symbol_put(lbk_com);
+	symbol_put(slipf_com);
 	symbol_put(thunder_bgx_com);
 	task_cleanup_handler_remove(cleanup_el3_irqs);
 }
