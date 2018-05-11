@@ -333,6 +333,14 @@
 
 #define PKI_STRM_CFG_GMID_MASK		0xFFFFULL
 
+#define  DMACH_SHIFT    32
+#define  DMACH_MASK     0x0000ffff
+#define  DMACL_SHIFT    0
+#define  DMACL_MASK     0xffffffff
+
+#define PCAM_TERM_E_DMACH  0xaULL
+#define PCAM_TERM_E_DMACL  0xbULL
+
 #define PKI_VF_SIZE			0x10000
 #define PKI_VF_BASE(x)			(0x01e00000ULL | (PKI_VF_SIZE * (x)))
 
@@ -362,6 +370,27 @@ enum PKI_LTYPE_E {
 	PKI_LTYPE_E_SW29	= 0x1d,
 	PKI_LTYPE_E_SW30	= 0x1e,
 	PKI_LTYPE_E_SW31	= 0x1f
+};
+
+union pki_clx_pcamx_termx_u {
+	u64 u;
+	struct pki_clx_pcamx_termx_s {
+		uint64_t style0:8;
+		uint64_t term0:8;
+		uint64_t reserved_16_31:16;
+		uint64_t style1:8;
+		uint64_t term1:8;
+		uint64_t reserved_48_62:15;
+		uint64_t valid:1;
+	} s;
+};
+
+union pki_clx_pcamx_matchx_u {
+	u64 u;
+	struct pki_clx_pcamx_matchx_s {
+		uint64_t data0:32;
+		uint64_t data1:32;
+	} s;
 };
 
 enum PKI_BELTYPE_E {
@@ -406,6 +435,19 @@ enum PKI_PCAM_TERM_E {
 	PKI_PCAM_TERM_L4_SPORT	= 0x2f,
 	PKI_PCAM_TERM_L4_PORT	= 0x30,
 	PKI_PCAM_TERM_LG_CUSTOM	= 0x39
+};
+
+union pki_clx_pcamx_actionx_u {
+	u64 u;
+	struct pki_clx_pcamx_actionx_s {
+		uint64_t advance:8;
+		uint64_t setty:5;
+		uint64_t pf:3;
+		uint64_t style_add:8;
+		uint64_t pmc:7;
+		uint64_t rsvdrw31:1;
+		uint64_t reserved_32_63:32;
+	} s;
 };
 
 #define MAX_PKI_PORTS	64
@@ -563,4 +605,8 @@ int pki_port_errchk(struct pkipf_vf *vf, u16 vf_id,
 int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 		     mbox_pki_hash_cfg_t *cfg);
 
+int pki_port_set_pcam_dmach(struct pkipf_vf *vf, u16 vf_id,
+			    struct mbox_pki_port_pcam_entry *cfg);
+int pki_port_set_pcam_dmacl(struct pkipf_vf *vf, u16 vf_id,
+			    struct mbox_pki_port_pcam_entry *cfg);
 #endif
