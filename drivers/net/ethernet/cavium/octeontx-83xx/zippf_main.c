@@ -465,7 +465,7 @@ static int zip_irq_init(struct zippf *zip)
 	for (i = 0; i < ZIP_PF_MSIX_COUNT; i++)
 		zip->msix_entries[i].entry = i;
 
-	ret = pci_enable_msix(zip->pdev, zip->msix_entries, ZIP_PF_MSIX_COUNT);
+	ret = pci_enable_msix_range(zip->pdev, zip->msix_entries, 1, ZIP_PF_MSIX_COUNT);
 	if (ret) {
 		dev_err(&zip->pdev->dev, "Enabling msix failed(%d)\n", ret);
 		return ret;
