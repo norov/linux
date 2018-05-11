@@ -379,6 +379,14 @@ static void dpi_irq_free(struct dpipf *dpi)
 	dpi_reg_write(dpi, DPI_SBE_INT_ENA_W1C, DPI_SBE_INT_RDB_SBE);
 	dpi_reg_write(dpi, DPI_DBE_INT_ENA_W1C, DPI_DBE_INT_RDB_DBE);
 
+	for (i = 0; i < DPI_PF_MSIX_COUNT; i++) {
+		if (dpi->msix_entries[i].vector)
+			free_irq(dpi->msix_entries[i].vector, dpi);
+	}
+
+	pci_disable_msix(dpi->pdev);
+	devm_kfree(&dpi->pdev->dev, dpi->msix_entries);
+
 	for (i = 0; i < DPI_MAX_CC_INT; i++) {
 		dpi_reg_write(dpi, DPI_REQQX_INT(i), DPI_REQQ_INT);
 		dpi_reg_write(dpi, DPI_REQQX_INT_ENA_W1C(i), DPI_REQQ_INT);
@@ -389,13 +397,6 @@ static void dpi_irq_free(struct dpipf *dpi)
 		dpi_reg_write(dpi, DPI_DMA_CCX_INT_ENA_W1C(i), DPI_DMA_CC_INT);
 	}
 
-	for (i = 0; i < DPI_PF_MSIX_COUNT; i++) {
-		if (dpi->msix_entries[i].vector)
-			free_irq(dpi->msix_entries[i].vector, dpi);
-	}
-
-	pci_disable_msix(dpi->pdev);
-	devm_kfree(&dpi->pdev->dev, dpi->msix_entries);
 }
 
 static irqreturn_t dpi_pf_intr_handler (int irq, void *dpi_irq)

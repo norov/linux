@@ -1486,7 +1486,7 @@ static int __init octeontx_init_module(void)
 		goto pkopf_err;
 	}
 
-	dpipf = try_then_request_module(symbol_get(dpipf_com), "dpipf");
+	dpipf = try_then_request_module(symbol_get(dpipf_com), "dpi");
 	if (!dpipf) {
 		ret = -ENODEV;
 		goto dpipf_err;
