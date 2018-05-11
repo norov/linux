@@ -20,7 +20,8 @@ enum coproc_t {
 	LBK_COPROC = 7,
 	TIM_COPROC = 8,
 	DPI_COPROC = 9,
-	ZIP_COPROC = 10
+	ZIP_COPROC = 10,
+	SDP_COPROC = 11
 };
 
 /*req messages*/
@@ -224,6 +225,7 @@ struct __attribute__((__packed__)) dcfg_resp {
 	u8	tim_count;
 	u8	net_port_count;
 	u8	virt_port_count;
+	u8	host_port_count;
 };
 
 /* FPA specific */
@@ -287,7 +289,7 @@ union mbox_data {
 enum {
 	OCTTX_PORT_TYPE_NET, /* Network interface ports */
 	OCTTX_PORT_TYPE_INT, /* CPU internal interface ports */
-	OCTTX_PORT_TYPE_PCI, /* DPI/PCIe interface ports */
+	OCTTX_PORT_TYPE_HOST, /* Host interface(SDP) ports */
 	OCTTX_PORT_TYPE_MAX
 };
 
@@ -501,6 +503,101 @@ struct mbox_sso_grp_priority {
 struct mbox_sso_get_dump {
 	size_t len;
 	u8 buf[MBOX_MAX_MSG_SIZE];
+};
+
+/*----------------------------------------------------------------------------*/
+/* SDP messages:                                                              */
+/*----------------------------------------------------------------------------*/
+/* Message IDs for SDP_COPROC */
+#define MBOX_SDP_PORT_OPEN        0
+#define MBOX_SDP_PORT_CLOSE       1
+#define MBOX_SDP_PORT_START       2
+#define MBOX_SDP_PORT_STOP        3
+#define MBOX_SDP_PORT_GET_CONFIG  4
+#define MBOX_SDP_PORT_GET_STATUS  5
+#define MBOX_SDP_PORT_GET_STATS   6
+#define MBOX_SDP_PORT_CLR_STATS   7
+#define MBOX_SDP_PORT_GET_LINK_STATUS  8
+#define MBOX_SDP_REG_READ         9
+#define MBOX_SDP_REG_WRITE        10
+
+/* SDP port configuration parameters: */
+struct mbox_sdp_port_conf {
+	/* 1 = port activated, 0 = port is idle.*/
+	u8 enable;
+	/* 1 = backpressure enabled, 0 = disabled.*/
+	u8 bpen;
+	/* CPU node */
+	u8 node;
+	/* Base channel (PKI_CHAN_E) */
+	u16 base_chan;
+	/* Number of channels */
+	u16 num_chans;
+	/* Diagnostics support: */
+	/* BGX number */
+	u8 sdp;
+	/* LMAC number */
+	u8 lmac;
+	/* PF value of PKIND (PKI port: BGX[]_CMR[]_RX_ID_MAP[pknd]).*/
+	u8 pkind;
+};
+
+/* SDP port status: */
+struct mbox_sdp_port_status {
+	/* 1 = link is up, 0 = link is down. */
+	u8 link_up;
+	/* 1 = LMAC is backpressured, 0 = no backpressure. */
+	u8 bp;
+};
+
+/* SDP port statistics: */
+struct mbox_sdp_port_stats {
+	u64 rx_packets;
+	u64 tx_packets;
+	u64 rx_bytes;
+	u64 tx_bytes;
+	u64 rx_errors;
+	u64 tx_errors;
+	u64 rx_dropped;
+	u64 tx_dropped;
+	u64 multicast;
+	u64 collisions;
+	/* Detailed receive errors. */
+	u64 rx_length_errors;
+	u64 rx_over_errors;
+	u64 rx_crc_errors;
+	u64 rx_frame_errors;
+	u64 rx_fifo_errors;
+	u64 rx_missed_errors;
+
+	/* Detailed transmit errors. */
+	u64 tx_aborted_errors;
+	u64 tx_carrier_errors;
+	u64 tx_fifo_errors;
+	u64 tx_heartbeat_errors;
+	u64 tx_window_errors;
+
+	/* Extended statistics based on RFC2819. */
+	u64 rx_1_to_64_packets;
+	u64 rx_65_to_127_packets;
+	u64 rx_128_to_255_packets;
+	u64 rx_256_to_511_packets;
+	u64 rx_512_to_1023_packets;
+	u64 rx_1024_to_1522_packets;
+	u64 rx_1523_to_max_packets;
+
+	u64 tx_1_to_64_packets;
+	u64 tx_65_to_127_packets;
+	u64 tx_128_to_255_packets;
+	u64 tx_256_to_511_packets;
+	u64 tx_512_to_1023_packets;
+	u64 tx_1024_to_1522_packets;
+	u64 tx_1523_to_max_packets;
+};
+
+struct mbox_sdp_reg {
+	u64 addr;
+	u64 val;
 };
 
 /*----------------------------------------------------------------------------*/
