@@ -600,6 +600,12 @@ static int pki_receive_message(u32 id, u16 domain_id,
 	case MBOX_PKI_PORT_HASH_CONFIG:
 		hdr->res_code = pki_port_hashcfg(vf, hdr->vfid, mdata);
 		break;
+	case MBOX_PKI_SET_PCAM_DMACH:
+		hdr->res_code = pki_port_set_pcam_dmach(vf, hdr->vfid, mdata);
+		break;
+	case MBOX_PKI_SET_PCAM_DMACL:
+		hdr->res_code = pki_port_set_pcam_dmacl(vf, hdr->vfid, mdata);
+		break;
 	}
 
 	mutex_unlock(&octeontx_pki_devices_lock);
