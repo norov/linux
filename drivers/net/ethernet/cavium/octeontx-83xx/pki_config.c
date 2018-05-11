@@ -26,7 +26,6 @@ enum PKI_PORT_STATE {
 	PKI_PORT_STOP	 = 3
 };
 
-
 static int pki_frmlen_reg(struct pki_t *pki, u16 maxlen, u16 minlen)
 {
 	u64 cfg;
@@ -883,5 +882,209 @@ int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 		pki_reg_write(pki, PKI_CLX_STYLEX_ALG(i, style), salg);
 		pki_reg_write(pki, PKI_CLX_STYLEX_CFG2(i, style), scfg2);
 	}
+	return MBOX_RET_SUCCESS;
+}
+
+#define  DMACH_SHIFT    32
+#define  DMACH_MASK     0x0000ffff
+#define  DMACL_SHIFT    0
+#define  DMACL_MASK     0xffffffff
+
+#define PCAM_TERM_E_DMACH  0xaULL
+#define PCAM_TERM_E_DMACL  0xbULL
+
+int pki_port_set_pcam_dmach(struct pkipf_vf *vf, u16 vf_id,
+			    struct mbox_pki_port_pcam_entry *cfg)
+{
+	struct pki_port *port;
+
+	union pki_clx_pcamx_termx_u   pcam_term;
+	union pki_clx_pcamx_matchx_u  pcam_match;
+	union pki_clx_pcamx_actionx_u pcam_action;
+
+	u16 maxlen = 0xffff;
+	u16 minlen = 0x20;
+
+	u64 mac_addr;
+	int i;
+	int bank = 0, index = 0;
+	struct pki_t *pki = vf->pki;
+
+	/* TO_DO add support for loopback ports later*/
+	port = &vf->bgx_port[vf_id];
+	if (port->state == PKI_PORT_CLOSE)
+		return MBOX_RET_INVALID;
+
+	mac_addr = cfg->mac_addr;
+	index = cfg->q_no;
+
+	dev_info(&pki->pdev->dev, " PKI:: DMACH MAC ADDR::%llx index::%d\n",
+		 mac_addr, index);
+
+	for (i = 0; i < pki->max_cls; i++) {
+		pcam_term.u = pki_reg_read(pki,
+					   PKI_CLX_PCAMX_TERMX(i, bank, index));
+		pcam_term.s.valid = 0;
+
+		/* disable the pcam */
+		pki_reg_write(pki, PKI_CLX_PCAMX_TERMX(i, bank, index),
+			      pcam_term.u);
+
+		pcam_match.u = pki_reg_read(pki,
+					    PKI_CLX_PCAMX_MATCHX(i,
+								 bank, index));
+
+		pcam_match.s.data1 =
+			((mac_addr) >> DMACH_SHIFT) & DMACH_MASK;
+		pcam_match.s.data0 =
+			~(((mac_addr) >> DMACH_SHIFT) & DMACH_MASK);
+
+		pki_reg_write(pki, PKI_CLX_PCAMX_MATCHX(i, bank, index),
+			      pcam_match.u);
+
+		pcam_action.u =
+			pki_reg_read(pki,
+				     PKI_CLX_PCAMX_ACTIONX(i, bank, index));
+
+		/* No action here. action will be taken when the lower 32-bit
+		 * address matches.
+		 */
+		pcam_action.s.pmc = 0;
+		pcam_action.s.style_add = 0;
+		pcam_action.s.pf = 0;
+		pcam_action.s.setty = 0;
+		pcam_action.s.advance = 0;
+
+		pki_reg_write(pki, PKI_CLX_PCAMX_ACTIONX(i, bank, index),
+			      pcam_action.u);
+
+		pcam_term.u = pki_reg_read(pki,
+					   PKI_CLX_PCAMX_TERMX(i, bank, index));
+
+		pcam_term.s.term1 = PCAM_TERM_E_DMACH;
+		pcam_term.s.term0 = ~PCAM_TERM_E_DMACH & 0xff;
+		pcam_term.s.valid = 1;
+
+		pki_reg_write(pki, PKI_CLX_PCAMX_TERMX(i, bank, index),
+			      pcam_term.u);
+	}
+
+	for (i = 0; i < pki->max_cls; i++) {
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACH CL[%d]_PCAM[%d]_TERM[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_TERMX(i, bank, index)));
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACH CL[%d]_PCAM[%d]_MATCH[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_MATCHX(i, bank, index)));
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACH CL[%d]_PCAM[%d]_ACTION[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_ACTIONX(i, bank, index)));
+	}
+
+	pki_reg_write(pki, PKI_FRM_LEN_CHKX(0),
+		      PKI_FRM_MINLEN(minlen) | PKI_FRM_MAXLEN(maxlen));
+	pki_reg_write(pki, PKI_FRM_LEN_CHKX(1),
+		      PKI_FRM_MINLEN(minlen) | PKI_FRM_MAXLEN(maxlen));
+
+	dev_info(&pki->pdev->dev, "PKI:: PKI_FRMLEN[0]:: 0x%llx\n",
+		 pki_reg_read(pki, PKI_FRM_LEN_CHKX(0)));
+	dev_info(&pki->pdev->dev, "PKI:: PKI_FRMLEN[1]:: 0x%llx\n",
+		 pki_reg_read(pki, PKI_FRM_LEN_CHKX(1)));
+
+	return MBOX_RET_SUCCESS;
+}
+
+int pki_port_set_pcam_dmacl(struct pkipf_vf *vf, u16 vf_id,
+			    struct mbox_pki_port_pcam_entry *cfg)
+{
+	struct pki_port *port;
+	union pki_clx_pcamx_termx_u   pcam_term;
+	union pki_clx_pcamx_matchx_u  pcam_match;
+	union pki_clx_pcamx_actionx_u pcam_action;
+	u64 mac_addr;
+	int i;
+	int bank = 1, index = 0;
+	struct pki_t *pki = vf->pki;
+
+	/* TO_DO add support for loopback ports later*/
+	port = &vf->bgx_port[vf_id];
+	if (port->state == PKI_PORT_CLOSE)
+		return MBOX_RET_INVALID;
+
+	mac_addr = cfg->mac_addr & 0xffffffffffff;
+	index = cfg->q_no;
+
+	dev_info(&pki->pdev->dev, " PKI:: DMACL MAC ADDR::%llx index::%d\n",
+		 mac_addr, index);
+
+	for (i = 0; i < pki->max_cls; i++) {
+		pcam_term.u = pki_reg_read(pki,
+					   PKI_CLX_PCAMX_TERMX(i, bank, index));
+
+		pcam_term.s.valid = 0;
+
+		/* disable the pcam */
+		pki_reg_write(pki, PKI_CLX_PCAMX_TERMX(i, bank, index),
+			      pcam_term.u);
+
+		pcam_match.u =
+			pki_reg_read(pki, PKI_CLX_PCAMX_MATCHX(i, bank, index));
+
+		pcam_match.s.data1 = (mac_addr) & DMACL_MASK;
+		pcam_match.s.data0 = ~((mac_addr) & DMACL_MASK);
+
+		pki_reg_write(pki,
+			      PKI_CLX_PCAMX_MATCHX(i, bank, index),
+			      pcam_match.u);
+
+		pcam_action.u =
+			pki_reg_read(pki,
+				     PKI_CLX_PCAMX_ACTIONX(i, bank, index));
+
+		pcam_action.s.pmc = 0;
+		pcam_action.s.style_add = index;
+		pcam_action.s.pf = 4;
+		pcam_action.s.setty = 0;
+		pcam_action.s.advance = 0;
+
+		pki_reg_write(pki,
+			      PKI_CLX_PCAMX_ACTIONX(i, bank, index),
+			      pcam_action.u);
+
+		pcam_term.u = pki_reg_read(pki,
+					   PKI_CLX_PCAMX_TERMX(i, bank, index));
+
+		pcam_term.s.term1 = PCAM_TERM_E_DMACL;
+		pcam_term.s.term0 = ~PCAM_TERM_E_DMACL & 0xff;
+		pcam_term.s.valid = 1;
+
+		pki_reg_write(pki,
+			      PKI_CLX_PCAMX_TERMX(i, bank, index), pcam_term.u);
+	}
+
+	for (i = 0; i < pki->max_cls; i++) {
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACL CL[%d]_PCAM[%d]_TERM[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_TERMX(i, bank, index)));
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACL CL[%d]_PCAM[%d]_MATCH[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_MATCHX(i, bank, index)));
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACL CL[%d]_PCAM[%d]_ACTION[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_ACTIONX(i, bank, index)));
+	}
+
 	return MBOX_RET_SUCCESS;
 }
