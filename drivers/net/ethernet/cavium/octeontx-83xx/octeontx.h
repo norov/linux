@@ -150,6 +150,22 @@ struct octtx_lbk_port {
 };
 
 extern atomic_t octtx_sso_reset[];
+/* Domain internal (SDP) port */
+#define OCTTX_MAX_SDP_PORTS 1 /* Maximum SDP ports per System */
 
+struct octtx_sdp_port {
+	struct list_head list;
+	int	domain_id;
+	int	dom_port_idx; /* Domain-local index of SDP port */
+	int	glb_port_idx; /* System global index of SDP port */
+	int	node; /* CPU node */
+	int	sdp; /* Node-local SDP device index */
+	int	lmac; /* BGX-local port/LMAC number/index */
+	int	lmac_type; /* OCTTX_BGX_LMAC_TYPE_nnn */
+	int	base_chan; /* Node-local base channel (PKI_CHAN_E) */
+	int	num_chans;
+	int	pkind; /* PKI port number */
+	int	link_up; /* Last retrieved link status */
+};
 #endif
 
