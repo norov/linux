@@ -129,6 +129,30 @@ int assign_pkind_lbk(struct pkipf_vf *vf, struct octtx_lbk_port *port)
 	return pkind;
 }
 
+int assign_pkind_sdp(struct pkipf_vf *vf, struct octtx_sdp_port *port)
+{
+	int pkind;
+
+	if (vf->sdp_port[port->dom_port_idx].valid)
+		return -EEXIST;
+
+	/* TO_DO use alloc/free resource */
+	pkind = SDP_PKIND_BASE;
+
+	if (pkind > (SDP_PKIND_BASE + MAX_SDP_PKIND))
+		return -EINVAL;
+	vf->sdp_port[port->dom_port_idx].valid = true;
+	vf->sdp_port[port->dom_port_idx].pkind = pkind;
+
+	/* by default disable fcs for bgx port as BGX is stripping it,
+	 * should be controllabe by app
+	 */
+	vf->sdp_port[port->dom_port_idx].has_fcs = false;
+	vf->sdp_port[port->dom_port_idx].state = PKI_PORT_CLOSE;
+
+	return pkind;
+}
+
 void init_styles(struct pki_t *pki)
 
 {
@@ -217,6 +241,9 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
+		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
 		break;
@@ -233,33 +260,58 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 	cfg = port->init_style & PKI_PKIND_STYLE_MASK;
 	for (i = 0; i < pki->max_cls; i++)
 		pki_reg_write(pki, PKI_CLX_PKINDX_STYLE(i, port->pkind), cfg);
-	cfg = port->has_fcs ? (0x1ULL << PKI_PKIND_CFG_FCS_SHIFT) : 0;
-	for (i = 0; i < pki->max_cls; i++)
-		pki_reg_write(pki, PKI_CLX_PKINDX_CFG(i, port->pkind), cfg);
-	/* Initialize style typical values*/
-	cfg = 0;
-	if (port->has_fcs) {
-		cfg |= (0x1ULL << PKI_STYLE_CFG_FCS_CHK_SHIFT);
-		cfg |= (0x1ULL << PKI_STYLE_CFG_FCS_STRIP_SHIFT);
-	}
-	cfg |= (0x1ULL << PKI_STYLE_CFG_LENERR_EN_SHIFT);
-	cfg |= (0x1ull << PKI_STYLE_CFG_DROP_SHIFT);
-	for (i = 0; i < pki->max_cls; i++)
-		pki_reg_write(pki, PKI_CLX_STYLEX_CFG(i, port->init_style),
-			      cfg);
 
-	cfg = 0;
-	cfg |= (0x1ULL << PKI_STYLE_CFG2_CSUM_LC_SHIFT);
-	cfg |= (0x1ULL << PKI_STYLE_CFG2_CSUM_LD_SHIFT);
-	cfg |= (0x1ULL << PKI_STYLE_CFG2_CSUM_LE_SHIFT);
-	cfg |= (0x1ULL << PKI_STYLE_CFG2_CSUM_LF_SHIFT);
-	cfg |= (0x1ULL << PKI_STYLE_CFG2_LEN_LC_SHIFT);
-	cfg |= (0x1ULL << PKI_STYLE_CFG2_LEN_LD_SHIFT);
-	cfg |= (0x1ULL << PKI_STYLE_CFG2_LEN_LE_SHIFT);
-	cfg |= (0x1ULL << PKI_STYLE_CFG2_LEN_LF_SHIFT);
-	for (i = 0; i < pki->max_cls; i++)
-		pki_reg_write(pki, PKI_CLX_STYLEX_CFG2(i, port->init_style),
-			      cfg);
+	if (port_data->port_type == OCTTX_PORT_TYPE_NET) {
+		cfg = port->has_fcs ? (0x1ULL << PKI_PKIND_CFG_FCS_SHIFT) : 0;
+		for (i = 0; i < pki->max_cls; i++)
+			pki_reg_write(pki, PKI_CLX_PKINDX_CFG(i, port->pkind),
+				      cfg);
+		/* Initialize style typical values*/
+		cfg = 0;
+		if (port->has_fcs) {
+			cfg |= (0x1ULL << PKI_STYLE_CFG_FCS_CHK_SHIFT);
+			cfg |= (0x1ULL << PKI_STYLE_CFG_FCS_STRIP_SHIFT);
+		}
+		cfg |= (0x1ULL << PKI_STYLE_CFG_LENERR_EN_SHIFT);
+		cfg |= (0x1ull << PKI_STYLE_CFG_DROP_SHIFT);
+		for (i = 0; i < pki->max_cls; i++)
+			pki_reg_write(pki,
+				      PKI_CLX_STYLEX_CFG(i, port->init_style),
+				      cfg);
+
+		cfg = 0;
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_CSUM_LC_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_CSUM_LD_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_CSUM_LE_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_CSUM_LF_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_LEN_LC_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_LEN_LD_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_LEN_LE_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_LEN_LF_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_TAG_DLC_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_TAG_DLF_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_TAG_SLC_SHIFT);
+		cfg |= (0x1ULL << PKI_STYLE_CFG2_TAG_SLF_SHIFT);
+		for (i = 0; i < pki->max_cls; i++)
+			pki_reg_write(pki,
+				      PKI_CLX_STYLEX_CFG2(i, port->init_style),
+				      cfg);
+	} else { /* For OCTTX_PORT_TYPE_HOST */
+		for (i = 0; i < pki->max_cls; i++) {
+			cfg = pki_reg_read(pki,
+					   PKI_CLX_PKINDX_CFG(i, port->pkind));
+			cfg |= (0x1ULL << PKI_PKIND_CFG_INST_SHIFT);
+			pki_reg_write(pki, PKI_CLX_PKINDX_CFG(i, port->pkind),
+				      cfg);
+		}
+
+		cfg  = 0;
+		for (i = 0; i < pki->max_cls; i++) {
+			pki_reg_write(pki,
+				      PKI_CLX_STYLEX_CFG(i, port->init_style),
+				      cfg);
+		}
+	} /* END OCTTX_PORT_TYPE_HOST */
 
 	port->state = PKI_PORT_OPEN;
 	port->qpg_base = QPG_INVALID;
@@ -280,6 +332,9 @@ int pki_port_alloc_qpg(struct pkipf_vf *vf, u16 vf_id,
 	switch (qpg_attr->port_type) {
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
@@ -317,6 +372,9 @@ int pki_port_free_qpg(struct pkipf_vf *vf, u16 vf_id,
 	switch (qpg_attr->port_type) {
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
@@ -359,6 +417,9 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
+		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
 		break;
@@ -382,6 +443,7 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 	}
 	for (i = 0; i < pki->max_cls; i++) {
 		cfg = pki_reg_read(pki, PKI_CLX_STYLEX_ALG(i, style));
+		cfg |= (1ull << PKI_STYLE_ALG_TAG_PRT_SHIFT);
 		set_field(&cfg, PKI_STYLE_ALG_QPG_QOS_MASK,
 			  PKI_STYLE_ALG_QPG_QOS_SHIFT, qcfg->qpg_qos);
 		set_field(&cfg, PKI_STYLE_ALG_TT_MASK,
@@ -404,6 +466,9 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 		set_field(&cfg, PKI_QPG_TBL_GRPTAG_OK_MASK,
 			  PKI_QPG_TBL_GRPTAG_OK_SHIFT, qpg->grptag_ok);
 		pki_reg_write(pki, PKI_QPG_TBLX(qpg_base + i), cfg);
+		dev_dbg(&pki->pdev->dev, "PKI : PKI_QPG_TBLX[%d] :: %llx\n",
+			(qpg_base + i),
+			pki_reg_read(pki, PKI_QPG_TBLX(qpg_base + i)));
 		cfg = pki_reg_read(pki, PKI_QPG_TBLBX(qpg_base + i));
 		set_field(&cfg, PKI_QPG_TBLB_STRM_MASK,
 			  PKI_QPG_TBLB_STRM_SHIFT, vf->stream_id);
@@ -412,12 +477,22 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 		set_field(&cfg, PKI_QPG_TBLB_ENA_DROP_MASK,
 			  PKI_QPG_TBLB_ENA_DROP_SHIFT, qpg->ena_drop);
 		pki_reg_write(pki, PKI_QPG_TBLBX(qpg_base + i), cfg);
+		dev_dbg(&pki->pdev->dev, "PKI : PKI_QPG_TBLBX[%d] :: %llx\n",
+			(qpg_base + i),
+			pki_reg_read(pki, PKI_QPG_TBLBX(qpg_base + i)));
+		dev_dbg(&pki->pdev->dev, "PKI : PKI_STREAM[%d] CFG ::%llx\n",
+			vf->stream_id,
+			pki_reg_read(pki, PKI_STRMX_CFG(vf->stream_id)));
 	}
 	for (i = 0; i < pki->max_cls; i++) {
 		cfg = pki_reg_read(pki, PKI_CLX_STYLEX_CFG(i, style));
 		set_field(&cfg, PKI_STYLE_CFG_QPG_BASE_MASK, 0, port->qpg_base);
 		pki_reg_write(pki, PKI_CLX_STYLEX_CFG(i, style), cfg);
 	}
+
+	dev_dbg(&pki->pdev->dev, "PKI : vf_id::[%d] port QPG BASE::%d type: %d\n",
+		vf_id, port->qpg_base, qcfg->port_type);
+
 	port->state = PKI_PORT_STOP;
 	return MBOX_RET_SUCCESS;
 }
@@ -435,6 +510,9 @@ int pki_set_port_config(struct pkipf_vf *vf, u16 vf_id,
 	switch (port_cfg->port_type) {
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
@@ -559,6 +637,9 @@ int pki_port_start(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
+		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
 		break;
@@ -573,6 +654,12 @@ int pki_port_start(struct pkipf_vf *vf, u16 vf_id,
 		cfg &= ~(0x1ULL << PKI_STYLE_CFG_DROP_SHIFT);
 		pki_reg_write(pki, PKI_CLX_STYLEX_CFG(i,
 						      port->init_style), cfg);
+
+		dev_dbg(&pki->pdev->dev,
+			"PKI: PKI_CL[%d]_STYLE[%d]_CFG : 0x%llx\n", i,
+			port->init_style,
+			pki_reg_read(pki,
+				     PKI_CLX_STYLEX_CFG(i, port->init_style)));
 	}
 	port->state = PKI_PORT_START;
 	return MBOX_RET_SUCCESS;
@@ -589,6 +676,9 @@ int pki_port_stop(struct pkipf_vf *vf, u16 vf_id,
 	switch (port_data->port_type) {
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
@@ -617,6 +707,9 @@ int pki_port_close(struct pkipf_vf *vf, u16 vf_id,
 	switch (port_data->port_type) {
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
@@ -652,6 +745,9 @@ int pki_port_pktbuf_cfg(struct pkipf_vf *vf, u16 vf_id,
 	switch (pcfg->port_type) {
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
@@ -736,6 +832,10 @@ int pki_port_pktbuf_cfg(struct pkipf_vf *vf, u16 vf_id,
 
 	pki_reg_write(pki, PKI_STYLEX_BUF(port->init_style), reg);
 
+	dev_dbg(&pki->pdev->dev,
+		"PKI: PKI_STYLE[%d]_BUF :: 0x%llx\n", port->init_style,
+		pki_reg_read(pki, PKI_STYLEX_BUF(port->init_style)));
+
 	return MBOX_RET_SUCCESS;
 }
 
@@ -753,6 +853,9 @@ int pki_port_errchk(struct pkipf_vf *vf, u16 vf_id,
 	switch (cfg->port_type) {
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
@@ -847,6 +950,9 @@ int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 	switch (cfg->port_type) {
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
+		break;
+	case OCTTX_PORT_TYPE_HOST:
+		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
 		port = &vf->lbk_port[vf_id];
