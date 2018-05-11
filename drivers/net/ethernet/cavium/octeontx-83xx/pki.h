@@ -473,6 +473,7 @@ struct pkipf_vf {
 
 	struct	pki_port	bgx_port[MAX_PKI_PORTS];
 	struct	pki_port	lbk_port[MAX_PKI_PORTS];
+	struct	pki_port	sdp_port[1];
 
 	/* In future if resources are allocated per domain */
 	int	max_fstyles;
@@ -545,6 +546,8 @@ struct pki_com_s {
 			    struct octtx_bgx_port *port);
 	int (*add_lbk_port)(u32 node, u16 domain_id,
 			    struct octtx_lbk_port *port);
+	int (*add_sdp_port)(u32 node, u16 domain_id,
+			    struct octtx_sdp_port *port);
 	int (*get_bgx_port_stats)(struct octtx_bgx_port *port);
 };
 
@@ -583,6 +586,7 @@ static inline void set_field(u64 *ptr, u64 field_mask, u8 field_shift, u64 val)
 
 int assign_pkind_bgx(struct pkipf_vf *vf, struct octtx_bgx_port *port);
 int assign_pkind_lbk(struct pkipf_vf *vf, struct octtx_lbk_port *port);
+int assign_pkind_sdp(struct pkipf_vf *vf, struct octtx_sdp_port *port);
 void init_styles(struct pki_t *pki);
 
 int pki_port_open(struct pkipf_vf *vf, u16 vf_id, mbox_pki_port_t *port_data);
