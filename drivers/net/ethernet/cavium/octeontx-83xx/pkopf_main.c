@@ -20,12 +20,16 @@
 /* PKO MAC type (enumerated by PKO_LMAC_E) */
 #define PKO_MAC_LBK	0
 #define PKO_MAC_BGX	1
-#define PKO_MAC_DPI	2
+#define PKO_MAC_HOST	2
 
 #define PKO_CHAN_NULL	0xFFF
 
 #define LBK_CHAN_BASE	0x0
 #define LBK_CHAN_RANGE	BIT(8)
+
+#define SDP_MAC_NUM     2
+#define SDP_CHAN_BASE	0x400
+#define SDP_CHAN_RANGE	BIT(8)
 
 #define BGX_CHAN_BASE	0x800
 #define BGX_CHAN_RANGE	BIT(8)
@@ -78,6 +82,16 @@ static int pko_get_bgx_mac(int bgx, int lmac)
 {
 	/* 3 = PKO BGX base MAC, 0x4 = number of MACs used by BGX. */
 	return 3 + (0x4 * bgx) + lmac;
+}
+
+static int pko_get_sdp_chan(int sdp, int lmac, int chan)
+{
+	return  SDP_CHAN_BASE + (chan);
+}
+
+static int pko_get_sdp_mac(int sdp, int lmac)
+{
+	return lmac;
 }
 
 static int pko_get_lbk_chan(int lbk, int chan)
@@ -751,6 +765,7 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 	u64 size = 0; /* {2.5, 2.5, 2.5, 2.5}KB */
 	u64 skid = 0x0; /* 16 */
 	u64 rate = 0x0; /* 6.25 Gpbs (6 inflight packets) */
+	u64 min_pad = 0x1; /* Minimum padding enable */
 
 	/* 1. FIFO group assignment map:
 	 * G0 (FIFOs: 0,1,2,3)     -- BGX0            (mac_num = 3,4,5,6)
@@ -800,9 +815,15 @@ static int pko_mac_init(struct pkopf *pko, int mac_num, int mac_mode)
 		default: /* SGMII, ... */
 			break;
 		}
-	} else if (mac_num >= 0 && mac_num <= 2) { /* LBK */
+	} else if (mac_num >= 0 && mac_num <= 2) { /* LBK/SDP */
 		fifo = mac_num + 16;
 		ptgf = 4;
+		size = 2; /* {2.5, 2.5, 5.0, ---}KB */
+		if (mac_num == SDP_MAC_NUM) { /* SDP */
+			rate = 0x3; /* 50 Gpbs (48 inflight packets) */
+			skid = 0x2; /* 64 */
+			min_pad = 0x0;
+		}
 	} else if (mac_num == 19) { /* NULL */
 		fifo = 19;
 		ptgf = 5;
@@ -850,20 +871,41 @@ static void pko_pq_init(struct pkopf *pko, int vf, int mac_num, u32 max_frame)
 	u64 queue_base = vf * 8;
 	u64 reg;
 
-	/* If single child PRIORITY must be 0xF */
-	reg = (mac_num << 16) |
-		(queue_base << 32) |
-		(0xFull << 1);
+	if (mac_num != SDP_MAC_NUM) { /* BGX MAC specific configuration */
+		/* If single child PRIORITY must be 0xF */
+		reg = (mac_num << 16) |
+			(queue_base << 32) |
+			(0xFull << 1);
+	} else { /* SDP MAC specific configuration */
+		reg = (mac_num << 16) |
+			(queue_base << 32);
+	}
 	pko_reg_write(pko, PKO_PF_L1_SQX_TOPOLOGY(mac_num), reg);
+
+	dev_dbg(&pko->pdev->dev, "PKO: VF[%d] L1_SQ[%d]_TOPOLOGY ::0x%llx\n",
+		vf, mac_num,
+		pko_reg_read(pko, PKO_PF_L1_SQX_TOPOLOGY(mac_num)));
 
 	reg = (mac_num << 13);
 	pko_reg_write(pko, PKO_PF_L1_SQX_SHAPE(mac_num), reg);
 
-	reg = min(max_frame + 40, (u32)0xffffff);
-	pko_reg_write(pko, PKO_PF_L1_SQX_SCHEDULE(mac_num), reg);
+	dev_dbg(&pko->pdev->dev, "PKO: VF[%d] L1_SQ[%d]_SHAPE ::0x%llx\n",
+		vf, mac_num, pko_reg_read(pko, PKO_PF_L1_SQX_SHAPE(mac_num)));
+
+	if (mac_num != SDP_MAC_NUM) {  /* BGX MAC specific configuration */
+		reg = min(max_frame + 40, (u32)0xffffff);
+		pko_reg_write(pko, PKO_PF_L1_SQX_SCHEDULE(mac_num), reg);
+		dev_dbg(&pko->pdev->dev,
+			"PKO: VF[%d] L1_SQ[%d]_SCHEDULE ::0x%llx\n",
+			vf, mac_num,
+			pko_reg_read(pko, PKO_PF_L1_SQX_SCHEDULE(mac_num)));
+	}
 
 	reg = (mac_num | 0ULL) << 44;
 	pko_reg_write(pko, PKO_PF_L1_SQX_LINK(mac_num), reg);
+
+	dev_dbg(&pko->pdev->dev, "PKO: VF[%d] L1_SQ[%d]_LINK ::0x%llx\n",
+		vf, mac_num, pko_reg_read(pko, PKO_PF_L1_SQX_LINK(mac_num)));
 }
 
 static void pko_pq_teardown(struct pkopf *pko, int mac_num)
@@ -941,7 +983,12 @@ static int pko_sq_init(struct pkopf *pko, int vf, int level, u32 channel,
 	channel_level = pko_reg_read(pko, PKO_PF_CHANNEL_LEVEL);
 	channel_level += 2;
 
-	queue_base = (vf * 8);
+	dev_dbg(&pko->pdev->dev, "%s: channel_level: %d\n",
+		__func__, channel_level);
+	if (mac_num != SDP_MAC_NUM)  /* BGX MAC specific configuration */
+		queue_base = (vf * 8);
+	else  /* SDP MAC specific configuration */
+		queue_base = (vf * 8) + (channel & 0x3f);
 
 	reg = min(max_frame + 40, (u32)0xffffff);
 	pko_lX_set_schedule(pko, level, queue_base, reg);
@@ -950,18 +997,32 @@ static int pko_sq_init(struct pkopf *pko, int vf, int level, u32 channel,
 	pko_lX_set_shape(pko, level, queue_base, reg);
 
 	reg = (parent_sq << 16);
-	if (level != pko->max_levels) {
+
+	if (mac_num == SDP_MAC_NUM) {  /* SDP MAC specific configuration */
 		reg |= ((0ULL | queue_base) << 32);
-		reg |= (0xf << 1);
+	} else {  /* BGX MAC specific configuration */
+		if (level != pko->max_levels) {
+			reg |= ((0ULL | queue_base) << 32);
+			reg |= (0xf << 1);
+		}
 	}
 	pko_lX_set_topology(pko, level, queue_base, reg);
 
+	dev_dbg(&pko->pdev->dev,
+		"%s: level: %d, channel_level: %d pko->max_levels: %d\n",
+		 __func__, level, channel_level, pko->max_levels);
 	if (level == channel_level) {
 		reg = ((channel | 0ULL) & 0xffful) << 32;
 		pko_reg_write(pko, PKO_PF_L3_L2_SQX_CHANNEL(queue_base), reg);
+		dev_dbg(&pko->pdev->dev, "PKO: L3_L2_SQ[%d]_CHANNEL ::0x%llx\n",
+			queue_base,
+			pko_reg_read(pko,
+				     PKO_PF_L3_L2_SQX_CHANNEL(queue_base)));
 
 		reg = (queue_base) | (1Ull << 15) | (mac_num << 9);
 		pko_reg_write(pko, PKO_PF_LUTX(channel), reg);
+		dev_dbg(&pko->pdev->dev, "PKO: PF_LTUX[%d] ::0x%llx\n",
+			channel, pko_reg_read(pko, PKO_PF_LUTX(channel)));
 	}
 
 	return queue_base;
@@ -989,7 +1050,7 @@ static void pko_sq_teardown(struct pkopf *pko, int vf, int level, u32 channel,
 	}
 }
 
-static void pko_dq_init(struct pkopf *pko, int vf)
+static void pko_dq_init(struct pkopf *pko, int vf, int mac_num)
 {
 	int queue_base, i;
 	u64 reg;
@@ -997,14 +1058,29 @@ static void pko_dq_init(struct pkopf *pko, int vf)
 	queue_base = vf * 8;
 	reg = queue_base << 16;
 	for (i = 0; i < 8; i++) {
+		/* for SDP MAC, 8 dqs are mapped to 8 sq_l3s */
+		if (mac_num == SDP_MAC_NUM)  /* SDP specific configuration */
+			reg = (queue_base + i) << 16;
+
 		pko_reg_write(pko, PKO_PF_DQX_TOPOLOGY(queue_base + i), reg);
+		dev_dbg(&pko->pdev->dev, "PKO: DQ[%d]_TOPOLOGY ::0x%llx\n",
+			(queue_base + i),
+			pko_reg_read(pko, PKO_PF_DQX_TOPOLOGY(queue_base + i)));
 
 		/* PRIO = 0, RR_QUANTUM = max */
 		pko_reg_write(pko, PKO_PF_DQX_SCHEDULE(queue_base + i),
 			      0xffffff);
+		dev_dbg(&pko->pdev->dev, "PKO: DQ[%d]_SCHEDULE ::0x%llx\n",
+			(queue_base + i),
+			pko_reg_read(pko, PKO_PF_DQX_SCHEDULE(queue_base + i)));
 
-		pko_reg_write(pko, PKO_PF_DQX_SHAPE(queue_base + i), 0x0);
-		pko_reg_write(pko, PKO_PF_PDM_DQX_MINPAD(queue_base + i), 0x1);
+		if (mac_num != SDP_MAC_NUM) {
+			pko_reg_write(pko, PKO_PF_DQX_SHAPE(queue_base + i),
+				      0x0);
+			pko_reg_write(pko,
+				      PKO_PF_PDM_DQX_MINPAD(queue_base + i),
+				      0x1);
+		}
 	}
 }
 
@@ -1025,20 +1101,45 @@ static int pko_pstree_setup(struct pkopf *pko, int vf, u32 max_frame,
 			    int mac_num, int mac_mode, int channel)
 {
 	int lvl;
-	int err;
+	int err, i, dq_cnt;
 
 	err = pko_mac_init(pko, mac_num, mac_mode);
 	if (err)
 		return -ENODEV;
 
+	dev_dbg(&pko->pdev->dev, "%s: vf: %d, mac_num: %d, max_frame: %d\n",
+		__func__, vf, mac_num, max_frame);
 	pko_pq_init(pko, vf, mac_num, max_frame);
 
 	err = mac_num;
-	for (lvl = 2; lvl <= pko->max_levels; lvl++)
-		err = pko_sq_init(pko, vf, lvl, channel, mac_num,
-				  max_frame, err);
+	if (mac_num != SDP_MAC_NUM) { /* BGX MAC specific configuration */
+		for (lvl = 2; lvl <= pko->max_levels; lvl++)
+			err = pko_sq_init(pko, vf, lvl, channel, mac_num,
+					  max_frame, err);
+	} else { /* SDP MAC specific configuration */
+		/* TODO pko_vf:1 is for SDP, Map sq_l2, sq_l3 for all the DQs.*/
+		dq_cnt = 8;
+		lvl = 2;
 
-	pko_dq_init(pko, vf);
+		for (i = 0; i < dq_cnt; i++) {
+			err = mac_num;
+			dev_dbg(&pko->pdev->dev, "%s: vf: %d, lvl: %d, channel: %d, i : %d, max_frame: %d, err: %d\n",
+				__func__, vf, lvl, channel, i, max_frame, err);
+			pko_sq_init(pko, vf, lvl, channel + i, mac_num,
+				    max_frame, err);
+		}
+
+		lvl = 3;
+
+		for (i = 0; i < dq_cnt; i++) {
+			err = (vf * 8) + i;
+			dev_dbg(&pko->pdev->dev, "%s: vf: %d, lvl: %d, channel: %d, i : %d, max_frame: %d, err: %d\n",
+				__func__, vf, lvl, channel, i, max_frame, err);
+			pko_sq_init(pko, vf, lvl, channel + i, mac_num,
+				    max_frame, err);
+		}
+	}
+	pko_dq_init(pko, vf, mac_num);
 
 	return 0;
 }
