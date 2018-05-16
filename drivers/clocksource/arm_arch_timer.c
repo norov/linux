@@ -807,7 +807,7 @@ static void arch_timer_evtstrm_enable(int divider)
 	elf_hwcap |= HWCAP_EVTSTRM;
 #endif
 #ifdef CONFIG_AARCH32_EL0
-	compat_elf_hwcap |= COMPAT_HWCAP_EVTSTRM;
+	a32_elf_hwcap |= COMPAT_HWCAP_EVTSTRM;
 #endif
 	cpumask_set_cpu(smp_processor_id(), &evtstrm_available);
 }
