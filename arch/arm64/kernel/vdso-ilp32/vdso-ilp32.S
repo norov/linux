@@ -1,7 +1,7 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0 */
+
 /*
  * Copyright (C) 2012 ARM Limited
- *
  * Author: Will Deacon <will.deacon@arm.com>
  */
 
@@ -10,12 +10,13 @@
 #include <linux/const.h>
 #include <asm/page.h>
 
-	.globl vdso_lp64_start, vdso_lp64_end
-	.section .rodata
+	__PAGE_ALIGNED_DATA
+
+	.globl vdso_ilp32_start, vdso_ilp32_end
 	.balign PAGE_SIZE
-vdso_lp64_start:
-	.incbin "arch/arm64/kernel/vdso/vdso.so"
+vdso_ilp32_start:
+	.incbin "arch/arm64/kernel/vdso-ilp32/vdso-ilp32.so"
 	.balign PAGE_SIZE
-vdso_lp64_end:
+vdso_ilp32_end:
 
 	.previous
