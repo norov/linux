@@ -7,6 +7,7 @@
  */
 
 #include <linux/bug.h>
+#include <linux/compat.h>
 #include <linux/signal.h>
 #include <linux/personality.h>
 #include <linux/kallsyms.h>
