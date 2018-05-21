@@ -592,7 +592,7 @@ static int fpa_irq_init(struct fpapf *fpa)
 	u64 ecc_int = ((0ULL | FPA_ECC_RAM_SBE_MASK) << FPA_ECC_RAM_SBE_SHIFT) |
 		((0ULL | FPA_ECC_RAM_DBE_MASK) << FPA_ECC_RAM_DBE_SHIFT);
 	u64 gen_int = 0x1f;
-	int i, ret;
+	int ret;
 
 	/*clear ECC irq status */
 	fpa_reg_write(fpa, FPA_PF_ECC_INT_ENA_W1C, ecc_int);
@@ -605,14 +605,7 @@ static int fpa_irq_init(struct fpapf *fpa)
 		return ret;
 	}
 
-	fpa->msix_entries = devm_kzalloc(&fpa->pdev->dev,
-			ret * sizeof(struct msix_entry), GFP_KERNEL);
-	if (!fpa->msix_entries)
-		return -ENOMEM;
-	for (i = 0; i < ret; i++)
-		fpa->msix_entries[i].entry = i;
-
-	ret = pci_enable_msix(fpa->pdev, fpa->msix_entries, ret);
+	ret = pci_alloc_irq_vectors(fpa->pdev, ret, ret, PCI_IRQ_MSIX);
 	if (ret) {
 		dev_err(&fpa->pdev->dev, "Enabling msix failed\n");
 		return ret;
