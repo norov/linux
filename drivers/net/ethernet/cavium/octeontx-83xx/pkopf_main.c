@@ -529,16 +529,8 @@ static int pko_irq_init(struct pkopf *pko)
 	for (i = 0; i < PKO_MSIX_COUNT; i++)
 		pko_reg_write(pko, intr[i].coffset, intr[i].mask);
 
-	pko->msix_entries = devm_kzalloc(&pko->pdev->dev,
-			PKO_MSIX_COUNT * sizeof(struct msix_entry), GFP_KERNEL);
-
-	if (!pko->msix_entries)
-		return -ENOMEM;
-
-	for (i = 0; i < PKO_MSIX_COUNT; i++)
-		pko->msix_entries[i].entry = i;
-
-	ret = pci_enable_msix(pko->pdev, pko->msix_entries, PKO_MSIX_COUNT);
+	ret = pci_alloc_irq_vectors(pko->pdev, PKO_MSIX_COUNT,
+					PKO_MSIX_COUNT, PCI_IRQ_MSIX);
 	if (ret) {
 		dev_err(&pko->pdev->dev, "Enabling msix failed\n");
 		return ret;

@@ -880,15 +880,8 @@ static int sso_irq_init(struct ssopf *sso)
 	sso_reg = SSO_MBOX;
 	sso_reg_write(sso, SSO_PF_MBOX_ENA_W1C, sso_reg);
 
-	sso->msix_entries = devm_kzalloc(&sso->pdev->dev,
-			SSO_PF_MSIX_COUNT *
-			sizeof(struct msix_entry), GFP_KERNEL);
-	if (!sso->msix_entries)
-		return -ENOMEM;
-	for (i = 0; i < SSO_PF_MSIX_COUNT; i++)
-		sso->msix_entries[i].entry = i;
-
-	ret = pci_enable_msix(sso->pdev, sso->msix_entries, SSO_PF_MSIX_COUNT);
+	ret = pci_alloc_irq_vectors(sso->pdev, SSO_PF_MSIX_COUNT,
+					SSO_PF_MSIX_COUNT, PCI_IRQ_MSIX);
 	if (ret) {
 		dev_err(&sso->pdev->dev, "Enabling msix failed(%d)\n", ret);
 		return ret;
