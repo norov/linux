@@ -668,25 +668,6 @@ int pki_add_lbk_port(u32 id, u16 domain_id, struct octtx_lbk_port *port)
 	return pkind;
 }
 
-int pki_add_sdp_port(u32 id, u16 domain_id, struct octtx_sdp_port *port)
-{
-	struct pkipf_vf *vf = NULL;
-	int pkind;
-
-	mutex_lock(&octeontx_pki_devices_lock);
-
-	vf = pki_get_vf(id, domain_id);
-	if (!vf) {
-		mutex_unlock(&octeontx_pki_devices_lock);
-		return -ENODEV;
-	}
-
-	pkind = assign_pkind_sdp(vf, port);
-
-	mutex_unlock(&octeontx_pki_devices_lock);
-	return pkind;
-}
-
 int pki_get_bgx_port_stats(struct octtx_bgx_port *port)
 {
 	struct pki_t *pki;
@@ -709,8 +690,7 @@ struct pki_com_s pki_com  = {
 	.receive_message = pki_receive_message,
 	.add_bgx_port = pki_add_bgx_port,
 	.add_lbk_port = pki_add_lbk_port,
-	.add_sdp_port = pki_add_sdp_port,
-	.get_bgx_port_stats = pki_get_bgx_port_stats
+	.get_bgx_port_stats = pki_get_bgx_port_stats,
 };
 EXPORT_SYMBOL(pki_com);
 
