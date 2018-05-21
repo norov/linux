@@ -478,7 +478,7 @@ static int tim_irq_init(struct timpf *tim)
 	for (i = 0; i < TIM_PF_MSIX_COUNT; i++)
 		tim_reg_write(tim, intr[i].coffset, intr[i].mask);
 
-	ret = pci_alloc_vectors(tim->pdev, TIM_PF_MSIX_COUNT,
+	ret = pci_alloc_irq_vectors(tim->pdev, TIM_PF_MSIX_COUNT,
 				TIM_PF_MSIX_COUNT, PCI_IRQ_MSIX);
 	if (ret) {
 		dev_err(&tim->pdev->dev, "Failed to enable TIM MSIX.\n");

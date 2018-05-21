@@ -487,16 +487,8 @@ static int pki_irq_init(struct pki_t *pki)
 	for (i = 0; i < PKI_MSIX_COUNT; i++)
 		pki_reg_write(pki, intr[i].coffset, intr[i].mask);
 
-	pki->msix_entries = devm_kzalloc(&pki->pdev->dev,
-			PKI_MSIX_COUNT * sizeof(struct msix_entry), GFP_KERNEL);
-
-	if (!pki->msix_entries)
-		return -ENOMEM;
-
-	for (i = 0; i < PKI_MSIX_COUNT; i++)
-		pki->msix_entries[i].entry = i;
-
-	ret = pci_enable_msix(pki->pdev, pki->msix_entries, PKI_MSIX_COUNT);
+	ret = pci_alloc_irq_vectors(pki->pdev, PKI_MSIX_COUNT,
+					PKI_MSIX_COUNT, PCI_IRQ_MSIX);
 	if (ret) {
 		dev_err(&pki->pdev->dev, "Enabling msix failed\n");
 		return ret;
