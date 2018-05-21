@@ -478,15 +478,8 @@ static int tim_irq_init(struct timpf *tim)
 	for (i = 0; i < TIM_PF_MSIX_COUNT; i++)
 		tim_reg_write(tim, intr[i].coffset, intr[i].mask);
 
-	tim->msix_entries = devm_kzalloc(&tim->pdev->dev,
-		TIM_PF_MSIX_COUNT * sizeof(struct msix_entry), GFP_KERNEL);
-	if (!tim->msix_entries)
-		return -ENOMEM;
-
-	for (i = 0; i < TIM_PF_MSIX_COUNT; i++)
-		tim->msix_entries[i].entry = i;
-
-	ret = pci_enable_msix(tim->pdev, tim->msix_entries, TIM_PF_MSIX_COUNT);
+	ret = pci_alloc_vectors(tim->pdev, TIM_PF_MSIX_COUNT,
+				TIM_PF_MSIX_COUNT, PCI_IRQ_MSIX);
 	if (ret) {
 		dev_err(&tim->pdev->dev, "Failed to enable TIM MSIX.\n");
 		return ret;
