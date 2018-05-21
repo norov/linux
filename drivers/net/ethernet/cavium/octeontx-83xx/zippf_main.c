@@ -457,15 +457,8 @@ static int zip_irq_init(struct zippf *zip)
 	zip_reg_write(zip, ZIP_PF_FIFE_ENA_W1C, zip_reg);
 	zip_reg_write(zip, ZIP_PF_MBOX_ENA_W1C, zip_reg);
 
-	zip->msix_entries = devm_kzalloc(&zip->pdev->dev,
-			ZIP_PF_MSIX_COUNT *
-			sizeof(struct msix_entry), GFP_KERNEL);
-	if (!zip->msix_entries)
-		return -ENOMEM;
-	for (i = 0; i < ZIP_PF_MSIX_COUNT; i++)
-		zip->msix_entries[i].entry = i;
-
-	ret = pci_enable_msix(zip->pdev, zip->msix_entries, ZIP_PF_MSIX_COUNT);
+	ret = pci_alloc_irq_vectors(zip->pdev, ZIP_PF_MSIX_COUNT,
+					ZIP_PF_MSIX_COUNT, PCI_IRQ_MSIX);
 	if (ret) {
 		dev_err(&zip->pdev->dev, "Enabling msix failed(%d)\n", ret);
 		return ret;
