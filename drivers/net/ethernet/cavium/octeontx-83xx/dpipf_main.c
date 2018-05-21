@@ -469,17 +469,8 @@ static int dpi_irq_init(struct dpipf *dpi)
 		dpi_reg_write(dpi, DPI_DMA_CCX_INT_ENA_W1C(i), DPI_DMA_CC_INT);
 	}
 
-	dpi->msix_entries =
-	devm_kzalloc(&dpi->pdev->dev,
-		     DPI_PF_MSIX_COUNT * sizeof(struct msix_entry), GFP_KERNEL);
-
-	if (!dpi->msix_entries)
-		return -ENOMEM;
-
-	for (i = 0; i < DPI_PF_MSIX_COUNT; i++)
-		dpi->msix_entries[i].entry = i;
-
-	ret = pci_enable_msix(dpi->pdev, dpi->msix_entries, DPI_PF_MSIX_COUNT);
+	ret = pci_alloc_irq_vectors(dpi->pdev, DPI_PF_MSIX_COUNT,
+					DPI_PF_MSIX_COUNT, PCI_IRQ_MSIX);
 	if (ret) {
 		dev_err(&dpi->pdev->dev, "Enabling msix failed\n");
 		goto free_entries;
