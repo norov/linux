@@ -908,8 +908,14 @@ typedef struct mbox_pki_port_modify_qos_entry {
 /* Program PCAM with ethernet header */
 struct mbox_pki_port_pcam_entry {
 	u8 port_type;
+	/* mac address to be programmed in the pcam entry */
 	u64 mac_addr;
-	u64 q_no;
+	/* selects index of the pcam entry to be programmed */
+	u64 index;
+	/* 0 = pcam entry will be programmed with the mac_addr passed
+	 * 1 = this pcam entry will be freed, mac_addr field is ignored
+	 */
+	u8 free_pcam;
 };
 
 #endif
