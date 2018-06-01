@@ -19,6 +19,7 @@
 #include <linux/irqchip/arm-gic-v3.h>
 #include <linux/kvm_host.h>
 
+#include <asm/kvm_emulate.h>
 #include <asm/kvm_hyp.h>
 
 #define vtr_to_max_lr_idx(v)		((v) & 0xf)
@@ -208,6 +209,9 @@ void __hyp_text __vgic_v3_save_state(struct kvm_vcpu *vcpu)
 
 		vcpu->arch.vgic_cpu.live_lrs = 0;
 	} else {
+		if (static_branch_unlikely(&vgic_v3_cpuif_trap))
+			write_gicreg(0, ICH_HCR_EL2);
+
 		cpu_if->vgic_misr  = 0;
 		cpu_if->vgic_eisr  = 0;
 		cpu_if->vgic_elrsr = 0xffff;
@@ -292,6 +296,14 @@ void __hyp_text __vgic_v3_restore_state(struct kvm_vcpu *vcpu)
 
 			__gic_v3_set_lr(cpu_if->vgic_lr[i], i);
 		}
+	} else {
+		/*
+		 * If we need to trap system registers, we must write
+		 * ICH_HCR_EL2 anyway, even if no interrupts are being
+		 * injected,
+		 */
+		if (static_branch_unlikely(&vgic_v3_cpuif_trap))
+			write_gicreg(cpu_if->vgic_hcr, ICH_HCR_EL2);
 	}
 
 	/*
