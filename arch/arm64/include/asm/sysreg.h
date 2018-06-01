@@ -86,6 +86,7 @@
 #define SYS_ICC_AP0Rn_EL1(n)		sys_reg(3, 0, 12, 8, 4 | n)
 #define SYS_ICC_AP1Rn_EL1(n)		sys_reg(3, 0, 12, 9, n)
 #define SYS_ICC_HPPIR1_EL1		sys_reg(3, 0, 12, 12, 2)
+#define SYS_ICC_GRPEN0_EL1		sys_reg(3, 0, 12, 12, 6)
 
 #define REG_PSTATE_PAN_IMM		sys_reg(0, 0, 4, 0, 4)
 #define REG_PSTATE_UAO_IMM		sys_reg(0, 0, 4, 0, 3)

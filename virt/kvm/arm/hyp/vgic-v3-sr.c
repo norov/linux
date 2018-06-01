@@ -748,9 +748,28 @@ __vgic_v3_write_eoir(struct kvm_vcpu *vcpu, u32 vmcr, int rt)
 }
 
 static void __hyp_text
+__vgic_v3_read_igrpen0(struct kvm_vcpu *vcpu, u32 vmcr, int rt)
+{
+	vcpu_set_reg(vcpu, rt, !!(vmcr & ICH_VMCR_ENG0_MASK));
+}
+
+static void __hyp_text
 __vgic_v3_read_igrpen1(struct kvm_vcpu *vcpu, u32 vmcr, int rt)
 {
 	vcpu_set_reg(vcpu, rt, !!(vmcr & ICH_VMCR_ENG1_MASK));
+}
+
+static void __hyp_text
+__vgic_v3_write_igrpen0(struct kvm_vcpu *vcpu, u32 vmcr, int rt)
+{
+	u64 val = vcpu_get_reg(vcpu, rt);
+
+	if (val & 1)
+		vmcr |= ICH_VMCR_ENG0_MASK;
+	else
+		vmcr &= ~ICH_VMCR_ENG0_MASK;
+
+	__vgic_v3_write_vmcr(vmcr);
 }
 
 static void __hyp_text
@@ -976,6 +995,12 @@ int __hyp_text __vgic_v3_perform_cpuif_access(struct kvm_vcpu *vcpu)
 	case SYS_ICC_HPPIR0_EL1:
 	case SYS_ICC_HPPIR1_EL1:
 		fn = __vgic_v3_read_hppir;
+		break;
+	case SYS_ICC_GRPEN0_EL1:
+		if (is_read)
+			fn = __vgic_v3_read_igrpen0;
+		else
+			fn = __vgic_v3_write_igrpen0;
 		break;
 	case SYS_ICC_BPR0_EL1:
 		if (is_read)
