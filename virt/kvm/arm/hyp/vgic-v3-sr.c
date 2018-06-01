@@ -204,6 +204,90 @@ static u32 __hyp_text __vgic_v3_read_ap1rn(int n)
 	return val;
 }
 
+static void __hyp_text __vgic_v3_write_ap0rn(u32 val, int n)
+{
+	switch (n) {
+	case 0:
+		write_gicreg(val, ICH_AP0R0_EL2);
+		break;
+	case 1:
+		write_gicreg(val, ICH_AP0R1_EL2);
+		break;
+	case 2:
+		write_gicreg(val, ICH_AP0R2_EL2);
+		break;
+	case 3:
+		write_gicreg(val, ICH_AP0R3_EL2);
+		break;
+	}
+}
+
+static void __hyp_text __vgic_v3_write_ap1rn(u32 val, int n)
+{
+	switch (n) {
+	case 0:
+		write_gicreg(val, ICH_AP1R0_EL2);
+		break;
+	case 1:
+		write_gicreg(val, ICH_AP1R1_EL2);
+		break;
+	case 2:
+		write_gicreg(val, ICH_AP1R2_EL2);
+		break;
+	case 3:
+		write_gicreg(val, ICH_AP1R3_EL2);
+		break;
+	}
+}
+
+static u32 __hyp_text __vgic_v3_read_ap0rn(int n)
+{
+	u32 val;
+
+	switch (n) {
+	case 0:
+		val = read_gicreg(ICH_AP0R0_EL2);
+		break;
+	case 1:
+		val = read_gicreg(ICH_AP0R1_EL2);
+		break;
+	case 2:
+		val = read_gicreg(ICH_AP0R2_EL2);
+		break;
+	case 3:
+		val = read_gicreg(ICH_AP0R3_EL2);
+		break;
+	default:
+		unreachable();
+	}
+
+	return val;
+}
+
+static u32 __hyp_text __vgic_v3_read_ap1rn(int n)
+{
+	u32 val;
+
+	switch (n) {
+	case 0:
+		val = read_gicreg(ICH_AP1R0_EL2);
+		break;
+	case 1:
+		val = read_gicreg(ICH_AP1R1_EL2);
+		break;
+	case 2:
+		val = read_gicreg(ICH_AP1R2_EL2);
+		break;
+	case 3:
+		val = read_gicreg(ICH_AP1R3_EL2);
+		break;
+	default:
+		unreachable();
+	}
+
+	return val;
+}
+
 void __hyp_text __vgic_v3_save_state(struct kvm_vcpu *vcpu)
 {
 	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
