@@ -568,7 +568,7 @@ static void nic_send_rss_size(struct nicpf *nic, int vf)
 
 	msg = (u64 *)&mbx;
 
-	mbx.rss_size.msg = NIC_MBOX_MSG_RSS_SIZE | NIC_MBOX_MSG_RES_BIT;
+	mbx.rss_size.msg = NIC_MBOX_MSG_RSS_SIZE;
 	mbx.rss_size.ind_tbl_size = nic->hw->rss_ind_tbl_size;
 	nic_send_msg_to_vf(nic, vf, &mbx);
 }
@@ -895,9 +895,8 @@ static void nic_alloc_sqs(struct nicpf *nic, u8 pvf, struct sqs_alloc *sqs)
 	}
 
 send_mbox:
-	mbx.sqs_alloc.msg = NIC_MBOX_MSG_ALLOC_SQS | NIC_MBOX_MSG_RES_BIT;
-	mbx.sqs_alloc.spec = sqs->spec;
-	mbx.sqs_alloc.qs_count = alloc_qs; /* 0 for failure (NACK) */
+	mbx.sqs_alloc.msg = NIC_MBOX_MSG_ALLOC_SQS;
+	mbx.sqs_alloc.qs_count = alloc_qs;
 	nic_send_msg_to_vf(nic, pvf, &mbx);
 }
 
