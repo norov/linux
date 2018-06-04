@@ -496,8 +496,8 @@ static int pki_irq_init(struct pki_t *pki)
 	for (i = 0; i < PKI_MSIX_COUNT; i++)
 		pki->msix_entries[i].entry = i;
 
-	ret = pci_enable_msix(pki->pdev, pki->msix_entries, PKI_MSIX_COUNT);
-	if (ret) {
+	ret = pci_enable_msix_range(pki->pdev, pki->msix_entries, 1, PKI_MSIX_COUNT);
+	if (ret < 0) {
 		dev_err(&pki->pdev->dev, "Enabling msix failed\n");
 		return ret;
 	}

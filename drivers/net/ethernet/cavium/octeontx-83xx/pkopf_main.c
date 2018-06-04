@@ -534,8 +534,8 @@ static int pko_irq_init(struct pkopf *pko)
 	for (i = 0; i < PKO_MSIX_COUNT; i++)
 		pko->msix_entries[i].entry = i;
 
-	ret = pci_enable_msix(pko->pdev, pko->msix_entries, PKO_MSIX_COUNT);
-	if (ret) {
+	ret = pci_enable_msix_range(pko->pdev, pko->msix_entries, 1, PKO_MSIX_COUNT);
+	if (ret < 0) {
 		dev_err(&pko->pdev->dev, "Enabling msix failed\n");
 		return ret;
 	}

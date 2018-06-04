@@ -486,8 +486,8 @@ static int tim_irq_init(struct timpf *tim)
 	for (i = 0; i < TIM_PF_MSIX_COUNT; i++)
 		tim->msix_entries[i].entry = i;
 
-	ret = pci_enable_msix(tim->pdev, tim->msix_entries, TIM_PF_MSIX_COUNT);
-	if (ret) {
+	ret = pci_enable_msix_range(tim->pdev, tim->msix_entries, 1, TIM_PF_MSIX_COUNT);
+	if (ret < 0) {
 		dev_err(&tim->pdev->dev, "Failed to enable TIM MSIX.\n");
 		return ret;
 	}

@@ -888,8 +888,8 @@ static int sso_irq_init(struct ssopf *sso)
 	for (i = 0; i < SSO_PF_MSIX_COUNT; i++)
 		sso->msix_entries[i].entry = i;
 
-	ret = pci_enable_msix(sso->pdev, sso->msix_entries, SSO_PF_MSIX_COUNT);
-	if (ret) {
+	ret = pci_enable_msix_range(sso->pdev, sso->msix_entries, 1, SSO_PF_MSIX_COUNT);
+	if (ret < 0) {
 		dev_err(&sso->pdev->dev, "Enabling msix failed(%d)\n", ret);
 		return ret;
 	}
