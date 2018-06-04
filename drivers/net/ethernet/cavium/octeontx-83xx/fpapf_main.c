@@ -612,8 +612,8 @@ static int fpa_irq_init(struct fpapf *fpa)
 	for (i = 0; i < ret; i++)
 		fpa->msix_entries[i].entry = i;
 
-	ret = pci_enable_msix(fpa->pdev, fpa->msix_entries, ret);
-	if (ret) {
+	ret = pci_enable_msix_range(fpa->pdev, fpa->msix_entries, 1, ret);
+	if (ret < 0) {
 		dev_err(&fpa->pdev->dev, "Enabling msix failed\n");
 		return ret;
 	}
