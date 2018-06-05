@@ -1,0 +1,32 @@
+Device-Tree bindings for gpio i2c driver
+
+A simple parameterized no-irq of_driven i2c->gpio expander,
+cut down from gpio-pcf857x.c to be totally device-tree driven.
+
+Suitable for any "memory-like" device, where a 1-byte i2c read yields data
+which can safely be written back, possibly with a bit changed, with the
+effect of changing only the output level of that bit's GPIO pin.
+
+Required properties:
+	- compatible = "gpio-i2c"
+	- reg = i2c-address
+	- gpio-controller
+	- #gpio-cells = <1>;
+	- ngpios = number of pins modeled
+
+Example nodes:
+
+&i2c_bus {
+        gpio1: cpld@6c {
+                compatible = "gpio-i2c";
+		gpio-controller;
+                reg = <0x6c>;
+		#gpio-cells = <1>;
+                ngpios = <160>; // 8bits for each reg 0..0x13
+        };
+};
+
+_some_device_ {
+	// pin controlled by bitmask 0x2 of byte 0x4 of gpio1
+	enable-gpios = <&gpio1 33>;
+}
