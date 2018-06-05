@@ -728,6 +728,18 @@ config GPIO_ADNP
 	  enough to represent all pins, but the driver will assume a
 	  register layout for 64 pins (8 registers).
 
+config GPIO_I2C
+	tristate "Generic I2C->GPIO no-irq expander"
+	depends on OF
+	default n
+	help
+	  Select this option to enable GPIO for simple I2C devices,
+	  parameterized by device-tree, and having no interrupts.
+	  Developed to model a custom board's CPLD, but may be useful
+	  for various hardware where i2c-poking flips external pins.
+
+	  If unsure, say N.
+
 config GPIO_MAX7300
 	tristate "Maxim MAX7300 GPIO expander"
 	select GPIO_MAX730X
