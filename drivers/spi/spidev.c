@@ -669,6 +669,19 @@ static const struct of_device_id spidev_dt_ids[] = {
 	{ .compatible = "lineartechnology,ltc2488" },
 	{ .compatible = "ge,achc" },
 	{ .compatible = "semtech,sx1301" },
+	/*
+	 * Compromise with commit 956b200a
+	 *  spi: spidev: Warn loudly if instantiated from DT as "spidev"
+	 * Either push these two upstream, and do the same on all new IDs.
+	 */
+	{ .compatible = "silabs,si32260" },
+	{ .compatible = "maxim,ds26521" },
+	/*
+	 * Or push this "linux,spidev" upstream, and amend the warning to
+	 * complain if no OTHER compat string is supplied to help steer
+	 * device recognition ...
+	 */
+	{ .compatible = "linux,spidev" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, spidev_dt_ids);
