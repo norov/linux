@@ -1,0 +1,41 @@
+spidev: generic usermode SPI driver
+
+The devicetree binding for devices interfaced through spidev
+is controversial, and this documents a compromise for extensible
+embedded systems, which is at variance with the kernel.org policy
+
+By the policy discussed in kernel.org's commit 956b200a,
+each new device type handled via the spidev device should be added
+to spidev.c's signature list, because device tree entries should refer
+to the actual hardware, not just an access method.
+
+Changing the kernel to add compatible devices seems wrong,
+but that's what the spidev code implied - logging a warning
+if compatible="spidev" is listed in device-tree.
+
+Two SPI-driven telephony devices (SLIC and framer) are added to
+compatible-id list in the spirit of kernel.org's 956b200a.
+
+In practice many distributions have found this to be unworkable,
+and added a "linux,spidev" generic id, so that's added too,
+to avoid having to rework generic thunder kernel when a new SPI
+device is added, which can be managed from usermode by spidev.
+
+One of these changes should go upstream, but perhaps not both,
+so that devtree-described SPI targets can be accessed from
+usermode via kernel spidev driver.
+
+Perhaps the best solution is to mark device tree entries with both
+the "linux,spidev" string, to allow binding to kernels without
+knowledge of target device, and also with a target device string
+to help usercode find the device type it's looking for.
+
+Original list
+        { .compatible = "rohm,dh2228fv" },
+        { .compatible = "lineartechnology,ltc2488" },
+added
+        { .compatible = "silabs,si32260" },
+        { .compatible = "maxim,ds26521" },
+compromise for extendability
+        { .compatible = "linux,spidev" },
+
