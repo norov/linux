@@ -25,10 +25,26 @@ static void octeon_spi_wait_ready(struct octeon_spi *p)
 	} while (mpi_sts.s.busy);
 }
 
+static int octeon_spi_mux(struct spi_master *master, struct spi_message *msg)
+{
+#ifdef CONFIG_CAVIUM_SPI_MUX
+	struct octeon_spi *p = spi_master_get_devdata(master);
+	int cs = msg->spi->chip_select;
+	int half = (cs >= 4);
+	static int was = -1;
+
+	if (was != half && p->regs.cs_mux >= 0)
+		gpio_direction_output(p->regs.cs_mux, half);
+	was = half;
+#endif
+	return cs % 4;
+}
+
 static int octeon_spi_do_transfer(struct octeon_spi *p,
 				  struct spi_message *msg,
 				  struct spi_transfer *xfer,
-				  bool last_xfer)
+				  bool last_xfer,
+				  int cs)
 {
 	struct spi_device *spi = msg->spi;
 	union cvmx_mpi_cfg mpi_cfg;
@@ -59,9 +75,7 @@ static int octeon_spi_do_transfer(struct octeon_spi *p,
 	mpi_cfg.s.cslate = cpha ? 1 : 0;
 	mpi_cfg.s.enable = 1;
 
-	if (spi->chip_select < 4 && enax != p->cs_enax)
-		p->cs_enax = enax;
-
+	p->cs_enax |= 1ull << (12 + cs);
 	mpi_cfg.u64 |= p->cs_enax;
 
 	if (mpi_cfg.u64 != p->last_cfg) {
@@ -82,7 +96,7 @@ static int octeon_spi_do_transfer(struct octeon_spi *p,
 			writeq(d, p->register_base + OCTEON_SPI_DAT0(p) + (8 * i));
 		}
 		mpi_tx.u64 = 0;
-		mpi_tx.s.csid = spi->chip_select;
+		mpi_tx.s.csid = cs;
 		mpi_tx.s.leavecs = 1;
 		mpi_tx.s.txnum = tx_buf ? OCTEON_SPI_MAX_BYTES : 0;
 		mpi_tx.s.totnum = OCTEON_SPI_MAX_BYTES;
@@ -107,7 +121,7 @@ static int octeon_spi_do_transfer(struct octeon_spi *p,
 	}
 
 	mpi_tx.u64 = 0;
-	mpi_tx.s.csid = spi->chip_select;
+	mpi_tx.s.csid = cs;
 	if (last_xfer)
 		mpi_tx.s.leavecs = xfer->cs_change;
 	else
@@ -136,11 +150,12 @@ int octeon_spi_transfer_one_message(struct spi_master *master,
 	unsigned int total_len = 0;
 	int status = 0;
 	struct spi_transfer *xfer;
+	int cs = octeon_spi_mux(master, msg);
 
 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
 		bool last_xfer = list_is_last(&xfer->transfer_list,
 					      &msg->transfers);
-		int r = octeon_spi_do_transfer(p, msg, xfer, last_xfer);
+		int r = octeon_spi_do_transfer(p, msg, xfer, last_xfer, cs);
 		if (r < 0) {
 			status = r;
 			goto err;

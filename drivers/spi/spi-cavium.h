@@ -12,6 +12,7 @@ struct octeon_spi_regs {
 	int status;
 	int tx;
 	int data;
+	int cs_mux; /* gpio to select CS4-7, not 0-3 */
 };
 
 struct octeon_spi {
@@ -30,6 +31,7 @@ struct octeon_spi {
 
 int octeon_spi_transfer_one_message(struct spi_master *master,
 				    struct spi_message *msg);
+
 
 /* MPI register descriptions */
 
@@ -329,5 +331,17 @@ union cvmx_mpi_tx {
 	struct cvmx_mpi_tx_s cn66xx;
 	struct cvmx_mpi_tx_cn61xx cnf71xx;
 };
+
+
+/*
+ * when (regs->cs_mux >= 0) it names a gpio pin which expands chip-select,
+ * when asserted the cavium-spi's CS0-3 address devices 4-7.
+ * May be useful when board design faces gpio-pin shortage.
+ */
+#define CONFIG_CAVIUM_SPI_MUX /* move to Kconfig? */
+#ifdef CONFIG_CAVIUM_SPI_MUX
+# include <linux/gpio.h>
+# include <linux/of_gpio.h>
+#endif
 
 #endif /* __SPI_CAVIUM_H */
