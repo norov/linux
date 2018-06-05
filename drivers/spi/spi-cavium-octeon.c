@@ -44,6 +44,7 @@ static int octeon_spi_probe(struct platform_device *pdev)
 	p->regs.status = 0x08;
 	p->regs.tx = 0x10;
 	p->regs.data = 0x80;
+	p->regs.cs_mux = -1;
 
 	master->num_chipselect = 4;
 	master->mode_bits = SPI_CPHA |
