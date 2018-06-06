@@ -480,7 +480,7 @@ static int dpi_irq_init(struct dpipf *dpi)
 	for (i = 0; i < DPI_PF_MSIX_COUNT; i++)
 		dpi->msix_entries[i].entry = i;
 
-	ret = pci_enable_msix(dpi->pdev, dpi->msix_entries, DPI_PF_MSIX_COUNT);
+	ret = pci_enable_msix_range(dpi->pdev, dpi->msix_entries, 1, DPI_PF_MSIX_COUNT);
 	if (ret) {
 		dev_err(&dpi->pdev->dev, "Enabling msix failed\n");
 		goto free_entries;
