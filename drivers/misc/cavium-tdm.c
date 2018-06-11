@@ -2,6 +2,7 @@
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/ioctl.h>
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
@@ -1079,7 +1080,7 @@ static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		tdm_msix[eno].vector = 0;
 	}
 
-	err = pci_enable_msix(pdev, tdm_msix, NR_TDM_IRQS);
+	err = pci_enable_msix_range(pdev, tdm_msix, 1, NR_TDM_IRQS);
 	if (err) {
 		dev_err(dev, "Unable to enable MSI-X\n");
 		goto err_unmap;
