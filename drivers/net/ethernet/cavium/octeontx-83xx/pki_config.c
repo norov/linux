@@ -999,25 +999,6 @@ int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 #define PCAM_TERM_E_DMACH  0xaULL
 #define PCAM_TERM_E_DMACL  0xbULL
 
-static inline void free_pcam(struct pki_t *pki, int cluster, int bank,
-			     int index)
-{
-	union pki_clx_pcamx_termx_u   pcam_term;
-	union pki_clx_pcamx_matchx_u  pcam_match;
-
-	pcam_term.u = pki_reg_read(pki,
-				   PKI_CLX_PCAMX_TERMX(cluster, bank, index));
-	/* disable the pcam */
-	pcam_term.s.valid = 0;
-
-	pki_reg_write(pki, PKI_CLX_PCAMX_TERMX(cluster, bank, index),
-		      pcam_term.u);
-
-	pcam_match.u = 0x0;
-	pki_reg_write(pki, PKI_CLX_PCAMX_MATCHX(cluster, bank, index),
-		      pcam_match.u);
-}
-
 int pki_port_set_pcam_dmach(struct pkipf_vf *vf, u16 vf_id,
 			    struct mbox_pki_port_pcam_entry *cfg)
 {
@@ -1041,18 +1022,10 @@ int pki_port_set_pcam_dmach(struct pkipf_vf *vf, u16 vf_id,
 		return MBOX_RET_INVALID;
 
 	mac_addr = cfg->mac_addr;
-	index = cfg->index;
+	index = cfg->q_no;
 
-	/* Check if app is requesting to free the PCAM entry */
-	if (cfg->free_pcam == 1) {
-		for (i = 0; i < pki->max_cls; i++)
-			free_pcam(pki, i, bank, index);
-
-		return MBOX_RET_SUCCESS;
-	}
-
-	dev_dbg(&pki->pdev->dev, " PKI:: DMACH MAC ADDR::%llx index::%d\n",
-		mac_addr, index);
+	dev_info(&pki->pdev->dev, " PKI:: DMACH MAC ADDR::%llx index::%d\n",
+		 mac_addr, index);
 
 	for (i = 0; i < pki->max_cls; i++) {
 		pcam_term.u = pki_reg_read(pki,
@@ -1102,10 +1075,33 @@ int pki_port_set_pcam_dmach(struct pkipf_vf *vf, u16 vf_id,
 			      pcam_term.u);
 	}
 
+	for (i = 0; i < pki->max_cls; i++) {
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACH CL[%d]_PCAM[%d]_TERM[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_TERMX(i, bank, index)));
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACH CL[%d]_PCAM[%d]_MATCH[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_MATCHX(i, bank, index)));
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACH CL[%d]_PCAM[%d]_ACTION[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_ACTIONX(i, bank, index)));
+	}
+
 	pki_reg_write(pki, PKI_FRM_LEN_CHKX(0),
 		      PKI_FRM_MINLEN(minlen) | PKI_FRM_MAXLEN(maxlen));
 	pki_reg_write(pki, PKI_FRM_LEN_CHKX(1),
 		      PKI_FRM_MINLEN(minlen) | PKI_FRM_MAXLEN(maxlen));
+
+	dev_info(&pki->pdev->dev, "PKI:: PKI_FRMLEN[0]:: 0x%llx\n",
+		 pki_reg_read(pki, PKI_FRM_LEN_CHKX(0)));
+	dev_info(&pki->pdev->dev, "PKI:: PKI_FRMLEN[1]:: 0x%llx\n",
+		 pki_reg_read(pki, PKI_FRM_LEN_CHKX(1)));
 
 	return MBOX_RET_SUCCESS;
 }
@@ -1128,18 +1124,10 @@ int pki_port_set_pcam_dmacl(struct pkipf_vf *vf, u16 vf_id,
 		return MBOX_RET_INVALID;
 
 	mac_addr = cfg->mac_addr & 0xffffffffffff;
-	index = cfg->index;
+	index = cfg->q_no;
 
-	/* Check if app is requesting to free the PCAM entry */
-	if (cfg->free_pcam == 1) {
-		for (i = 0; i < pki->max_cls; i++)
-			free_pcam(pki, i, bank, index);
-
-		return MBOX_RET_SUCCESS;
-	}
-
-	dev_dbg(&pki->pdev->dev, " PKI:: DMACL MAC ADDR::%llx index::%d\n",
-		mac_addr, index);
+	dev_info(&pki->pdev->dev, " PKI:: DMACL MAC ADDR::%llx index::%d\n",
+		 mac_addr, index);
 
 	for (i = 0; i < pki->max_cls; i++) {
 		pcam_term.u = pki_reg_read(pki,
@@ -1166,7 +1154,7 @@ int pki_port_set_pcam_dmacl(struct pkipf_vf *vf, u16 vf_id,
 				     PKI_CLX_PCAMX_ACTIONX(i, bank, index));
 
 		pcam_action.s.pmc = 0;
-		pcam_action.s.style_add = 0;
+		pcam_action.s.style_add = index;
 		pcam_action.s.pf = 4;
 		pcam_action.s.setty = 0;
 		pcam_action.s.advance = 0;
@@ -1184,6 +1172,24 @@ int pki_port_set_pcam_dmacl(struct pkipf_vf *vf, u16 vf_id,
 
 		pki_reg_write(pki,
 			      PKI_CLX_PCAMX_TERMX(i, bank, index), pcam_term.u);
+	}
+
+	for (i = 0; i < pki->max_cls; i++) {
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACL CL[%d]_PCAM[%d]_TERM[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_TERMX(i, bank, index)));
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACL CL[%d]_PCAM[%d]_MATCH[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_MATCHX(i, bank, index)));
+		dev_info(&pki->pdev->dev,
+			 " PKI:: DMACL CL[%d]_PCAM[%d]_ACTION[%d] :: 0x%llx\n",
+			 i, bank, index,
+			 pki_reg_read(pki,
+				      PKI_CLX_PCAMX_ACTIONX(i, bank, index)));
 	}
 
 	return MBOX_RET_SUCCESS;
