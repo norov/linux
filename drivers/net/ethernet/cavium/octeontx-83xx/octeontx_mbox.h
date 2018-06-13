@@ -695,8 +695,6 @@ struct __attribute__((__packed__)) mbox_tim_ring_conf {
 #define MBOX_PKI_PORT_ALLOC_QPG			21
 #define MBOX_PKI_PORT_FREE_QPG			22
 #define MBOX_PKI_SET_PORT_CONFIG		23
-#define MBOX_PKI_SET_PCAM_DMACH			24
-#define MBOX_PKI_SET_PCAM_DMACL			25
 
 /* pki pkind parse mode */
 enum  {
@@ -904,12 +902,5 @@ typedef struct mbox_pki_port_modify_qos_entry {
 	} mmask;
 	struct mbox_pki_qos_entry qos_entry;
 } mbox_pki_mod_qos_t;
-
-/* Program PCAM with ethernet header */
-struct mbox_pki_port_pcam_entry {
-	u8 port_type;
-	u64 mac_addr;
-	u64 q_no;
-};
 
 #endif
