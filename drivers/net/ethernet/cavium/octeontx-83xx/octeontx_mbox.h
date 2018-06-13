@@ -225,7 +225,7 @@ struct __attribute__((__packed__)) dcfg_resp {
 	u8	tim_count;
 	u8	net_port_count;
 	u8	virt_port_count;
-	u8	host_port_count;
+	u8	pci_port_count;
 };
 
 /* FPA specific */
@@ -289,7 +289,7 @@ union mbox_data {
 enum {
 	OCTTX_PORT_TYPE_NET, /* Network interface ports */
 	OCTTX_PORT_TYPE_INT, /* CPU internal interface ports */
-	OCTTX_PORT_TYPE_HOST, /* Host interface(SDP) ports */
+	OCTTX_PORT_TYPE_PCI, /* DPI/PCIe interface ports */
 	OCTTX_PORT_TYPE_MAX
 };
 

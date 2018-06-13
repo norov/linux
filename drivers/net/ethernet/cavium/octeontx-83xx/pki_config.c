@@ -241,7 +241,7 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -296,7 +296,7 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 			pki_reg_write(pki,
 				      PKI_CLX_STYLEX_CFG2(i, port->init_style),
 				      cfg);
-	} else { /* For OCTTX_PORT_TYPE_HOST */
+	} else { /* For OCTTX_PORT_TYPE_PCI */
 		for (i = 0; i < pki->max_cls; i++) {
 			cfg = pki_reg_read(pki,
 					   PKI_CLX_PKINDX_CFG(i, port->pkind));
@@ -311,7 +311,7 @@ int pki_port_open(struct pkipf_vf *vf, u16 vf_id,
 				      PKI_CLX_STYLEX_CFG(i, port->init_style),
 				      cfg);
 		}
-	} /* END OCTTX_PORT_TYPE_HOST */
+	} /* END OCTTX_PORT_TYPE_PCI */
 
 	port->state = PKI_PORT_OPEN;
 	port->qpg_base = QPG_INVALID;
@@ -333,7 +333,7 @@ int pki_port_alloc_qpg(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -373,7 +373,7 @@ int pki_port_free_qpg(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -417,7 +417,7 @@ int pki_port_create_qos(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -511,7 +511,7 @@ int pki_set_port_config(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -637,7 +637,7 @@ int pki_port_start(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -677,7 +677,7 @@ int pki_port_stop(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -708,7 +708,7 @@ int pki_port_close(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -746,7 +746,7 @@ int pki_port_pktbuf_cfg(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -854,7 +854,7 @@ int pki_port_errchk(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
@@ -951,7 +951,7 @@ int pki_port_hashcfg(struct pkipf_vf *vf, u16 vf_id,
 	case OCTTX_PORT_TYPE_NET:
 		port = &vf->bgx_port[vf_id];
 		break;
-	case OCTTX_PORT_TYPE_HOST:
+	case OCTTX_PORT_TYPE_PCI:
 		port = &vf->sdp_port[vf_id];
 		break;
 	case OCTTX_PORT_TYPE_INT:
