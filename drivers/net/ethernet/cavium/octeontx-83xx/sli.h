@@ -19,17 +19,57 @@
 #define PCI_SLI_PF_CFG_BAR		0
 #define PCI_SLI_PF_MSIX_BAR		4
 
-struct slipf {
-	struct pci_dev		*pdev;
-	void __iomem		*reg_base;
-	int			id;
-	struct msix_entry	*msix_entries;
-	struct list_head    list; /* List of SLI devices */
-	int   sli_idx; /* CPU-local SLI device index.*/
-	int   port_count;
-	int   node; /* CPU node */
+#define SLI_LMAC_MAX_PFS		1
 
-	u32	  flags;
+#define SLI_SCRATCH1			(0x1000ULL)
+#define SLI_SCRATCH2			(0x1010ULL)
+#define SDP_SCRATCHX(x)			(0x80020180ULL | ((x) << 23))
+#define SLI_EPFX_SCRATCH(x)		(0x80028100ULL | ((x) << 23))
+
+#define SDP_CONST			(0x880300ULL)
+#define SDP_CONST			(0x880300ULL)
+#define SLI_LMAC_CONST0X(x)		(0x1004000ULL | ((x) << 4))
+#define SLI_LMAC_CONST1X(x)		(0x1004008ULL | ((x) << 4))
+
+#define SDP_OUT_WMARK			(0x880000ULL)
+#define SDP_GBL_CONTROL			(0x880200ULL)
+#define SDP_GBL_CONTROL_BPKIND_MASK     0x3f
+#define SDP_GBL_CONTROL_BPKIND_SHIFT	8
+#define SDP_OUT_BP_ENx_W1C(x)		(0x880220ULL | ((x) << 4))
+#define SDP_OUT_BP_ENx_W1S(x)		(0x880240ULL | ((x) << 4))
+#define SDP_PKIND_VALID			(0x880210ULL)
+
+#define SDP_CHANNEL_START		0x400
+#define SDP_HOST_LOADED			0xDEADBEEFULL
+#define SDP_GET_HOST_INFO		0xBEEFDEEDULL
+#define SDP_HOST_INFO_RECEIVED		0xDEADDEULL
+#define SDP_HANDSHAKE_COMPLETED		0xDEEDDEEDULL
+
+#define SDP_HOST_EPF_APP_BASE		0x1
+#define SDP_HOST_EPF_APP_NIC		0x2
+
+struct sli_epf {
+	int hs_done;
+	int app_mode;
+	int pf_srn;
+	int rppf;
+	int num_vfs;
+	int vf_srn;
+	int rpvf;
+};
+
+struct slipf {
+	struct pci_dev *pdev;
+	void __iomem *reg_base;
+	int id;
+	struct msix_entry *msix_entries;
+	struct list_head    list; /* List of SLI devices */
+	int sli_idx; /* CPU-local SLI device index.*/
+	int port_count;
+	int node; /* CPU node */
+	u32 flags;
+	struct sli_epf epf[SLI_LMAC_MAX_PFS];
+	u64 ticks_per_us;
 };
 
 struct slipf_com_s {
@@ -48,5 +88,12 @@ struct slipf_com_s {
 };
 
 extern struct slipf_com_s slipf_com;
+
+static inline void set_sdp_field(u64 *ptr, u64 field_mask,
+				 u8 field_shift, u64 val)
+{
+	*ptr &= ~(field_mask << field_shift);
+	*ptr |= (val & field_mask) << field_shift;
+}
 
 #endif /* __SLI_H__ */

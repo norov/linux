@@ -191,7 +191,7 @@ config OCTEONTX_ZIP_PF
 
 config OCTEONTX_SLI_PF
 	tristate "OcteonTX SLI physical function driver(SLI_PF)"
-	depends on 64BIT && OCTEONTX_DPI
+	depends on 64BIT && OCTEONTX_DPI && OCTEONTX_RST
 	default y
 	help
 	  Select this option to enable SLI.
