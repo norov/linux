@@ -269,7 +269,7 @@ static ssize_t octtx_create_domain_store(struct device *dev,
 				goto error;
 			if (kstrtol(start, 10, &dpi_count))
 				goto error;
-		} else if (!strncmp(strim(start), "sdp", sizeof("sdp") - 1)) {
+		} else if (!strncmp(strim(start), "pci", sizeof("pci") - 1)) {
 			temp = strsep(&start, ":");
 			if (!start)
 				goto error;
@@ -430,7 +430,7 @@ static int octtx_master_receive_message(struct mbox_hdr *hdr,
 			dcfg->tim_count = domain->tim_vf_count;
 			dcfg->net_port_count = domain->bgx_count;
 			dcfg->virt_port_count = domain->lbk_count;
-			dcfg->host_port_count = domain->sdp_count;
+			dcfg->pci_port_count = domain->sdp_count;
 			resp->data = sizeof(struct dcfg_resp);
 			hdr->res_code = MBOX_RET_SUCCESS;
 			break;
