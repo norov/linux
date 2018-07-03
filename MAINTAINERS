@@ -3214,7 +3214,7 @@ CAVIUM NAND DRIVER
 M:	Peter Swain <pswain@cavium.com>
 W:	http://www.cavium.com
 S:	Supported
-F:	drivers/mtd/nand/cavium_nand.c
+F:	drivers/mtd/nand/cavium/
 
 CAVIUM OCTEON-TX CRYPTO DRIVER
 M:	George Cherian <george.cherian@cavium.com>
