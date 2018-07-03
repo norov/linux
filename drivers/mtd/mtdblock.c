@@ -65,7 +65,7 @@ static int erase_write (struct mtd_info *mtd, unsigned long pos,
 			int len, const char *buf)
 {
 	struct erase_info erase;
-	DECLARE_WAITQUEUE(wait, current);
+	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	wait_queue_head_t wait_q;
 	size_t retlen;
 	int ret;
@@ -81,12 +81,12 @@ static int erase_write (struct mtd_info *mtd, unsigned long pos,
 	erase.len = len;
 	erase.priv = (u_long)&wait_q;
 
-	set_current_state(TASK_INTERRUPTIBLE);
+	smp_mb__before_atomic(); /* sync erase */
 	add_wait_queue(&wait_q, &wait);
 
 	ret = mtd_erase(mtd, &erase);
 	if (ret) {
-		set_current_state(TASK_RUNNING);
+		smp_mb__before_atomic(); /* sync erase */
 		remove_wait_queue(&wait_q, &wait);
 		printk (KERN_WARNING "mtdblock: erase of region [0x%lx, 0x%x] "
 				     "on \"%s\" failed\n",
@@ -94,7 +94,7 @@ static int erase_write (struct mtd_info *mtd, unsigned long pos,
 		return ret;
 	}
 
-	schedule();  /* Wait for erase to finish. */
+	wait_woken(&wait, TASK_INTERRUPTIBLE, MAX_SCHEDULE_TIMEOUT);
 	remove_wait_queue(&wait_q, &wait);
 
 	/*
