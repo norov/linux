@@ -14,6 +14,8 @@ struct task_struct;
 
 #ifdef CONFIG_TASK_ISOLATION
 
+extern cpumask_var_t task_isolation_map;
+
 /**
  * task_isolation_request() - prctl hook to request task isolation
  * @flags:	Flags from <linux/prctl.h> PR_TASK_ISOLATION_xxx.
