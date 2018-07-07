@@ -11,6 +11,7 @@
 
 #include <linux/capability.h>
 #include <linux/kernel.h>
+#include <linux/isolation.h>
 #include <linux/netdevice.h>
 #include <net/switchdev.h>
 #include <linux/if_arp.h>
@@ -720,6 +721,18 @@ static ssize_t store_rps_map(struct netdev_rx_queue *queue,
 		free_cpumask_var(mask);
 		return err;
 	}
+
+#ifdef CONFIG_TASK_ISOLATION
+	if (cpumask_intersects(mask, task_isolation_map)) {
+		char tmp[256];
+
+		pr_warn("RPS is not allowed on CPUs allocated for isolated tasks\n");
+
+		cpumask_andnot(mask, mask, task_isolation_map);
+		cpumap_print_to_pagebuf(1, tmp, mask);
+		pr_warn("RPS CPUs list is reduced to: %s\n", tmp);
+	}
+#endif
 
 	map = kzalloc(max_t(unsigned int,
 	    RPS_MAP_SIZE(cpumask_weight(mask)), L1_CACHE_BYTES),
