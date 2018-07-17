@@ -158,6 +158,12 @@ static inline void task_isolation_user_exit(void)
 #endif
 }
 
+static inline bool is_isolation_cpu(int cpu)
+{
+	return task_isolation_map != NULL &&
+		cpumask_test_cpu(cpu, task_isolation_map);
+}
+
 #else /* !CONFIG_TASK_ISOLATION */
 static inline int task_isolation_request(unsigned int flags) { return -EINVAL; }
 static inline void task_isolation_start(void) { }
@@ -172,6 +178,7 @@ static inline void task_isolation_remote_cpumask_interrupt(
 	const struct cpumask *mask, const char *fmt, ...) { }
 static inline void task_isolation_signal(struct task_struct *task) { }
 static inline void task_isolation_user_exit(void) { }
+static inline bool is_isolation_cpu(int cpu) { return 0; }
 #endif
 
 #endif /* _LINUX_ISOLATION_H */
