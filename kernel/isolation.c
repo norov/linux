@@ -41,12 +41,6 @@ static int __init task_isolation_init(void)
 }
 core_initcall(task_isolation_init)
 
-static inline bool is_isolation_cpu(int cpu)
-{
-	return task_isolation_map != NULL &&
-		cpumask_test_cpu(cpu, task_isolation_map);
-}
-
 /* Enable stack backtraces of any interrupts of task_isolation cores. */
 static bool task_isolation_debug;
 static int __init task_isolation_debug_func(char *str)
