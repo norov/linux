@@ -827,8 +827,8 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	 * virt1: transferring packets between PKO/PKI and NIC (LBK1 + LBK2).
 	 * NOTE: The domain specification validity should be done here.
 	 */
-	domain->lbk_count = lbk_count;
-	for (i = 0; i < domain->lbk_count; i++) {
+	domain->lbk_count = 0;
+	for (i = 0; i < lbk_count; i++) {
 		if (lbk_port[i] > 1) {
 			dev_err(octtx_device, "LBK invalid port g%ld\n",
 				lbk_port[i]);
@@ -847,9 +847,10 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 				domain->lbk_port[i].glb_port_idx);
 			goto error;
 		}
+		domain->lbk_count++;
 	}
 
-	if (domain->lbk_count) {
+	if (lbk_count) {
 		ret = lbk->create_domain(node, domain_id, domain->lbk_port, i,
 					 &octtx_master_com, domain,
 					 domain->ports_kobj);
@@ -871,9 +872,9 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	 * In this, default configuraiton, all available ports are
 	 * given to this domain.
 	 */
-	domain->bgx_count = bgx_count;
-	if (domain->bgx_count) {
-		for (i = 0; i < domain->bgx_count; i++) {
+	domain->bgx_count = 0;
+	if (bgx_count) {
+		for (i = 0; i < bgx_count; i++) {
 			domain->bgx_port[i].domain_id = domain_id;
 			domain->bgx_port[i].dom_port_idx = i;
 			domain->bgx_port[i].glb_port_idx = bgx_port[i];
@@ -888,7 +889,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 		domain->bgx_domain_created = true;
 	}
 	/* Now that we know which exact ports we have, set pkinds for them. */
-	for (i = 0; i < domain->bgx_count; i++) {
+	for (i = 0; i < bgx_count; i++) {
 		ret = pki->add_bgx_port(node, domain_id, &domain->bgx_port[i]);
 		if (ret < 0) {
 			dev_err(octtx_device,
@@ -923,11 +924,12 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 					&kattr->attr);
 		if (ret < 0)
 			goto error;
+		domain->bgx_count++;
 	}
 
-	domain->sdp_count = sdp_count;
-	if (domain->sdp_count) {
-		for (i = 0; i < domain->sdp_count; i++) {
+	domain->sdp_count = 0;
+	if (sdp_count) {
+		for (i = 0; i < sdp_count; i++) {
 			domain->sdp_port[i].domain_id = domain_id;
 			domain->sdp_port[i].dom_port_idx = i;
 			domain->sdp_port[i].glb_port_idx = sdp_port[i];
@@ -942,7 +944,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 	}
 
 	/* Now that we know which exact ports we have, set pkinds for them. */
-	for (i = 0; i < domain->sdp_count; i++) {
+	for (i = 0; i < sdp_count; i++) {
 		ret = pki->add_sdp_port(node, domain_id, &domain->sdp_port[i]);
 		if (ret < 0) {
 			dev_err(octtx_device,
@@ -964,6 +966,7 @@ int octeontx_create_domain(const char *name, int type, int sso_count,
 			goto error;
 		}
 		/* TODO: setup sysfs entry for sdp port*/
+		domain->sdp_count++;
 	}
 	if (ret) {
 		dev_err(octtx_device, "Failed to create SDP domain\n");
