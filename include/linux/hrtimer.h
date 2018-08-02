@@ -288,6 +288,7 @@ static inline int hrtimer_is_hres_active(struct hrtimer *timer)
 # define KTIME_MONOTONIC_RES	KTIME_HIGH_RES
 
 extern void clock_was_set_delayed(void);
+extern void kick_hrtimer(void);
 
 extern unsigned int hrtimer_resolution;
 
