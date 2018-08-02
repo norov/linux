@@ -48,6 +48,7 @@
 #include <linux/sched/rt.h>
 #include <linux/sched/deadline.h>
 #include <linux/sched/nohz.h>
+#include <linux/isolation.h>
 #include <linux/sched/debug.h>
 #include <linux/timer.h>
 #include <linux/freezer.h>
@@ -678,6 +679,17 @@ static void retrigger_next_event(void *arg)
 	raw_spin_unlock(&base->lock);
 }
 
+void kick_hrtimer(void)
+{
+	unsigned long flags;
+
+	preempt_disable();
+	local_irq_save(flags);
+	retrigger_next_event(NULL);
+	local_irq_restore(flags);
+	preempt_enable();
+}
+
 /*
  * Switch to high resolution mode
  */
@@ -729,6 +741,7 @@ static inline int hrtimer_reprogram(struct hrtimer *timer,
 }
 static inline void hrtimer_init_hres(struct hrtimer_cpu_base *base) { }
 static inline void retrigger_next_event(void *arg) { }
+void kick_hrtimer(void) { }
 
 #endif /* CONFIG_HIGH_RES_TIMERS */
 
@@ -746,8 +759,14 @@ static inline void retrigger_next_event(void *arg) { }
 void clock_was_set(void)
 {
 #ifdef CONFIG_HIGH_RES_TIMERS
+	cpumask_var_t nisol_cpus;
+#ifdef CONFIG_TASK_ISOLATION
+	cpumask_complement(nisol_cpus, task_isolation_map);
+#else
+	cpumask_setall(nisol_cpus);
+#endif
 	/* Retrigger the CPU local events everywhere */
-	on_each_cpu(retrigger_next_event, NULL, 1);
+	on_each_cpu_mask(nisol_cpus, retrigger_next_event, NULL, 1);
 #endif
 	timerfd_clock_was_set();
 }

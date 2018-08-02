@@ -6,6 +6,7 @@
  *  Distributed under GPLv2.
  */
 
+#include <linux/hrtimer.h>
 #include <linux/mm.h>
 #include <linux/swap.h>
 #include <linux/vmstat.h>
@@ -103,6 +104,7 @@ static void stop_isolation(struct task_struct *p)
 	p->task_isolation_flags = 0;
 	p->task_isolation_state = STATE_NORMAL;
 	clear_tsk_thread_flag(p, TIF_TASK_ISOLATION);
+	kick_hrtimer();
 }
 
 /*
