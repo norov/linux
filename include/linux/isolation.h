@@ -6,6 +6,7 @@
 
 #include <linux/tick.h>
 #include <linux/prctl.h>
+#include <linux/hrtimer.h>
 
 #ifdef CONFIG_TASK_ISOLATION
 
@@ -32,8 +33,15 @@ static inline void task_isolation_set_flags(struct task_struct *p,
 
 	if (flags & PR_TASK_ISOLATION_ENABLE)
 		set_tsk_thread_flag(p, TIF_TASK_ISOLATION);
-	else
+	else {
 		clear_tsk_thread_flag(p, TIF_TASK_ISOLATION);
+
+		/*
+		 * We don't interrupt isolated task to update timer
+		 * structures, so do on exit of isolation.
+		 */
+		kick_hrtimer();
+	}
 }
 
 extern int task_isolation_syscall(int nr);

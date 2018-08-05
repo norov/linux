@@ -494,6 +494,8 @@ extern void __init hrtimers_init(void);
 /* Show pending timers: */
 extern void sysrq_timer_list_show(void);
 
+extern void kick_hrtimer(void);
+
 int hrtimers_prepare_cpu(unsigned int cpu);
 #ifdef CONFIG_HOTPLUG_CPU
 int hrtimers_dead_cpu(unsigned int cpu);
