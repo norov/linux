@@ -7847,6 +7847,8 @@ void normalize_rt_tasks(void)
  * under any other configuration.
  */
 
+#endif /* defined(CONFIG_IA64) || defined(CONFIG_KGDB_KDB) */
+
 /**
  * curr_task - return the current task for a given cpu.
  * @cpu: the processor in question.
@@ -7859,8 +7861,6 @@ struct task_struct *curr_task(int cpu)
 {
 	return cpu_curr(cpu);
 }
-
-#endif /* defined(CONFIG_IA64) || defined(CONFIG_KGDB_KDB) */
 
 #ifdef CONFIG_IA64
 /**

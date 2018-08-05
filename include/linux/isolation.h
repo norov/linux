@@ -57,6 +57,7 @@ extern void task_isolation_debug_cpumask(const struct cpumask *,
 					 const char *type);
 extern void task_isolation_debug_task(int cpu, struct task_struct *p,
 				      const char *type);
+void task_isolation_cpumask(struct cpumask *mask);
 #else
 static inline void task_isolation_init(void) { }
 static inline bool task_isolation_possible(int cpu) { return false; }
@@ -67,6 +68,7 @@ extern inline void task_isolation_set_flags(struct task_struct *p,
 static inline int task_isolation_syscall(int nr) { return 0; }
 static inline void task_isolation_quiet_exception(const char *fmt, ...) { }
 static inline void task_isolation_debug(int cpu, const char *type) { }
+static inline void task_isolation_cpumask(struct cpumask *mask) { }
 #define task_isolation_debug_cpumask(mask, type) do {} while (0)
 #endif
 
