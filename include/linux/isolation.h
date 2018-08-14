@@ -73,6 +73,8 @@ static inline bool is_isolation_cpu(int cpu)
 		cpumask_test_cpu(cpu, task_isolation_map);
 }
 
+int task_isolation_on_cpu(int cpu);
+
 #else
 static inline void task_isolation_init(void) { }
 static inline bool task_isolation_possible(int cpu) { return false; }
@@ -86,6 +88,7 @@ static inline void task_isolation_debug(int cpu, const char *type) { }
 static inline void task_isolation_cpumask(struct cpumask *mask) { }
 static inline bool is_isolation_cpu(int cpu) { return 0; }
 #define task_isolation_debug_cpumask(mask, type) do {} while (0)
+static inline int task_isolation_on_cpu(int cpu) { return 0; }
 #endif
 
 #endif

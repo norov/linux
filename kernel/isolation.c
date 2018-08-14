@@ -338,6 +338,13 @@ void task_isolation_debug_cpumask(const struct cpumask *mask, const char *type)
 
 extern struct task_struct *curr_task(int cpu);
 
+int task_isolation_on_cpu(int cpu)
+{
+	struct task_struct *tsk = curr_task(cpu);
+
+	return tsk != NULL && test_tsk_thread_flag(tsk, TIF_TASK_ISOLATION);
+}
+
 void task_isolation_cpumask(struct cpumask *mask)
 {
 	int cpu;
@@ -346,10 +353,7 @@ void task_isolation_cpumask(struct cpumask *mask)
 		return;
 
 	/* No need to report on this cpu since we're already in the kernel. */
-	for_each_cpu(cpu, task_isolation_map) {
-		struct task_struct *tsk = curr_task(cpu);
-
-		if (tsk && test_tsk_thread_flag(tsk, TIF_TASK_ISOLATION))
+	for_each_cpu(cpu, task_isolation_map)
+		if (task_isolation_on_cpu(cpu))
 			cpumask_set_cpu(cpu, mask);
-	}
 }
