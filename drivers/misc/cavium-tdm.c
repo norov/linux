@@ -11,10 +11,17 @@
 #include <linux/init.h>
 #include <linux/version.h>
 #include <linux/module.h>
-#include <linux/sched.h>
-#include <linux/ioctl.h>
 #include <linux/kernel.h>
+#include <linux/clk.h>
 #include <linux/interrupt.h>
+#include <linux/spinlock.h>
+#include <linux/semaphore.h>
+#include <linux/ioctl.h>
+#include <linux/smp.h>
+#include <linux/atomic.h>
+#include <linux/poll.h>
+#include <linux/sched.h>
+#include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/pci.h>
@@ -23,7 +30,7 @@
 #include <linux/semaphore.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
-#include <linux/sysrq.h>
+#include <linux/vmalloc.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/sched/signal.h>
@@ -35,9 +42,8 @@
 #include <asm/irq.h>
 #include <asm/byteorder.h>
 
-#include <linux/cavium-tdm.h>
-
 #ifdef CONFIG_MIPS
+#include <linux/platform_device.h>
 #include <asm/octeon/cvmx.h>
 #include <asm/octeon/octeon-model.h>
 #include <asm/octeon/octeon-feature.h>
@@ -45,22 +51,7 @@
 #include <asm/octeon/cvmx-sysinfo.h>
 #endif /* CONFIG_MIPS */
 
-#ifdef CONFIG_ARM64
-/* all corresponding types covered in this file */
-#endif /* arm64 */
-
-#include <linux/kernel.h>
-#include <linux/init.h>
-#include <linux/version.h>
-#include <linux/module.h>
-#include <linux/clk.h>
-#include <linux/interrupt.h>
-#include <linux/semaphore.h>
-#include <linux/ioctl.h>
-#include <linux/spinlock.h>
-#include <linux/smp.h>
-#include <linux/atomic.h>
-#include <linux/poll.h>
+#include <linux/cavium-tdm.h>
 
 #define DEVNAME	"tdm"
 
@@ -72,13 +63,25 @@ const bool big_endian = 1;
 const bool big_endian;
 #endif
 
+#if CONFIG_CAVIUM_TDM_MAX_SLOTS
+# define MAX_SLOTS CONFIG_CAVIUM_TDM_MAX_SLOTS
+#else
+# define SPARSE_SLOTS
+# define MAX_SLOTS TDM_MAX_SLOTS
+#endif
+
+/* align MAX_SLOTS up to boundary for bitmasks */
+#define ALIGN_MAX_SLOTS ALIGN(MAX_SLOTS, BITS_PER_LONG/8)
+/* and for mask register scans */
+#define MASK_REGS	(ALIGN(ALIGN_MAX_SLOTS, 64) / 64)
+
 /* tdm_trace mask bits are ... */
 enum {
-#ifdef DEBUG
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
 	t_on	= 1,
 #else /* no trace code, gcc eliminates at build time */
 	t_on	= 0,
-#endif /* !DEBUG */
+#endif /* !CONFIG_CAVIUM_TDM_DEBUG */
 	t_err	= 0x1,		/* exceptions */
 	t_read	= 0x2 * t_on,	/* read from fifo */
 	t_write	= 0x4 * t_on,	/* write to fifo */
@@ -90,201 +93,298 @@ enum {
 	t_wr	= 0x100 * t_on,	/* pcm write path */
 	t_scan	= 0x200 * t_on,	/* pcm write path */
 	t_change = 0x400 * t_on, /* log everything at geometry change */
-	t_init  = t_err,
+	t_init  = t_err | t_change,
 	/* or'd in if t_change, at geometry change */
-	t_detail = t_scan | t_csr | t_pump | t_chan | t_misc | t_rd | t_wr,
+	t_detail = t_scan | t_csr | t_pump | t_chan | t_misc,
 };
 
-int tdm_trace = t_init;
+static int tdm_trace = t_init;
 module_param_named(trace, tdm_trace, int, 0644);
 
 /* trace_printk logging of interesting events (slot map changes) */
 static int old_trace; /* saved trace flags over change-tracing */
 static int trace_changes; /* count down on exhaustive logging */
 
+/* event tracing, which collapses to nothing if !defined(DEBUG) */
 #define tr_tdm(mask, fmt, ...) do { \
 	/* unless trace_changes, trace only initial N */ \
-	static int once = 50; \
+	static int _once = 50; \
+	/* TODO: adjust masks on WARN calls, rather than this strstr() */ \
 	if (tdm_trace & (mask)) { \
+		int _more; \
 		/* if under t_change, trace forever */ \
-		int more = (trace_changes ? 1 : once--); \
-		if (more >= 0) { \
-			char c = more ? ' ' : '#'; \
-			trace_printk("%c%d " fmt, c, __LINE__, ##__VA_ARGS__); \
+		_more = trace_changes ? 1 : _once; \
+		if (_more >= 0) { \
+			char c = _more ? ' ' : '#'; \
+			trace_printk("%c %d " fmt, c, __LINE__, ##__VA_ARGS__);\
 		} \
 	    } \
 	} while (0)
 
+/*
+ * A bus is one or more engines wired-or'd, currently exactly one,
+ * but the two concepts are kept distinct for later dynamic-slot-map
+ * enhancements, where engines are swapped to achieve geometry change.
+ *
+ * To emphasise that a bus is a virtual construct, but keep text compact,
+ * use the variables tdm_bus *v; tdm_engine *e;
+ */
+struct tdm_engine;
+struct tdm_bus;
+#define NR_TDM_BUSES (NR_TDM_ENGINES - 0)
+static inline int chk_v(struct tdm_bus *v);
+
+/*
+ * Global codec-dependent zero-fill for write underrun
+ * 4-wide to allow alternating +0/-0 under 8 or 16bit codecs
+ */
+static u8 silence[4] = {
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
+	[0 ... 3] = '@',	/* constant lead-in for testing */
+#else
+	0x1, 0x81, 0x1, 0x81,	/* A-Law alternating +0, -0 */
+#endif
+};
+
 #define tf(fmt, ...) tr_tdm(t_misc, fmt, ##__VA_ARGS__)
 
+/*
+ * Tracing macros simplifying code, but REQUIRING certain variables in scope:
+ * Mostly used only where the needed v/vno/eno/dir already exist in calling
+ * context, so reduce clutter, leaving surrounding code more readable.
+ * Again, they collapse to nothing if !defined(CONFIG_CAVIUM_TDM_DEBUG).
+ */
+/* trace_bus_dir() -- REQUIRES v & dir in scope */
+#define tvd(fmt, ...) tf("tdm%c%c%c%s %c%c%c " fmt, \
+	chk_v(v) ? -1 : '0' + (v)->vno, \
+	chk_v(v) ? -1 : '0' + ((v)->e[(v)->eb] ? (v)->e[(v)->eb]->eno : -1), \
+	chk_v(v) ? -1 : '0' + ((v)->e[!(v)->eb] ? (v)->e[!(v)->eb]->eno : -1), \
+	DirStr(dir), \
+	chk_v(v) ? '/' : "-+"[!!(v)->eb], \
+	chk_v(v) ? '/' : "-+"[!!FCUR(v)[!!(dir)].bno],  \
+	chk_v(v) ? '/' : "-+"[!!FOLD(v)[!!(dir)].bno], \
+	##__VA_ARGS__)
 
-/* called under lock to mark an "interesting" event */
-static inline void __mark_change(void)
-{
-	if (!(tdm_trace & t_change))
-		return;
-	if (!old_trace)
-		old_trace = tdm_trace;
-	tdm_trace |= t_detail;
-	trace_changes = 20; /* scans of enhanced tracing */
-	tf("tracing on\n");
-}
-
-/* called under lock to mark irq-handling done */
-static inline void __mark_done(void)
-{
-	if (trace_changes <= 0)
-		return;
-	if (--trace_changes)
-		return;
-	tf("tracing off\n");
-	tdm_trace = old_trace;
-}
+/* trace_bus_engine_dir() -- REQUIRES eno/v/dir in scope, for handover trace */
+#define tved(fmt, ...) tvd("e%d " fmt, (int)(eno), ##__VA_ARGS__)
+/* trace_engine_no() -- REQUIRES eno in scope */
+#define ten(fmt, ...) tf("tdm?%d? " fmt, (int)(eno), ##__VA_ARGS__)
+/* trace_bus_no() -- REQUIRES vno in scope */
+#define tvn(fmt, ...) tf("tdm%d?? " fmt, (int)(vno), ##__VA_ARGS__)
+/* trace_bus() -- REQUIRES v in scope */
+#define tv(fmt, ...) do { \
+		int vno = v->vno; \
+		tf("tdm%d?? " fmt, (int)(vno), ##__VA_ARGS__); \
+	} while (0)
+/* tfl() -- tf() with caller __LINE__, REQUIRES line in scope */
+#define tfl(fmt, ...) tf("from:%d " fmt, line, ##__VA_ARGS__)
 
 enum {
 	/* Direction enumerated for walking over both halves in irq servicing,
 	 * or setup/teardown. Doesn't have to map to engine number, but it's a
 	 * nice convention. All engines may Tx/Rx/Both, except that Tx on early
-	 * cn81xx chips' tdm1..3 will poison other users of IOBN bus (eg bgx)
+	 * cn81xx chips' tdm1..3 will poison other users of IOBN bus (eg bgx).
+	 *
+	 * Try to keep tx<rx assumption confined to for_xxx() macros below.
+	 * When a property is dup'd on tx/rx flows, use e->flows[0].prop to
+	 * make intention clear. That way any hardware asymmetry can be hidden.
 	 */
-	tx_tdm	= 0,
-	rx_tdm	= 1,
-	TXRX	= 2, /* number of directions, not enum, sizes array[TXRX] */
-#define IsTx(d)		((d) == tx_tdm)
-#define DirStr(d)	(IsTx(d) ? "tx" : "rx")
+	tx	= 0,
+	rx	= 1,
+	DIRS	= 2,	/* for dimensioning/looping */
+	both	= 2,	/* clarifies evmask(v, both, ev_xxx) */
+};
+#define IsTx(d)		((d) == tx)
+#define IsRx(d)		((d) != tx)
+#define DirStr(d)	(IsTx(d) ? "tx" : (IsRx(dir) ? "rx" : "--"))
+/* for the RARE cases when order is important... */
+#define for_rx_tx(dir, cond) for ((dir) = rx; (cond) && (dir) >= tx; (dir)--)
+#define for_tx_rx(dir, cond) for ((dir) = tx; (cond) && (dir) <= rx; (dir)++)
+/* otherwise use the generic, which allows ordering to be build-specific */
+#define for_dir(dir) for ((dir) = 0; (dir) < DIRS; (dir)++)
 
-	/* how many 8-sample superframes in ring-buffer? */
-	/* ... must be divisible by 2, smaller for lower latency */
-	/* TODO: make SUPERS runtime settable with TDMS(TX/RX)RING(frames) */
-	SUPERS = 16,
-	FRAMES = SUPERS * 8,	/* samples in ringbuffer */
-	FRAMES_PER_HALF = FRAMES / 2,	/* process 1/2 ring per scan */
-	/* irq every SUPERS/2, dma_cfg[rxst,txrd] each IRQ_THRESH */
-	IRQS_PER_WRAP = 2, /* Note: explicit factors in code tied to this */
-	IRQ_THRESH = FRAMES / IRQS_PER_WRAP,
+/* various tx/rx-specifics are summarised in xxthing[dir] */
+static const u8 xxwrap[DIRS] = {
+	[tx] = tdm_txwrap,
+	[rx] = tdm_rxwrap,
 };
 
-#ifdef CONFIG_MIPS
-#include <linux/platform_device.h>
-#include <asm/octeon/cvmx-gpio-defs.h>
-#endif /*MIPS*/
+static const u8 xxdma[DIRS] = {
+	[tx] = tdm_txrd,
+	[rx] = tdm_rxst,
+};
+
+static const u8 xxovf[DIRS] = {
+	[tx] = tdm_txempty,
+	[rx] = tdm_rxovf,
+};
+
+static const u8 xxbits[DIRS] = {
+	[tx] = tdm_txbits,
+	[rx] = tdm_rxbits,
+};
 
 union cavium_tdm_dma_cfg {
 	uint64_t u64;
 	struct {
-#ifdef __BIG_ENDIAN_BITFIELD
-		uint64_t rdpend:1;
-		uint64_t reserved_54_62:9;
-		uint64_t rxslots:10;
-		uint64_t reserved_42_43:2;
-		uint64_t txslots:10;
-		uint64_t reserved_30_31:2;
-		uint64_t rxst:10;
-		uint64_t reserved_19_19:1;
-		uint64_t useldt:1;
-		uint64_t txrd:10;
-		uint64_t fetchsiz:4;
-		uint64_t thresh:4;
-#else
-		uint64_t thresh:4;
-		uint64_t fetchsiz:4;
-		uint64_t txrd:10;
-		uint64_t useldt:1;
-		uint64_t reserved_19_19:1;
-		uint64_t rxst:10;
-		uint64_t reserved_30_31:2;
-		uint64_t txslots:10;
-		uint64_t reserved_42_43:2;
-		uint64_t rxslots:10;
-		uint64_t reserved_54_62:9;
-		uint64_t rdpend:1;
-#endif
+		__BITFIELD_FIELD(uint64_t rdpend:1,
+		__BITFIELD_FIELD(uint64_t reserved_54_62:9,
+		__BITFIELD_FIELD(uint64_t rxslots:10,
+		__BITFIELD_FIELD(uint64_t reserved_42_43:2,
+		__BITFIELD_FIELD(uint64_t txslots:10,
+		__BITFIELD_FIELD(uint64_t reserved_30_31:2,
+		__BITFIELD_FIELD(uint64_t rxst:10,
+		__BITFIELD_FIELD(uint64_t reserved_19_19:1,
+		__BITFIELD_FIELD(uint64_t useldt:1,
+		__BITFIELD_FIELD(uint64_t txrd:10,
+		__BITFIELD_FIELD(uint64_t fetchsiz:4,
+		__BITFIELD_FIELD(uint64_t thresh:4,
+		;))))))))))))
+	} s;
+};
+
+/* TDM_DBG private data */
+union tdm_dbg {
+	uint64_t u64;
+	struct {
+		__BITFIELD_FIELD(uint64_t dma_rxsf_cnt:16,
+		__BITFIELD_FIELD(uint64_t dma_sf_cnt:16,
+		__BITFIELD_FIELD(uint64_t dma_rxcnt_in_fr:10,
+		__BITFIELD_FIELD(uint64_t dma_cnt_in_fr:10,
+		__BITFIELD_FIELD(uint64_t dma_ld_pnd:1,
+		__BITFIELD_FIELD(uint64_t reserved:2,
+		__BITFIELD_FIELD(uint64_t dma_ld_cnt:5,
+		__BITFIELD_FIELD(uint64_t dma_cnt:4,
+		;))))))))
 	} s;
 };
 
 #ifdef CONFIG_ARM64
 static void *tdm_base;
-# ifndef DEBUG
-#  define cvmx_write_csr(addr, val)	writeq_relaxed(val, (void *)(addr))
+
+/* TODO: flip write names, _prefix indicating noisy like read, and trim */
+# define cvmx_read_csr(addr)		readq((void *)(addr))
+# define cvmx_write_csr(addr, val)	writeq_relaxed(val, (void *)(addr))
+#ifndef CONFIG_CAVIUM_TDM_DEBUG
+#  define _cvmx_write_csr(addr, val)	cvmx_write_csr(addr, val)
+#  define _cvmx_read_csr(addr)		cvmx_read_csr(addr)
 # else
-#  define cvmx_write_csr(addr, val)	do { \
+#  define _cvmx_write_csr(addr, val)	do { \
 		void *w_a = (void *)(addr); \
 		u64 w_v = (val); \
 		tr_tdm(t_csr, "%p w %llx\n", w_a, w_v); \
 		writeq_relaxed(w_v, w_a); \
 		cvmx_read_csr(w_a); \
 	} while (0)
+#  define _cvmx_read_csr(addr)	({ \
+		void *r_a = (void *)(addr); \
+		u64 r_v = cvmx_read_csr(r_a); \
+		tr_tdm(t_csr, "%p r %llx\n", r_a, r_v); \
+		r_v; \
+	})
 # endif
-# define cvmx_read_csr(addr)		readq((void *)(addr))
+
 # define cvmx_phys_to_ptr(v)		((void *)(v))
-# define cvmx_write_sync		cvmx_write_csr
+
 #else /* !CONFIG_ARM64 */
-# define _cvmx_write_csr(addr, val) do { \
+
+# ifndef CONFIG_CAVIUM_TDM_DEBUG
+#  define _cvmx_write_csr(addr, val)	cvmx_write_csr(addr, val)
+# else
+#  define _cvmx_write_csr(addr, val) do { \
 		tr_tdm(t_csr, "%llx w %llx\n", addr, (u64)val); \
 		cvmx_write_csr(addr, val); \
 	} while (0)
-# undef cvmx_write_csr
-# define cvmx_write_csr(addr, val)	_cvmx_write_csr(addr, val)
-# define cvmx_write_sync(addr, val)	do { \
-		u64 _a = (addr); \
-		cvmx_write_csr(_a, val); \
-		cvmx_read_csr(_a); \
-	} while (0)
+# endif
+# define _cvmx_read_csr(addr)		cvmx_read_csr(addr)
+
 #endif /* !CONFIG_ARM64 */
 
 static struct device *tdmdev;
 
 /* modparam for forcing major device, or inspecting it */
 static int tdmdrv_major;
-module_param(tdmdrv_major, int, 0444);
+module_param(tdmdrv_major, int, 0644);
+
+/* DMA ring size in frames */
+static int ring_frames;
+module_param(ring_frames, int, 0644);
+/* maybe reduce _MIN to 1 if read/write_actor allows partial superframes */
+#define RING_FRAMES_MIN		(2 * 8)
+#define RING_FRAMES_MAX		(8 << 16)
+//#define RING_FRAMES_DEFAULT	(4 * 8)
+#define RING_FRAMES_DEFAULT        (2 * 8) /* default is slow for state debug */
+#define FRAMES(v, dir)		((v)->ring_frames[dir])
+#define SUPERS(v, dir)		(FRAMES(v, dir) >> 3)
+#define STRIDE(f, dir)		((f)->fslots)
+
+enum ev_e {
+	/* events pending, fits in u8, so 8 copies fit in u64 waitfor */
+	ev_off	= 1,
+	ev_wrap	= 2,
+	ev_xfer	= 4,	/* any txrd/rxst */
+	ev_mask	= 0xff,	/* for clearing on close */
+};
+
+/* dynamic geometry handover action state */
+enum s_e {
+	s_off,
+	s_normal,	/* 1: one-engine running */
+	s_jump,		/* 2: one-engine starting */
+	s_dim,
+};
+static const char *_s_s[s_dim] = {
+	[s_off] = "s_off",
+	[s_normal] = "s_normal",
+	[s_jump] = "s_jump",
+};
+#define s_s(_s)	_s_s[_s]
+
+enum { irqs_per_wrap = 2 };	/* could extend to N slices of DMA buffer? */
 
 /* LDT usage per engine: (useldt & (1 << eno)) selects temporary cacheline */
 static int useldt;
-module_param(useldt, int, 0444);
+module_param(useldt, int, 0644);
 
 /* if set, adjust DMA fetch size from default of 8 */
 static int fetch_size; /* fetch_size == 1 + dma_cfg[fetchsiz] */
-module_param(fetch_size, int, 0444);
+module_param(fetch_size, int, 0644);
 
 /* if set, adjust DMA threshold from default of 8 */
 static int fetch_thresh;
-module_param(fetch_thresh, int, 0444);
+module_param(fetch_thresh, int, 0644);
 
-static inline u64 get_sclk(void)
-{
-	static struct clk *sclk;
-	static u64 sclk_hz;
+/* global override to FSYNC, as tdmcat binary doesn't allow tweak */
+static int fsyncsamp = -1;
+static int fsynclen = -1;
+static int fsyncloc = -1;
+module_param(fsyncsamp, int, 0644);
+module_param(fsynclen, int, 0644);
+module_param(fsyncloc, int, 0644);
 
-	if (sclk_hz)
-		return sclk_hz;
+/* wide_rx - bitmask of buses which receive all slots, even when no clients */
+static int wide_rx;
+module_param(wide_rx, int, 0444);
+#define WIDE(vno)	(wide_rx & (1 << (vno)))
 
-	if (IS_ERR_OR_NULL(sclk)) {
-		int ret;
+/* loop_rx - bitmask of buses which receive all Tx slots */
+static int loop_rx;
+module_param(loop_rx, int, 0444);
+#define LOOP(vno)	(loop_rx & (1 << (vno)))
 
-		sclk = devm_clk_get(tdmdev, NULL);
-		if (IS_ERR_OR_NULL(sclk)) {
-			pr_err("tdm: devm_clk_get() err %lld\n", (s64)sclk);
-		} else {
-			ret = clk_prepare_enable(sclk);
-			if (ret)
-				pr_err("tdm: clk_prepare_enable() err %d\n",
-					ret);
-			else
-				sclk_hz = clk_get_rate(sclk);
-		}
-	}
+enum {
+	/* flog() logs details of each A,N,C,L flow */
+	log_flows = 0,
+};
 
-#ifdef CONFIG_MIPS
-	if (!sclk_hz) {
-		pr_info("tdm: falling back to octeon_get_io_clock_rate()\n");
-		sclk_hz = octeon_get_io_clock_rate();
-	}
-#endif /*MIPS*/
-
-	pr_debug("tdm: Set system clock to %lld\n", sclk_hz);
-	return sclk_hz;
-}
-
+/*
+ * TODO: rename all to TDM_xxx and/or rework all as
+ * ... #define [?CVMX_PCMX_?]TDM_CFG(engine) TDM_REG(engine, 2)
+ * and later all union.s.xxx become bitmasks
+ */
+#define TDM_REG(eno, rno) \
+	((u64)tdm_base + 8 * (rno) + ((eno) & 3) * TDM_RSIZE)
+#define TDM_REGS 16 /* excludes xXMSK[] & MSIX */
 
 #ifdef CONFIG_MIPS
 #define TDM_RSIZE (1<<14)
@@ -295,19 +395,19 @@ static inline u64 get_sclk(void)
 #define CVMX_PCMX_INT_SUM(engine) \
 	((u64)tdm_base + 0x28 + ((engine) & 3) * TDM_RSIZE)
 #define CVMX_PCMX_INT_SUM_W1C(engine)	CVMX_PCMX_INT_SUM(engine)
-#else
+#else /* !MIPS */
 #define TDM_RSIZE (1<<16)
 #define CVMX_PCMX_INT_SUM_W1S(engine) \
 	((u64)tdm_base + 0x20 + ((engine) & 3) * TDM_RSIZE)
 #define CVMX_PCMX_INT_SUM_W1C(engine) \
 	((u64)tdm_base + 0x28 + ((engine) & 3) * TDM_RSIZE)
-#define CVMX_PCMX_INT_ENA_W1S(engine) \
-	((u64)tdm_base + 0x70 + ((engine) & 3) * TDM_RSIZE)	/*not MIPS */
-#define CVMX_PCMX_INT_ENA_W1C(engine) \
-	((u64)tdm_base + 0x78 + ((engine) & 3) * TDM_RSIZE)	/*not MIPS */
+#define CVMX_PCMX_INT_ENA_W1S(engine)	/*not MIPS */ \
+	((u64)tdm_base + 0x70 + ((engine) & 3) * TDM_RSIZE)
+#define CVMX_PCMX_INT_ENA_W1C(engine)	/*not MIPS */ \
+	((u64)tdm_base + 0x78 + ((engine) & 3) * TDM_RSIZE)
 #define CVMX_PCMX_INT_SUM(engine)	CVMX_PCMX_INT_SUM_W1S(engine)
 #define CVMX_PCMX_INT_ENA(engine)	CVMX_PCMX_INT_ENA_W1S(engine)
-#endif
+#endif /* !MIPS */
 
 #define CVMX_PCM_CLKX_CFG(clk) \
 	((u64)tdm_base + 0x00 + ((clk) & 1) * TDM_RSIZE)
@@ -344,7 +444,6 @@ static inline u64 get_sclk(void)
 #ifdef CONFIG_ARM64
 # define PCI_DEVICE_ID_THUNDER_TDM	0xA04E
 # define NR_TDM_IRQS			NR_TDM_ENGINES
-# define CVMX_SYNC			barrier()
 #endif /*CONFIG_ARM64 */
 
 #define DRV_NAME	"tdm"
@@ -366,14 +465,13 @@ static int pclk_hz[NR_CLKS]; /* for reporting */
 
 /* prefer coherent allocator */
 static bool use_coherent = true;
-module_param(use_coherent, bool, 0444);
-
+module_param(use_coherent, bool, 0644);
 
 MODULE_DESCRIPTION("Cavium TDM Controller Module");
 MODULE_AUTHOR("Peter Swain <peter.swain@marvell.com>");
 MODULE_LICENSE("GPL");
 
-static int tdm_setbuf(int eno, int dir);
+static int tdm_setbuf(int vno, int dir);
 static int tdm_teardown(void);
 
 #ifdef ONE_TDM_IRQ
@@ -385,9 +483,57 @@ static irqreturn_t tdm_handle_one(int irq, void *irqaction);
 #endif
 
 static long tdm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static inline int kickstart(struct tdm_bus *v);
 
 static const struct file_operations tdmdrv_fops;
 static struct class *tdmmodule_class;
+
+struct tdm_slot;
+typedef int (*tdm_actor) (struct tdm_slot *, u8 *dmabuf, int frames,
+	int stride, bool bno, int *offp);
+
+/* state for handling a read-or-write slot, or N consecutive slots */
+#ifndef SPARSE_SLOTS
+# define FIXED_FIFO_SUPERS
+#endif
+#define MAX_FIFO_LOG	9
+#define MAX_FIFO	(1 << MAX_FIFO_LOG)
+struct tdm_slot {
+	u16 sno;		/* first TDM slot */
+	u16 sample_bytes;	/* number of consecutive slots */
+	u8 vno;
+	u8 dir;
+	tdm_actor actor;	/* called at irq to process completed frames */
+	int skip;		/* samples to skip/fill at start */
+	bool closing;
+	bool active;
+	struct tdm_sess *sess;
+
+	/*
+	 * FIFO of u8 for mux/demux TDM.superframes <-> user
+	 * Offsets & sizes are in octets.
+	 * With Tx/Rx names already confused between SLIC/TDM, think of
+	 * these FIFOs as being divided into free region & content region.
+	 * Consumer takes from beginning of content, incs data_off.
+	 * Producer appends at free_off, incs free_off.
+	 */
+	int fifo_sz;		/* size in octets, must be 2^N */
+	int data_off, free_off;	/* always evaluated modulo _sz, data >= free */
+	/* re-zero'd every re-open up to here only */
+	wait_queue_head_t fifo_have_content;
+	wait_queue_head_t fifo_have_space;
+#ifdef FIXED_FIFO_SUPERS
+	u8 fifo[MAX_FIFO];
+#else /* !FIXED_FIFO_SUPERS */
+	/* fifo always allocated at end */
+	u8 fifo[0];
+#endif /* !FIXED_FIFO_SUPERS */
+};
+
+#define tdm_fifo_mask(s)	((s)->fifo_sz - 1)
+#define tdm_fifo_content(s)	((s)->free_off - (s)->data_off)
+#define tdm_fifo_space(s)	((s)->fifo_sz - tdm_fifo_content(s))
+#define tdm_fifo_full(s)	(tdm_fifo_space(s) <= 0)
 
 /*
  * struct tdm_sess:
@@ -397,9 +543,10 @@ static struct class *tdmmodule_class;
  * - a TDM-mode socket (not yet implemented, hooks in as tdm_read/tdm_write do)
  */
 struct tdm_sess {
-	int eno;
+	struct tdm_bus *v;
 	int rs, ws;		/* read/write slots */
-	struct tdm_slot *slot[TXRX];	/* slot buffering/signalling */
+	struct tdm_slot *slot[DIRS];	/* slot buffering/signalling */
+	ktime_t geom_start[2]; /* [1]=acquire_start, [0]=release_start */
 	bool bound;
 };
 
@@ -413,202 +560,574 @@ struct tdm_sess {
  *
  * @bno: which of the superframe DMA buffers is being used.
  * @fmask: bitmap of slots in use, soft copy of txmask[]/rxmsk[].
+ * @fslots: count of mask[] bits.
  * Note that fmask is typed to match bitops, not the 8 64bit registers,
  * and while it happens that u64 == unsigned long on mips64/arm64
- * they're purposefully kept distinct, but sized to contain same bitcount.
+ * types are purposefully kept distinct, but sized to contain same bitcount.
  * @changed: bitmask of fmask changes to push to hw, each represents a u64.
- * @fslots: count of mask[] bits.
+ * @clksel: which clocks source, hence framing details
+ * @fgen: circulating flow generation number, for debug
  */
 struct tdm_flow {
-	bool bno;	/* which DMA super/handle the flow maps */
-	u16 fslots;	/* bitcount of masks, soft copy of tx/rxslots */
+	bool bno;
+	u16 fslots;
+	s16 fgen;	/* flow generation number */
+	bool clksel;	/* for frame shape */
+	/* changed/fmask are ulong for bitops */
 	unsigned long changed;
-	unsigned long fmask[TDM_MAX_SLOTS / BITS_PER_LONG];
+	unsigned long fmask[ALIGN_MAX_SLOTS / BITS_PER_LONG];
 };
 
-/* locking is done at the IRQ-granularity level */
-#ifdef ONE_TDM_IRQ
+/* locking is done at the IRQ-granularity level, unless forced global */
+#if defined(ONE_TDM_IRQ) || defined(FORCE_ONE_TDM_LOCK)
+#define ONE_TDM_LOCK
 static spinlock_t tdm_lock;
-# define E_LOCK(e) tdm_lock
+# define TDM_LOCK(v) tdm_lock
 #else /* !ONE_TDM_IRQ */
-# define E_LOCK(e) ((e)->elock)
+# define TDM_LOCK(v) ((v)->bus_lock)
 #endif /* !ONE_TDM_IRQ */
 
 /*
- * struct tdm_engine:
- * @eno:	which engine 0..3.
+ * struct tdm_engine / struct tdm_bus:
+ * @eno:	which tdm engine 0..3.
+ * @vno:	which virtual engine 0..3. (vno==eno when proxy==0)
  * @clksel:	which clock generator? -1 for unassigned.
  * @super[] & @handle[]: virtual & dma addresses of superframe buffers,
  *		two banks in each direction, which alternate when slot
  *		mapping changes to avoid overwriting.
- * @fnew[]:	pending flow, accumulates slotmap changes & Tx data.
- * @fhw[]:	currently active DMA.
- * @frx:	previous flow, just Rx, for draining last cycle's data.
+ * @fnew[]:	pending flows, accumulate slotmap changes & Tx data.
+ * @fcur[]:	currently active DMA flows.
+ * @fold[]:	previous flow, or parallel when paired.
  * @ring_frames[] & @supersize[]: suggested and actual DMA buf sizes.
  * @slop[]:	dynamically allocated slot-pointer vector.
  */
 
-struct tdm_engine {
-	u8 eno;			/* ordinal for index into registers, etc */
+struct tdm_bus {
+	u8 vno;		/* const ordinal */
 	s8 clksel;
-	u16 max_slots[TXRX];	/* max slots allowed */
-#ifndef ONE_TDM_IRQ
-	spinlock_t elock;
-#endif /* !ONE_TDM_IRQ */
-	u64 *super[TXRX][2];
-	dma_addr_t handle[TXRX][2];
-	struct tdm_flow fnew[TXRX];
-	struct tdm_flow fhw[TXRX];
-	struct tdm_flow frx;
-	int ring_frames[TXRX];	/* override for SUPERS, not yet implemented */
-	size_t supersize[TXRX];
-	bool last_wrapped[TXRX];/* last processed IRQ was a tx/rxwrap */
-	s16 pll_step[TXRX]; /* add to irq_thresh from next cycle onward */
-	s16 pll_impulse[TXRX]; /* add to irq_thresh just for next cycle */
-	union cavium_tdm_cfg tc;	/* current CVMX_PCMX_TDM_CFG */
-	union cavium_tdm_dma_cfg dc; /* current CVMX_PCMX_DMA_CFG */
+	bool eb;	/* which engine/buffer fcur is using */
+	struct tdm_engine *e[2]; /* engine(s), indexed [v->eb] */
+	enum s_e hands;	/* handover state of the e[0/1] mapping */
+	u64 waitfor;	/* the evmask(xxx) needed before handover progress */
+	u16 max_slots[DIRS];	/* max slots in frame */
+	u8 dead_offset[DIRS];	/* dead-zone is d_s bits up, inverse mask */
+#ifndef ONE_TDM_LOCK
+	spinlock_t bus_lock;
+#endif /* !ONE_TDM_LOCK */
+	struct semaphore sem_bind;
+	u64 *super[DIRS][2]; /* indexed [dir][f->bno] */
+	dma_addr_t handle[DIRS][2]; /* indexed [dir][f->bno] */
+	struct tdm_flow flows[4 * DIRS]; /* mask bits, etc */
+	struct tdm_flow falloc[DIRS]; /* mask bits, etc */
+	int ring_frames[DIRS];
+	size_t supersize[DIRS];
+	s16 fgen;	/* flow generation number */
+	int tseq;	/* test sequence */
 	bool valid_cfg;		/* TDMSTIM issued? */
 	bool valid_ssiz;	/* optional TDMSSIZE issued? */
-	struct tdm_slot **slop[TXRX];
-	wait_queue_head_t mask_event;
-	u8 ena;			/* soft IRQ enable state */
-	u8 sum;			/* soft IRQ summary */
-	u8 cumsum;		/* accumulated events since TDMGSTAT */
-	int _irqstate[256]; /* stats. TODO: drop when stable */
-};
-static struct tdm_engine engines[NR_TDM_ENGINES];
-
-struct tdm_slot;
-typedef int (*tdm_actor) (struct tdm_slot *, u64 *b64, int frames, int stride);
-
-/* state for handling a read-or-write slot, or N consecutive slots */
-struct tdm_slot {
-	int sno;		/* first TDM slot */
-	u16 sample_bytes;	/* number of consecutive slots */
-	struct tdm_engine *eng;
-	tdm_actor actor;	/* called at irq to process completed frames */
-
-	/*
-	 * FIFO of u64 8-sample chunks for mux/demux TDM.superframes <-> user
-	 * Offsets & sizes are in 64bit superframe slots, not bytes.
-	 * With Tx/Rx names already confused between SLIC/TDM, think of
-	 * these FIFOs as being divided into free region & content region.
-	 * Consumer takes from beginning of content, incs data_off.
-	 * Producer appends at free_off, incs free_off.
-	 */
-	int fifo_sz;		/* size in supers, must be 2^N */
-#define tdm_fifo_mask(s) ((s)->fifo_sz - 1)
-	int data_off, free_off;	/* always evaluated modulo _sz, data >= free */
-	wait_queue_head_t fifo_have_content;
-	wait_queue_head_t fifo_have_space;
-#define tdm_fifo_content(s) ((s)->free_off - (s)->data_off)
-#define tdm_fifo_space(s) ((s)->fifo_sz - tdm_fifo_content(s))
-#define tdm_fifo_full(s) (tdm_fifo_space(s) <= 0)
-	u64 fifo[0];		/* allocated at end */
+	bool valid_flows;
+	union cavium_tdm_cfg tc;	/* current CVMX_PCMX_TDM_CFG */
+	union cavium_tdm_dma_cfg dc; /* current CVMX_PCMX_DMA_CFG */
+	wait_queue_head_t mask_event; /* something changed? */
+	int sync_pindex;	/* announce handover (testing) */
+	u64 event;		/* event++ on every irq */
+	bool fixed;		/* fixed (static) slotmap, Tx always on */
+	struct cavium_tdm_sslots sslot; /* static (always-mapped) slots */
+#ifdef SPARSE_SLOTS
+	struct tdm_slot **slop[DIRS]; /* SLOt Pointers - old way, buggy? */
+#else /* !SPARSE_SLOTS */
+	struct tdm_slot slop[DIRS][MAX_SLOTS]; /* SLOts Themselves - new way */
+#endif /* !SPARSE_SLOTS */
 };
 
-static int tdm_init(int eno, int dir);
-static void tdm_exit(int eno, int dir);
-static int tdm_hw_init(int eno);
-static void __change_mapping(struct tdm_engine *e, int dir, bool first);
+/* which role does this engine play? indexed erole[v->eb] */
+static const char *erole[2] = {
+	[1] = "tdm",	/* primary engine */
+	[0] = "tdx",	/* proxy engine */
+};
 
-static DEFINE_SEMAPHORE(starting);
-static int teardown;
 
-/* stats for /proc/tdm */
-static struct pstat {
-	u64 sum;
-	u64 drop;
-	u64 empty;
-	u64 pll_up;
-	u64 pll_dn;
-	u16 hang;
-} pstat[NR_TDM_ENGINES][TXRX];
+/*
+ * 3 "flows" are maintained in each of tx/rx - bitmasks of active slots:
+ * FALL: allocation map: ioctl(BIND) adds entries; close() removes them
+ * FCUR: copied from FALL when changing config, as proxy-engine state
+ * FOLD: previous state, or old engine when paired
+ * When geometry change happens, the whole flow array rotates, by fgen++
+ * But only 2 buffers needed (bno is 0/1), as Tx pre-loads FNEW,
+ * Rx post-drains FOLD. VFLOW() cycles thru 4-way space to avoid
+ * issues with overflow, which modulo-3 would bring.
+ */
+#define VFLOW(v, fi) (&((v)->flows[((unsigned int)((v)->fgen + fi) & 3) * 2]))
+#define FALL(v)		((v)->falloc) /* pending-geom details */
+#define FNEW(v)		VFLOW(v, 1) /* incoming-geom details */
+#define FCUR(v)		VFLOW(v, 0) /* current-geom details */
+#define FOLD(v)		VFLOW(v, -1) /* last-geom for Rx, post-proc */
 
-/* shut down an engine and log trace buffer */
-static void __tdm_dump(const char *f, int l, int eno)
-#define tdm_dump(e) __tdm_dump(__func__, __LINE__, e)
+struct tdm_engine {
+	struct tdm_bus *v; /* bus, if any */
+	struct tdm_flow *flows; /* which flows this engine owns */
+	bool wrapped[DIRS];/* last processed DMA phase was a wrap */
+	dma_addr_t hbase[DIRS]; /* start of DMA, flows[dir].handle[bno] */
+	dma_addr_t hend[DIRS]; /* end of DMA, hbase[dir] + length */
+	dma_addr_t half[DIRS]; /* midpoint */
+	u64 *sbase[DIRS]; /* vaddr of hbase */
+	u8 eno;		/* const ordinal for index into registers, etc */
+	u8 ena;		/* soft IRQ enable state */
+	u8 sum;		/* soft IRQ summary */
+	u8 cumsum;	/* accumulated events since TDMGSTAT */
+	ktime_t twrap[DIRS]; /* last start/wrap */
+	int skip_dma[DIRS]; /* frame xfers to skip in jumpstart/handover */
+	u64 lastirqs;	/* rolling (u4 state, u8 irq) log for debug */
+	int rxto; /* handover: rx valid to here (frames) */
+	int rxfrom; /* handover: rx valid from here (frames) */
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
+	int _irqstate[256]; /* detailed stats */
+#endif
+};
+
+/*
+ * eng[eno] manages a hardware TDM engine,
+ * veng[vno] manages a TDM bus, using 0..2 engines,
+ * mapping between them is controlled by "proxy"
+ */
+static struct tdm_engine eng[NR_TDM_ENGINES];
+static struct tdm_bus veng[NR_TDM_ENGINES];
+
+/* caller holds lock, mark an "interesting" event */
+static inline void mark_change(void)
 {
-#ifdef CONFIG_TRACING
-	struct tdm_engine *e = &engines[eno];
+	bool was_off = !old_trace;
 
-	if (!e->tc.s.enable)
+	if (!(tdm_trace & t_change))
 		return;
-	e->tc.s.enable = 0;
-	cvmx_write_sync(CVMX_PCMX_TDM_CFG(eno), e->tc.u64);
-	trace_printk("tdm_dump(%d) from %s:%d\n", eno, f, l);
-	ftrace_dump(DUMP_ALL);
-	wake_up(&e->mask_event);
-#endif
+	trace_changes = 50; /* scans of enhanced tracing */
+	if (was_off)
+		old_trace = tdm_trace;
+	if (was_off)
+		trace_printk("tdm tracing on %x |= %x\n",
+			tdm_trace, t_detail);
+	tdm_trace |= t_detail;
 }
 
-static inline void tdm_irq_enable(int eno, u8 bits)
+/* caller holds lock, mark irq-handling done */
+static inline void mark_done(void)
 {
-#ifdef CONFIG_MIPS
-	u8 ena;
-	u64 r = CVMX_PCMX_INT_ENA(eno);
+	if (trace_changes <= 0)
+		return;
+	if (--trace_changes)
+		return;
+	trace_printk("tdm tracing off\n");
+	tdm_trace = old_trace;
+	old_trace = 0;
+}
 
-	ena = cvmx_read_csr(r);
-	if (~ena & bits) {
-		ena |= bits;
-		cvmx_write_sync(r, ena);
-		engines[eno].ena = ena;
+static unsigned long held;
+
+/* bus state persistence, canceled by TDMSDROP */
+static inline void hold(unsigned int vno, bool on)
+{
+	if (vno >= NR_TDM_BUSES)
+		return;
+	if (on && !test_and_set_bit(vno, &held)) {
+		__module_get(THIS_MODULE);
+	} else if (!on && test_and_clear_bit(vno, &held)) {
+		/* TODO: revert vno to module-load state? */
+		module_put(THIS_MODULE);
 	}
-#else
-	cvmx_write_csr(CVMX_PCMX_INT_ENA_W1S(eno), bits);
-	engines[eno].ena |= bits;
-#endif
 }
 
-static inline void tdm_irq_disable(int eno, u8 bits)
+static inline u64 get_sclk(void)
 {
-#ifdef CONFIG_MIPS
-	u8 ena;
-	u64 r = CVMX_PCMX_INT_ENA(eno);
+	static struct clk *sclk;
+	static u64 sclk_hz;
 
-	ena = cvmx_read_csr(r);
-	if (ena & bits) {
-		ena &= ~bits;
-		cvmx_write_sync(r, ena);
-		engines[eno].ena = ena;
+	if (sclk_hz)
+		return sclk_hz;
+
+	if (IS_ERR_OR_NULL(sclk)) {
+		int ret;
+
+		sclk = devm_clk_get(tdmdev, NULL);
+		if (IS_ERR_OR_NULL(sclk)) {
+			pr_err("tdm: devm_clk_get() err %lld\n", (s64)sclk);
+		} else {
+			ret = clk_prepare_enable(sclk);
+			if (ret)
+				pr_err("tdm: clk_prepare_enable() err %d\n",
+					ret);
+			else
+				sclk_hz = clk_get_rate(sclk);
+		}
 	}
-#else
-	cvmx_write_csr(CVMX_PCMX_INT_ENA_W1C(eno), bits);
-	engines[eno].ena &= ~bits;
-#endif
+
+#ifdef CONFIG_MIPS
+	if (!sclk_hz) {
+		pr_info("tdm: falling back to octeon_get_io_clock_rate()\n");
+		sclk_hz = octeon_get_io_clock_rate();
+	}
+#endif /*MIPS*/
+
+	return sclk_hz;
 }
 
-static inline void tdm_irq_ack(int eno, u8 bits)
-{
-	cvmx_write_csr(CVMX_PCMX_INT_SUM_W1C(eno), bits);
-	engines[eno].sum = cvmx_read_csr(CVMX_PCMX_INT_SUM(eno));
-	engines[eno].cumsum |= engines[eno].sum;
-}
-
-static int validate_eno(unsigned int eno)
+static inline int chk_eno(unsigned int eno)
 {
 	if (eno < NR_TDM_ENGINES)
 		return 0;
 	return -EINVAL;
 }
 
-/* respect TCMSCLKSEL, fall back to TDMCFG.useclk1, default clk0 */
-static int which_clk(int eno)
+static inline int _chk_vno(unsigned int vno, int line)
+#define chk_vno(vno) _chk_vno(vno, __LINE__)
 {
-	struct tdm_engine *e = &engines[eno];
-
-	if (!validate_eno(eno))
+	if (vno < NR_TDM_BUSES)
 		return 0;
-	if (e->clksel >= 0)
-		return e->clksel;
-	return e->tc.s.useclk1;
+	return -EINVAL;
+}
+
+static inline int chk_v(struct tdm_bus *v)
+{
+	if (!v)
+		return -EINVAL;
+	return chk_vno(v->vno);
+}
+
+/* respect TCMSCLKSEL, fall back to TDMCFG.useclk1, default clk0 */
+static int which_clk(int vno)
+{
+	struct tdm_bus *v = &veng[vno];
+
+	if (chk_vno(vno))
+		return 0;
+	if (v->clksel >= 0)
+		return v->clksel;
+	return v->tc.s.useclk1;
+}
+
+/* flow/engine/bus logging */
+static bool probed;
+static void _flowlog(struct tdm_bus *v, int line)
+#define flowlog(v) _flowlog(v, __LINE__)
+{
+	int i;
+
+	for (i = 1; i >= 0; i--) {
+		bool eb = v->eb ^ !i;
+		struct tdm_engine *e = v->e[eb];
+		struct tdm_flow *flo;
+
+		if (!e)
+			continue;
+
+		flo = e->flows;
+
+		if (!flo) {
+			tfl("%s%d.e[b%d]:e%d flo:NULL\n",
+				erole[i], v->vno, eb, e->eno);
+			continue;
+		}
+
+		tfl("%s%d.e[b%d]:e%d f%d.b%d tx:%d@%llx rx:%d@%llx\n",
+			erole[i], v->vno, eb, e->eno,
+			flo[tx].fgen, flo->bno,
+			flo[tx].fslots, v->handle[tx][flo->bno],
+			flo[rx].fslots, v->handle[rx][flo->bno]);
+	}
+}
+
+static void _flog0(struct tdm_bus *v, const char *who, int line)
+#define flog0(v, who) _flog0(v, who, __LINE__)
+{
+	if (!probed)
+		return;
+
+	tfl("tdm%d.b%d A%d N%d%c C%d%c L%d%c %s\n", v->vno, v->eb,
+		FALL(v)->fgen,
+		FNEW(v)->fgen, "-+"[FNEW(v)->bno],
+		FCUR(v)->fgen, "-+"[FCUR(v)->bno],
+		FOLD(v)->fgen, "-+"[FOLD(v)->bno], who);
+	_flowlog(v, line);
+}
+
+static void flog1(struct tdm_bus *v, struct tdm_flow *f,
+		int dir, char *s, int line)
+{
+	int m;
+
+	f += dir;
+
+	tfl("v%d.%s%d.%s slots:%d b%d +%lx\n", v->vno, s,
+		f->fgen, DirStr(dir), f->fslots, f->bno, f->changed);
+
+	for (m = 0; m < MASK_REGS; m++) {
+		u64 msk = f->fmask[m];
+
+		if (!msk)
+			continue;
+		tfl("   m%d %llx\n", m, msk);
+	}
+}
+
+static void _flog(struct tdm_bus *v, const char *who, int line)
+#define flog(v, who) _flog(v, who, __LINE__)
+{
+	_flog0(v, who, line);
+	if (!log_flows)
+		return;
+	flog1(v, FALL(v), tx, "A", line);
+	flog1(v, FALL(v), rx, "A", line);
+	flog1(v, FNEW(v), tx, "N", line);
+	flog1(v, FNEW(v), rx, "N", line);
+	flog1(v, FCUR(v), tx, "C", line);
+	flog1(v, FCUR(v), rx, "C", line);
+	flog1(v, FOLD(v), tx, "L", line);
+	flog1(v, FOLD(v), rx, "L", line);
+}
+
+static inline union cavium_tdm_dma_cfg read_dc(int eno)
+{
+	union cavium_tdm_dma_cfg dc;
+
+	dc.u64 = cvmx_read_csr(CVMX_PCMX_DMA_CFG(eno));
+	return dc;
+}
+
+static inline union cavium_tdm_dma_cfg write_dc(int eno,
+			union cavium_tdm_dma_cfg dc)
+{
+	cvmx_write_csr(CVMX_PCMX_DMA_CFG(eno), dc.u64);
+
+	return dc;
+}
+
+static inline void v_dc(struct tdm_bus *v, union cavium_tdm_dma_cfg dc)
+{
+	v->dc = dc;
+}
+
+static inline void await_rdpend(int eno)
+{
+	union cavium_tdm_dma_cfg dc;
+
+	while ((dc = read_dc(eno)).s.rdpend)
+		;
+}
+
+static inline union cavium_tdm_cfg read_tc(int eno)
+{
+	union cavium_tdm_cfg tc;
+
+	await_rdpend(eno);
+	tc.u64 = cvmx_read_csr(CVMX_PCMX_TDM_CFG(eno));
+	return tc;
+}
+
+static inline void write_tc(int eno, union cavium_tdm_cfg tc)
+{
+	await_rdpend(eno);
+	cvmx_write_csr(CVMX_PCMX_TDM_CFG(eno), tc.u64);
+	await_rdpend(eno);
+}
+
+/*
+ * evmask() - encode bus-level IRQ events, controlling handover.
+ * Bus-level engine-handover actions must be done when all 4 DMA engines
+ * are in the correct state (tx & rx sides, of one or two TDM engines).
+ * evmask() encodes the required events into v->waitfor,
+ * 'dirs' is either tx/rx/both.
+ *
+ * TODO: simplify, the whole 'waitfor' dance can be much simpler with
+ * dynamic slot setup/teardown removed.
+ */
+static inline u64 evmask(int eno, int dirs, u64 event)
+{
+	u64 mask = 0, bits;
+	struct tdm_flow *flows = eng[eno].flows;
+	int dir;
+
+	if (!flows)
+		return 0;
+	/*
+	 * called with DIRS of tx or rx for single-dir
+	 * or dirs=both for both-direction events
+	 * Ugly - needs a name change, but inlines with constant arg
+	 * better than loop
+	 */
+	for_dir(dir) {
+		if (dirs != both && dirs != dir)
+			continue;
+		if (dir == tx && !flows[dir].fslots)
+			continue;
+		bits = event << (16 * eno + 8 * dir);
+		mask |= bits;
+	}
+
+	return mask;
+}
+
+enum {
+	ev_each_engine = 0x1000100010001ULL,
+	ev_each_tx = ev_each_engine << (8 * tx),
+	ev_each_rx = ev_each_engine << (8 * rx),
+	ev_any_dir = ev_each_tx | ev_each_rx,
+};
+
+static int tdm_init(int vno, int dir);
+static void tdm_exit(int vno, int dir);
+static int tdm_hw_init(struct tdm_bus *v);
+static struct tdm_slot *tdm_create_slot(struct tdm_bus *v,
+	struct tdm_sess *, int sno, int sample_bytes,
+	size_t fifo_sz, int dir, tdm_actor actor);
+
+/* impose FNEW(v)[dir] on hardware */
+static bool change_mapping(struct tdm_engine *e, int dir, bool first);
+/* both directions, and wakeup */
+static bool change_mappings(struct tdm_engine *e, bool first);
+
+static int teardown;
+
+/* stats for /proc/tdm */
+struct avg {
+	u64 count;
+	u64 us;
+	u64 max;
+};
+static struct pstat {
+	u64 sum;
+	u64 drops; /* or empty */
+	u64 irqs;
+	u64 missed[2]; /* missed[severity] */
+	u64 nops;
+	u64 hang;
+	u64 noflo;
+	u64 nolock;
+	struct avg av[2]; /* [1]bind [0]release */
+} pstat[NR_TDM_ENGINES][DIRS];
+
+static inline void tdm_irq_enable(int eno, u8 bits)
+{
+	if (!chk_eno(eno)) {
+#ifdef CONFIG_MIPS
+		u8 ena;
+		u64 r = CVMX_PCMX_INT_ENA(eno);
+
+		ena = cvmx_read_csr(r);
+		if (~ena & bits) {
+			ena |= bits;
+			_cvmx_write_csr(r, ena);
+			eng[eno].ena = ena;
+		}
+#else /* !MIPS */
+		_cvmx_write_csr(CVMX_PCMX_INT_ENA_W1S(eno), bits);
+		eng[eno].ena |= bits;
+#endif /* !MIPS */
+	}
+}
+
+static inline void tdm_irq_disable(int eno, u8 bits)
+{
+	if (!chk_eno(eno)) {
+#ifdef CONFIG_MIPS
+		u8 ena;
+		u64 r = CVMX_PCMX_INT_ENA(eno);
+
+		ena = cvmx_read_csr(r);
+		if (ena & bits) {
+			ena &= ~bits;
+			_cvmx_write_csr(r, ena);
+			eng[eno].ena = ena;
+		}
+#else /* !MIPS */
+		_cvmx_write_csr(CVMX_PCMX_INT_ENA_W1C(eno), bits);
+		eng[eno].ena &= ~bits;
+#endif /* !MIPS */
+	}
+}
+
+static inline void tdm_irq_ack(int eno, u8 bits)
+{
+	if (!chk_eno(eno)) {
+#if 0
+		/* should be enuff */
+		_cvmx_write_csr(CVMX_PCMX_INT_SUM_W1C(eno), bits);
+		eng[eno].sum = cvmx_read_csr(CVMX_PCMX_INT_SUM(eno));
+		eng[eno].cumsum |= eng[eno].sum;
+#else
+		/* explore suspected failure-to-clear */
+		_cvmx_write_csr(CVMX_PCMX_INT_SUM_W1C(eno), bits);
+		eng[eno].sum = _cvmx_read_csr(CVMX_PCMX_INT_SUM(eno));
+		eng[eno].cumsum |= eng[eno].sum;
+#endif
+	}
+}
+
+/* change handover state: could be inline func, this is more traceable */
+#define NEW_STATE(_v, _state) ((_v)->hands = (_state))
+
+/* prepare to clone engine */
+/* caller holds lock */
+static void next_clone(struct tdm_bus *v, int eold, enum ev_e event)
+{
+	int next;
+
+	/* next state depends on whether last close is happening */
+	if (!(FALL(v)[tx].fslots || FALL(v)[rx].fslots)) {
+		next = s_off;
+	} else {
+		tdm_irq_enable(eold, tdm_rxwrap);
+		next = s_jump;
+	}
+	NEW_STATE(v, next);
+}
+
+static char *tname[2] = {
+	[0] = "stop",
+	[1] = "bind",
+};
+
+static void geom_stats(struct tdm_bus *v, struct tdm_sess *s)
+{
+#ifdef CONFIG_PROC_FS
+	int enable;
+
+	for (enable = 1; s && enable >= 0; enable--) {
+		ktime_t tstart = s->geom_start[enable];
+		ktime_t tend;
+		int vno;
+		u64 us;
+
+		if (!tstart)
+			continue;
+		s->geom_start[enable] = 0;
+
+		tend = ktime_get_boottime();
+		vno = v->vno;
+
+		us = ktime_to_ns(ktime_sub(tend, tstart)) / 1000;
+
+		pstat[vno][0].av[enable].count++;
+		pstat[vno][0].av[enable].us += us;
+		if (pstat[vno][0].av[enable].max < us)
+			pstat[vno][0].av[enable].max = us;
+	}
+#endif
 }
 
 #ifdef CONFIG_PROC_FS
 static int show_tdm(struct seq_file *m, void *v)
 {
-	int clk, eno;
+	int clk, vno;
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
+	int eno, eold;
+#endif /*CONFIG_CAVIUM_TDM_DEBUG */
 
+	seq_printf(m, "cavium-tdm v%d buses:%d engines:%d clocks:%d default_ring_frames:%d",
+		TDM_VER, NR_TDM_BUSES, NR_TDM_ENGINES, NR_CLKS, ring_frames);
+#ifdef CONFIG_CAVIUM_TDM_MODULE
+	seq_printf(m, " sig %7.7s\n", THIS_MODULE->srcversion);
+#else
+	seq_puts(m, "\n");
+#endif
 	for (clk = 0; clk < NR_CLKS; clk++) {
 		seq_printf(m, "CLK%d", clk);
 		if (!(valid_clk[clk] & c_hz))
@@ -622,67 +1141,139 @@ static int show_tdm(struct seq_file *m, void *v)
 			   8 * clk_cfg[clk].s.numslots +
 			   clk_cfg[clk].s.extrabit, valid_clk[clk]);
 	}
-	for (eno = 0; eno < NR_TDM_ENGINES; eno++) {
-		struct tdm_engine *e = &engines[eno];
+
+	for (vno = 0; vno < NR_TDM_BUSES; vno++) {
+		struct tdm_bus *v = &veng[vno];
+		bool eb = v->eb;
+		struct tdm_engine *e0 = v->e[eb];
+		struct tdm_engine *e1 = v->e[!eb];
+		struct pstat *ts = &pstat[vno][0];
 		int dir;
-		int seen = 0;
 		int i;
 
-		for (dir = 0; dir < TXRX; dir++) {
-			struct pstat *s = &pstat[eno][dir];
-			struct tdm_flow *fnew = &e->fnew[dir];
-			struct tdm_flow *fhw = &e->fhw[dir];
-			struct tdm_flow *frx = &e->frx;
+		if (!pstat[vno][tx].sum
+		 && !pstat[vno][rx].sum
+		 && !pstat[vno][tx].av[1].count
+		 && !pstat[vno][rx].av[1].count)
+			continue;
+
+		seq_printf(m, "\n TDM%d bus", vno);
+		seq_printf(m, " f%d %s", v->fgen, s_s(v->hands));
+		seq_printf(m, " CLK%d engine", which_clk(vno));
+		if (e0)
+			seq_printf(m, "%d/", e0->eno);
+		else
+			seq_puts(m, "-/");
+		if (e1)
+			seq_printf(m, "%d ", e1->eno);
+		else
+			seq_puts(m, "- ");
+		seq_puts(m, "\n");
+
+		/* walk thru open/release stats */
+		seq_puts(m, "        ");
+
+		for (dir = 0; dir < 2; dir++) {
+			if (!ts->av[dir].count)
+				ts->av[dir].count = 1;
+			seq_printf(m, "%s(%llu av:%llu mx:%llu)%c",
+				tname[dir], ts->av[dir].count,
+				ts->av[dir].us / (ts->av[dir].count * 1000),
+				ts->av[dir].max / 1000,
+				dir ? '\n' : ' ');
+		}
+
+		for (dir = 0; dir < DIRS; dir++) {
+			struct pstat *s = &pstat[vno][dir];
+			struct tdm_flow *fa = &FALL(v)[dir];
+			struct tdm_flow *fc = &FCUR(v)[dir];
+			struct tdm_flow *fo = &FOLD(v)[dir];
 
 			/* skip any completely quiescent engine/dir */
-			if ((IsTx(dir)
-			     || !frx->fslots)
-			    && !fhw->fslots
-			    && !fnew->fslots)
+			if (s->av[1].count < 2
+			    && !(fo->fslots || fo->changed)
+			    && !(fa->fslots || fa->changed)
+			    && !(fc->fslots || fc->changed))
 				continue;
 
-			if (!seen++)
-				seq_printf(m, "TDM%d CLK%d ", eno,
-					   which_clk(eno));
-			else
-				seq_puts(m, "          ");
+			seq_printf(m, "\n  TDM%d ", vno);
 
 			seq_printf(m,
-				   "%s sum:%lld d:%lld h:%x pll:%d+%lld-%lld",
-				   DirStr(dir), s->sum, s->drop, s->hang,
-				   IsTx(dir) ? e->dc.s.txrd : e->dc.s.rxst,
-				   s->pll_up, s->pll_dn);
-			seq_printf(m, " %d>%d", fnew->fslots, fhw->fslots);
-			if (!IsTx(dir))
-				seq_printf(m, ">%d", frx->fslots);
-			seq_printf(m, " i%xE%x", e->sum, e->ena);
+				   "%s thresh:%d ring:%d octets:%lld\n",
+				   DirStr(dir),
+				   IsTx(dir) ? v->dc.s.txrd : v->dc.s.rxst,
+				   v->ring_frames[dir],
+				   s->sum);
+			seq_printf(m, "    slots alloc:%d%c cur:%d%c old:%d%c",
+				fa->fslots, "* "[!fa->changed],
+				fc->fslots, "* "[!fc->changed],
+				fo->fslots, "* "[!fo->changed]);
+			if (e0)
+				seq_printf(m, " i%xE%x/%llx",
+					e0->sum, e0->ena, e0->lastirqs);
+			if (e1 && e1 != e0)
+				seq_printf(m, " i%xE%x/%llx",
+					e1->sum, e1->ena, e1->lastirqs);
 			seq_puts(m, "\n");
 
-			for (i = 0; i < 8; i++) {
-				u64 m0 = fnew->fmask[i];
-				u64 m1 = fhw->fmask[i];
-				u64 m2 = IsTx(dir) ? 0 : frx->fmask[i];
+			for (i = 0; i < MASK_REGS; i++) {
+				u64 ma = fa->fmask[i];
+				u64 mc = fc->fmask[i];
+				u64 mo = fo->fmask[i];
+				static u8 showmask[NR_TDM_ENGINES][DIRS];
+				bool mv = showmask[vno][dir] & (1 << i);
 
-				if (!(m0 | m1 | m2))
+				if (!(ma | mc | mo | mv))
 					continue;
+
 				seq_printf(m,
-					"  TDM%d.%smsk%d %c%llx>%c%llx",
-					eno, DirStr(dir), i,
-					"-+"[e->fnew[dir].bno], m0,
-					"-+"[e->fhw[dir].bno], m1);
-				if (!IsTx(dir))
-					seq_printf(m, ">%c%llx",
-						"-+"[e->fhw[dir].bno], m2);
+					"  TDM%d.%smsk%d N%16.16llx",
+					vno, DirStr(dir), i, ma);
+
+				seq_printf(m, " C%c%16.16llx",
+					"-+"[fc->bno], mc);
+				seq_printf(m, " L%c%16.16llx",
+					"-+"[fo->bno], mo);
+
 				seq_putc(m, '\n');
+
+				/* only hide masks which are always zero */
+				showmask[vno][dir] |= (1<<i);
+			}
+
+			seq_printf(m,
+				"    TDM%d%s drops:%lld nops:%llu",
+				vno, DirStr(dir), s->drops, s->nops);
+			seq_printf(m,
+				" missed:%llu/%llu hang:%llu",
+				s->missed[1], s->missed[0], s->hang);
+			seq_printf(m,
+				" nolock:%llu noflo:%llu irqs:%llu\n",
+				s->nolock, s->noflo, s->irqs);
+		}
+	}
+
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
+	for (eno = 0, eold = -1; eno < NR_TDM_ENGINES; eno++) {
+		struct tdm_engine *e = &eng[eno];
+		int i;
+
+		for (i = 0; i < 256; i++) {
+			if (e->_irqstate[i]) {
+				if (eno != eold)
+					seq_printf(m, "\ne%d ", eno);
+				else
+					seq_puts(m, "   ");
+				eold = eno;
+				seq_printf(m, "sum %x %d\n",
+					   i, e->_irqstate[i]);
 			}
 		}
-#ifdef DEBUG
-		for (i = 0; i < 256; i++)
-			if (e->_irqstate[i])
-				seq_printf(m, "sum %x %d\n", i,
-					   e->_irqstate[i]);
-#endif
 	}
+#endif /*CONFIG_CAVIUM_TDM_DEBUG */
+	seq_printf(m, "trace %x\n", tdm_trace);
+	seq_printf(m, "wide_rx %x\n", wide_rx);
+	seq_printf(m, "loop_rx %x\n", loop_rx);
 
 	return 0;
 }
@@ -753,21 +1344,44 @@ static int tdm_gpio_setup(struct device *dev)
 }
 #endif /*CONFIG_MIPS */
 
-static int validate_clk(unsigned int eno, enum clkstate how, u64 arg)
+static int _chk_clk(unsigned int vno, enum clkstate how, u64 arg, int line)
+#define chk_clk(v, h, a) _chk_clk(v, h, a, __LINE__)
 {
-	int err = validate_eno(eno);
-	int clk = which_clk(eno);
+	int err = _chk_vno(vno, line);
+	int clk = which_clk(vno);
 
 	if (err)
 		return -EINVAL;
-	if (how & c_cfg)
+
+	if (how & c_cfg) {
+		int ns;
 		clk_cfg[clk].u64 = arg;
+
+		/* module symbols as quick tuning interface */
+		if (fsyncsamp >= 0)
+			clk_cfg[clk].s.fsyncsamp = fsyncsamp;
+		if (fsynclen >= 0)
+			clk_cfg[clk].s.fsynclen = fsynclen;
+		if (fsyncloc >= 0)
+			clk_cfg[clk].s.fsyncloc = fsyncloc;
+
+		/* always Rx first+last slots */
+		ns = clk_cfg[clk].s.numslots;
+		pr_debug("clk%dcfg ns:%d fsync(samp:%d len:%d loc:%d)\n",
+			clk,
+			clk_cfg[clk].s.numslots,
+			clk_cfg[clk].s.fsyncsamp,
+			clk_cfg[clk].s.fsynclen,
+			clk_cfg[clk].s.fsyncloc);
+	}
+
 	if (how & c_gen) {
 		u64 divisor;
 
 		clk_gen[clk].u64 = arg;
 		divisor = clk_gen[clk].s.divisor;
 		valid_clk[clk] &= ~c_hz;
+
 		if (!divisor) {
 			valid_clk[clk] |= c_ext;
 		} else if ((valid_clk[clk] & c_cfg)
@@ -782,6 +1396,11 @@ static int validate_clk(unsigned int eno, enum clkstate how, u64 arg)
 			bitclk >>= 32;
 			pclk_hz[clk] = bitclk;
 		}
+		pr_debug("clk%dgen deltasamp:%d numsamp:%d divisor:%d\n",
+			clk,
+			clk_gen[clk].s.deltasamp,
+			clk_gen[clk].s.numsamp,
+			clk_gen[clk].s.divisor);
 	}
 	valid_clk[clk] |= (how & ~c_on);
 
@@ -793,105 +1412,107 @@ static int validate_clk(unsigned int eno, enum clkstate how, u64 arg)
 		pr_info("TDM.CLK%d_CFG not set\n", clk);
 		err = -EINVAL;
 	}
+
 	if (!(valid_clk[clk] & c_gen)) {
 		pr_info("TDM.CLK%d_GEN not set\n", clk);
 		err = -EINVAL;
 	}
+
 	if (!err)
 		valid_clk[clk] |= c_on;
+
 	return err;
 }
 
-static int validate_cfg(unsigned int eno, union cavium_tdm_cfg *tc)
+static int chk_cfg(unsigned int vno, union cavium_tdm_cfg *tc)
 {
-	int err = validate_eno(eno);
-	struct tdm_engine *e = &engines[eno];
+	int err = chk_vno(vno);
+	struct tdm_bus *v = &veng[vno];
 
 	if (err)
 		return err;
-	if (e->valid_cfg)
+	if (v->valid_cfg)
 		return 0;
 	if (!tc)
 		return -EINVAL;
 	tc->s.enable = 0;
-	e->tc = *tc;
+	v->tc = *tc;
 	/* rest done in tdm_hw_init()  */
-	e->valid_cfg = true;
+	v->valid_cfg = true;
 
-	return err;
+	return 0;
 }
 
 /* setup superframes, defaulting as needed */
-static int validate_dma(int eno, union cavium_tdm_bind *b)
+static int chk_dma(int vno, union cavium_tdm_bind *b)
 {
-	int err = validate_clk(eno, c_on, 0);
+	int err = chk_clk(vno, c_on, 0);
 
-	if (!b)
-		return -EINVAL;
-
-	err = validate_cfg(eno, NULL);
+	err = chk_cfg(vno, NULL);
 	if (err)
 		return err;
 
-	if (!b->s.no_tx)
-		err = tdm_init(eno, tx_tdm);
+	if (!b || !b->s.no_tx)
+		err = tdm_init(vno, tx);
 	if (err)
 		return err;
 
-	if (!b->s.no_rx)
-		err = tdm_init(eno, rx_tdm);
-	if (err)
-		return err;
-	err = tdm_hw_init(eno);
-	tf("err:%d\n", err);
+	if (!b || !b->s.no_rx)
+		err = tdm_init(vno, rx);
 	return err;
 }
 
-/* validate_slots: apply slot binding (unless already bound)
+/* chk_slots: apply slot binding (unless already bound)
  * if clk/tdm not configured, default it
  */
-static int validate_slots(struct file *f, union cavium_tdm_bind *b)
+static int chk_slots(struct file *f, union cavium_tdm_bind *b)
 {
 	struct tdm_sess *sess = f->private_data;
-	int eno = sess->eno;
-	struct tdm_engine *e = &engines[eno];
+	struct tdm_bus *v = sess->v;
+	int vno = v->vno;
+	int clk = v->clksel;
 	int err;
 
 	/* assume worst, if not limited by TDMSRXBUF/TDMSTXBUF */
 	if (!sess->bound) {
-		if (!e->max_slots[rx_tdm] && !b->s.no_rx)
-			e->max_slots[rx_tdm] = TDM_MAX_SLOTS;
-		if (!e->max_slots[tx_tdm] && !b->s.no_tx)
-			e->max_slots[tx_tdm] = TDM_MAX_SLOTS;
+		int frame;
+
+		if (clk < 0)
+			clk = 0;
+		frame = clk_cfg[clk].s.numslots;
+		if (!v->max_slots[rx] && !b->s.no_rx)
+			v->max_slots[rx] = frame;
+		if (!v->max_slots[tx] && !b->s.no_tx)
+			v->max_slots[tx] = frame;
 	}
 
 	WARN(!b->s.slots, "sslots==0\n");
-	tf("tdm%d %c%c rs:%d ws:%d ss:%d ns:%d/%d\n",
-	   eno, "r-"[b->s.no_rx], "w-"[b->s.no_tx],
-	   b->s.rslot, b->s.wslot, b->s.slots,
-	   e->max_slots[rx_tdm], e->max_slots[tx_tdm]);
-	if (!b->s.no_rx && b->s.rslot + b->s.slots >= e->max_slots[rx_tdm])
+	if (!b->s.no_rx && b->s.rslot + b->s.slots > v->max_slots[rx])
 		return -EINVAL;
-	if (!b->s.no_tx && b->s.wslot + b->s.slots >= e->max_slots[tx_tdm])
+	if (!b->s.no_tx && b->s.wslot + b->s.slots > v->max_slots[tx])
 		return -EINVAL;
 
-	if (!e->tc.s.enable) {
-		err = validate_dma(eno, b);
-		if (err)
-			return err;
-	}
+	v->clksel = clk;
+	err = chk_dma(vno, b);
+	if (err)
+		return err;
 
 	sess->bound = true;
 	return 0;
 }
 
+static int tdm_flow_init(void);
+
 static int tdm_common_init(struct device *dev)
 {
-	int result, eno;
+	int result, i, j;
 
-	down(&starting);
 	if (!tdmdev)
 		tdmdev = dev;
+
+	result = tdm_flow_init();
+	if (result)
+		return result;
 
 	result = register_chrdev(tdmdrv_major, DEVNAME, &tdmdrv_fops);
 	if (result < 0) {
@@ -908,21 +1529,48 @@ static int tdm_common_init(struct device *dev)
 		goto ret;
 	}
 
-#ifdef ONE_TDM_IRQ
-	spin_lock_init(&tdm_lock);
-#endif /* ONE_TDM_IRQ */
+	for (i = 0; i < NR_TDM_ENGINES; i++)
+		eng[i].eno = i;
 
-	for (eno = 0; eno < NR_TDM_ENGINES; eno++) {
-		struct tdm_engine *e = &engines[eno];
+	for (i = 0; i < NR_TDM_BUSES; i++) {
+		struct tdm_bus *v = &veng[i];
+		int eb = 0;
 
-		e->eno = eno;
-		e->clksel = -1;
-#ifndef ONE_TDM_IRQ
-		spin_lock_init(&e->elock);
-#endif /* !ONE_TDM_IRQ */
+		v->clksel = -1;
+		v->vno = i;
+		v->fgen = 1;
+		v->eb = !eb;
 
-		device_create(tdmmodule_class, dev, MKDEV(tdmdrv_major, eno),
-			      NULL, DEVNAME "%d", eno);
+#ifndef SPARSE_SLOTS
+		for (j = 0; j < MAX_SLOTS; j++) {
+			int dir;
+
+			for_dir(dir) {
+				struct tdm_slot *s = &v->slop[dir][j];
+
+				init_waitqueue_head(&s->fifo_have_content);
+				init_waitqueue_head(&s->fifo_have_space);
+			}
+		}
+#endif /* !SPARSE_SLOTS */
+
+		/* walk the flows, alternating buffer sets */
+		/* "initial" buffer/engine is assigned until on map change */
+		for_dir(j) {
+			FALL(v)[j].bno = !eb;	/* ignored */
+			FALL(v)[j].fgen = v->fgen + 1;	/* yes, same as FNEW */
+			FNEW(v)[j].bno = eb;
+			FNEW(v)[j].fgen = v->fgen + 1;
+			FCUR(v)[j].bno = !eb;
+			FCUR(v)[j].fgen = v->fgen + 0;
+			FOLD(v)[j].bno = eb;
+			FOLD(v)[j].fgen = v->fgen - 1;
+		}
+	}
+
+	for (i = 0; i < NR_TDM_BUSES; i++) {
+		device_create(tdmmodule_class, dev, MKDEV(tdmdrv_major, i),
+			      NULL, DEVNAME "%d", i);
 	}
 
 	if (!tdmdev) {
@@ -937,9 +1585,9 @@ static int tdm_common_init(struct device *dev)
 #endif /* CONFIG_PROC_FS */
 
 	result = 0;
+	probed = true;
 
 ret:
-	up(&starting);
 	return result;
 }
 
@@ -951,8 +1599,85 @@ static void __exit tdm_common_remove(void *data)
 	tdm_teardown();
 }
 
+/* called under lock, or while probing */
+static void attach_engine(struct tdm_bus *v, int i,
+		struct tdm_engine *e, struct tdm_flow *f)
+{
+	if (e) {
+		if (e->flows && v) {
+			e->flows[tx].clksel = v->clksel;
+			e->flows[tx].clksel = v->clksel;
+		}
+		e->flows = f;
+		e->v = v;
+	}
+
+	v->e[i] = e;
+}
+
+static int tdm_pre_probe(void)
+{
+	int i;
+
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
+	pr_info("TDM_VER %d ioctl generation, TDM_IOCTL='%c'=0x%2.2xxx\n",
+		TDM_VER, TDM_IOCTL, TDM_IOCTL);
+	pr_info("%d tdm engines, %d tdm buses\n",
+		NR_TDM_ENGINES, NR_TDM_BUSES);
+
+
+# ifdef CONFIG_CAVIUM_TDM_MODULE
+	pr_info("sig %s\n", THIS_MODULE->srcversion);
+# endif
+#endif
+
+#ifdef ONE_TDM_LOCK
+	spin_lock_init(&tdm_lock);
+#endif /* ONE_TDM_LOCK */
+
+	for (i = 0; i < NR_TDM_ENGINES; i++)
+		eng[i].eno = i;
+
+	for (i = 0; i < NR_TDM_BUSES; i++) {
+		struct tdm_bus *v = &veng[i];
+		struct tdm_engine *e = &eng[i];
+
+		v->vno = i;
+		e->eno = i;
+
+		init_waitqueue_head(&v->mask_event);
+		sema_init(&v->sem_bind, 1);
+#ifndef ONE_TDM_LOCK
+		spin_lock_init(&TDM_LOCK(v));
+#endif /* !ONE_TDM_LOCK */
+	}
+
+	return 0;
+}
+
+static int tdm_flow_init(void)
+{
+	int i;
+
+	for (i = 0; i < NR_TDM_BUSES; i++) {
+		struct tdm_bus *v = &veng[i];
+		struct tdm_engine *e = &eng[i];
+		unsigned long flags;
+
+		spin_lock_irqsave(&TDM_LOCK(v), flags);
+		/* same engine in both slots */
+		attach_engine(v, 0, e, FCUR(v));
+		attach_engine(v, 1, e, FCUR(v));
+		v->sync_pindex = -1;
+
+		spin_unlock_irqrestore(&TDM_LOCK(v), flags);
+	}
+
+	return 0;
+}
+
 #ifdef CONFIG_MIPS
-static int __init tdm_mod_init(void)
+static int tdm_mod_init(void)
 {
 	int tdm_irq;
 	struct platform_device *pdev;
@@ -960,8 +1685,24 @@ static int __init tdm_mod_init(void)
 	int eno;
 	int err = -ENOMEM;
 
-	if (!octeon_has_feature(OCTEON_FEATURE_TDM))
+	err = tdm_pre_probe();
+	if (err)
+		return err;
+
+	if (!(
+#ifdef OCTEON_FEATURE_TDM
+		octeon_has_feature(OCTEON_FEATURE_TDM)
+#else
+		OCTEON_IS_MODEL(OCTEON_CN30XX)
+		|| OCTEON_IS_MODEL(OCTEON_CN31XX)
+		|| OCTEON_IS_MODEL(OCTEON_CN50XX)
+		|| OCTEON_IS_MODEL(OCTEON_CN61XX)
+		|| OCTEON_IS_MODEL(OCTEON_CNF71XX)
+		|| OCTEON_IS_MODEL(OCTEON_CN70XX)
+#endif
+		))
 		return -EIO;
+
 	tdm_irq = OCTEON_IRQ_TDM;
 
 	pdev = platform_device_alloc("tdm", PLATFORM_DEVID_NONE);
@@ -979,6 +1720,7 @@ static int __init tdm_mod_init(void)
 		tdm_irq_disable(eno, tdm_irqall);
 		tdm_irq_ack(eno, tdm_irqall);
 	}
+
 	if (devm_request_irq(dev, tdm_irq, tdm_handle_all,
 			IRQF_NO_THREAD, DEVNAME, (void *)-1ll)) {
 		pr_warn("TDM: IRQ %d is not free.\n", tdm_irq);
@@ -1004,6 +1746,8 @@ module_exit(tdm_mod_exit);
 #endif /*CONFIG_MIPS */
 
 #ifdef CONFIG_ARM64
+static bool tx0only;
+
 static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct device *dev = &pdev->dev;
@@ -1013,7 +1757,17 @@ static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	int gpio = -1;
 	enum of_gpio_flags gflags = 0;	/* default active high */
 
+	/* CN81XX pass 1.0/1.1 may not safely Tx on engines 1..3 */
+	tx0only = MIDR_IS_CPU_MODEL_RANGE(read_cpuid_id(),
+		MIDR_THUNDERX_81XX, 0x00, 0x01);
+
+	err = tdm_pre_probe();
+
+	if (err)
+		return err;
+
 	err = pci_enable_device(pdev);
+
 	if (err) {
 		dev_err(dev, "Failed to enable PCI device: err %d\n", err);
 		goto err_put;
@@ -1042,6 +1796,7 @@ static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		pr_debug("%s:%d pp %p\n", __func__, __LINE__, pp);
 		pp = of_find_property(NULL, "pcm-enable-gpios", NULL);
 	}
+
 	pr_debug("%s:%d pp %p\n", __func__, __LINE__, pp);
 
 	if (!IS_ERR_OR_NULL(pp)) {
@@ -1062,6 +1817,7 @@ static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	if (gpio >= 0) {
 		err = devm_gpio_request(dev, gpio, "pcm-enable");
+
 		if (err < 0)
 			goto err_disable_device;
 		err = gpio_direction_output(gpio, (gflags & OF_GPIO_ACTIVE_LOW)
@@ -1069,6 +1825,7 @@ static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	err = pci_request_regions(pdev, DRV_NAME);
+
 	if (err) {
 		dev_err(dev, "PCI request regions failed: err %d\n", err);
 		goto err_disable_device;
@@ -1090,6 +1847,7 @@ static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	err = tdm_common_init(dev);
+
 	if (err)
 		goto err_irq;
 
@@ -1100,14 +1858,15 @@ static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		tdm_irq_ack(eno, tdm_irqall);
 
 		err = request_irq(irq, tdm_handle_one,
-			    IRQF_NO_THREAD, DEVNAME, &engines[eno]);
+			    IRQF_NO_THREAD, DEVNAME, &eng[eno]);
+
 		if (err) {
 			pr_warn("TDM: IRQ %d is not free, err %d.\n", irq, err);
 			goto err_irq;
 		}
 	}
 
-	dev_info(dev, "TDM driver\n");
+	dev_info(dev, "cavium-tdm %d\n", TDM_VER);
 	return 0;
 
 err_irq:
@@ -1128,19 +1887,19 @@ static void __exit tdm_remove(struct pci_dev *pdev)
 {
 	int eno;
 
+	tdm_common_remove(tdmdev);
 	for (eno = 0; eno < NR_TDM_ENGINES; eno++) {
 		int irq = pci_irq_vector(pdev, eno);
 
-		tdm_irq_disable(eno, 0xff);
-		tdm_irq_ack(eno, 0xff);
+		tdm_irq_disable(eno, tdm_irqall);
+		tdm_irq_ack(eno, tdm_irqall);
 
 		pr_debug("%s engine#%d free_irq(%d)\n", __func__, eno, irq);
-		free_irq(irq, &engines[eno]);
+		free_irq(irq, &eng[eno]);
 	}
 
 	pci_free_irq_vectors(pdev);
 
-	tdm_common_remove(tdmdev);
 	if (tdm_base)
 		iounmap(tdm_base);
 	pci_release_regions(pdev);
@@ -1165,80 +1924,116 @@ static struct pci_driver tdm_driver = {
 module_pci_driver(tdm_driver);
 #endif /*CONFIG_ARM64 */
 
-static inline void await_rdpend(int eno)
+/* start engine from cold */
+/* caller holds lock */
+static bool enable_engine(struct tdm_engine *e)
 {
-	union cavium_tdm_dma_cfg dmac;
+	int dir, eno, vno;
+	struct tdm_bus *v;
 
-	do {
-		dmac.u64 = cvmx_read_csr(CVMX_PCMX_DMA_CFG(eno));
-	} while (dmac.s.rdpend);
-}
+	if (!e)
+		return false;
+	eno = e->eno;
 
-static inline int await_fsyncgood(int clk)
-{
-	union cavium_tdm_clk_cfg pcmClock;
+	v = e->v;
+	vno = v->vno;
 
-	pr_debug("wait for CVMX_PCM_CLK%d_CFG.fsyncgood\n", clk);
-	do {
-		if (msleep_interruptible(1))
-			return -EINTR;
-		pcmClock.u64 = cvmx_read_csr(CVMX_PCM_CLKX_CFG(clk));
-	} while (!pcmClock.s.fsyncgood);
+	if (!v)
+		return false;
 
-	return 0;
+	for (dir = 0; dir < DIRS; dir++) {
+		tdm_irq_ack(eno, xxbits[dir]);
+		tdm_irq_enable(eno, tdm_clkbits | xxbits[dir]);
+	}
+
+
+	e->wrapped[tx] = true;
+	e->wrapped[rx] = true;
+
+	/* save to v->dc, this is primary engine */
+	v_dc(v, write_dc(eno, v->dc));
+
+	/* re-point the DMA engines to buffer start */
+	cvmx_write_csr(CVMX_PCMX_TXSTART(eno),
+		cvmx_read_csr(CVMX_PCMX_TXSTART(eno)));
+	cvmx_write_csr(CVMX_PCMX_RXSTART(eno),
+		cvmx_read_csr(CVMX_PCMX_RXSTART(eno)));
+	wmb(); /* flush before enable */
+
+	v->tc.s.enable = 1;
+	e->twrap[tx] = e->twrap[rx] = ktime_get_boottime();
+
+	write_tc(eno, v->tc);
+
+
+	return true;
 }
 
 /* en/disable some TDM slots. caller holds lock */
+/* caller holds lock */
 static int __tdm_enable(struct tdm_sess *s,
 	int dir, bool enable, int sno0, int slots)
 {
-	int eno = s->eno;
-	int sno;
-	struct tdm_engine *e = &engines[eno];
-	struct tdm_flow *fn = &e->fnew[dir];
-	int send = 8 * sizeof(fn->fmask);
+	struct tdm_bus *v = s->v;
+	int sno, _sno;
+	struct tdm_flow *fa = &FALL(v)[dir];
+	int last = 8 * sizeof(fa->fmask);
 
-	for (sno = sno0; sno < send && slots > 0; --slots, sno++) {
+	/* no mask changes? */
+	if (v->fixed)
+		return 0;
+
+	for (_sno = sno0; _sno < last && slots > 0; --slots, _sno++) {
+		sno = _sno;
+
+		/* under fixed slot mask, do not count forbidden slots */
+		if (v->fixed && !test_bit(sno, v->sslot.mask[dir])) {
+			slots++;
+			continue;
+		}
+
 		if (enable) {
-			if (!test_and_set_bit(sno, fn->fmask)) {
-				fn->fslots++;
-				set_bit(sno / 64, &fn->changed);
-				__mark_change();
+			if (!test_and_set_bit(sno, fa->fmask)) {
+				fa->fslots++;
+				set_bit(sno / 64, &fa->changed);
+				mark_change();
 			} else {
-				/* revert the mappings set above */
+				/* revert any mappings set earlier */
 				while (--sno >= sno0) {
-					clear_bit(sno, fn->fmask);
-					fn->fslots--;
+					clear_bit(sno, fa->fmask);
+					fa->fslots--;
 				}
 				return -EBUSY;
 			}
 		} else {
-			if (test_and_clear_bit(sno, fn->fmask)) {
-				fn->fslots--;
-				set_bit(sno / 64, &fn->changed);
-				__mark_change();
+			if (test_and_clear_bit(sno, fa->fmask)) {
+				fa->fslots--;
+				set_bit(sno / 64, &fa->changed);
+				mark_change();
 			}
 		}
 	}
 
-	/*
-	 * If no slots were active, no IRQs will rotate the new slot map in.
-	 * But if no slots were active, no map conflicts exist, so safe.
-	 */
-	if (!e->fhw[dir].fslots)
-		__change_mapping(e, dir, true);
-
 	return 0;
 }
 
-static inline bool quiescent(struct tdm_engine *e, int dir)
+/* a quiescent flow is one for which no change is pending */
+/* check is not definitive unless lock held */
+static inline bool quiescent(struct tdm_bus *v, int dir)
 {
-	return !(IsTx(dir) && e->fnew[dir].changed);
+	/* stubbed in this version, critical in dynamic engine/bus model */
+	return true;
 }
 
 /*
  * Wait for slot-map conflicts to drain, lock engine.
+ * Locking for disable is uninterruptible because there's never contention,
+ * just serialization. But enable calls can conflict (collision, no clk).
  *
+ * Here is where any multiple-parallel-slot-changes policy is defined.
+ * Trivial in this version, critical in dynamic engine/bus model.
+ *
+ *Current Geometry Policy:
  * If current slot mapping has gone live (other slots have DMA data pending)
  * we cannot add/remove slots, as that would change the DMA mapping.
  * Retry until conflicts are gone in the disable (close/unbind case),
@@ -1246,95 +2041,99 @@ static inline bool quiescent(struct tdm_engine *e, int dir)
  *
  * On apparent success, recheck with lock held, returning 0 if uncontested
  */
-static inline bool bind_lock(struct tdm_engine *e, int dir,
+/* caller ACQUIRES lock */
+static inline bool bind_lock(struct tdm_bus *v, int dir,
 		bool enable, unsigned long *flagp)
 {
-	int err;
+	int err = 0;
 
-	if (!enable) {
-		wait_event(e->mask_event, quiescent(e, dir));
-		spin_lock_irqsave(&E_LOCK(e), *flagp);
+	if (!v) {
+		WARN_ONCE(1, "null bus\n");
+		return -EAGAIN;
+	}
+
+	if (enable)
+		err = wait_event_interruptible(v->mask_event,
+			quiescent(v, dir));
+	else
+		wait_event(v->mask_event, quiescent(v, dir));
+
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&TDM_LOCK(v), *flagp);
+	if (quiescent(v, dir))
 		return 0;
-	}
-
-	for (;;) {
-		tf("bind_lock tdm%d%s en:%d\n", e->eno, DirStr(dir), enable);
-		err = wait_event_interruptible(e->mask_event,
-			quiescent(e, dir));
-		if (!err) {
-			spin_lock_irqsave(&E_LOCK(e), *flagp);
-			if (quiescent(e, dir))
-				return 0;
-			spin_unlock_irqrestore(&E_LOCK(e), *flagp);
-			err = -EAGAIN;
-		}
-		if (enable)
-			return err;
-	}
+	spin_unlock_irqrestore(&TDM_LOCK(v), *flagp);
+	return -EAGAIN;
 }
 
+/* caller holds sem_bind, fun acquires/releases TDM_LOCK(v) */
 static int tdm_enable(struct file *fi, int dir,
 	bool enable, int sno0, int slots)
 {
 	struct tdm_sess *sess = fi->private_data;
-	int eno = sess->eno;
-	struct tdm_engine *e = &engines[eno];
-	unsigned long flags;
-	struct tdm_flow *fn = &e->fnew[dir];
+	struct tdm_bus *v = sess->v;
+	int vno = v->vno;
+	int eb = !v->eb; /* always act on /next/ flow */
+	int eno = -1;
+	struct tdm_engine *e = NULL;
+	unsigned long flags = 0; /* assigned to quiet gcc */
 	int err;
 	bool active;
 
-	if (!e->slop[dir] && enable)
-		tdm_setbuf(eno, dir);
+	if (!v->super[dir][0] && enable)
+		tdm_setbuf(vno, dir);
 
-	if (!e->slop[dir])
+	if (!v->super[dir][0])
 		return -EPROTO;
 
-	err = bind_lock(e, dir, enable, &flags);
-	tf("bind_lock returns %d\n", err);
+	err = bind_lock(v, dir, enable, &flags);
 	if (err)
 		return err;
 
-	active = !!e->fhw[dir].fslots;
-	err = __tdm_enable(sess, dir, enable, sno0, slots);
+	if (v->hands == s_off) {
+		active = false;
+	} else {
+		active = FCUR(v)[dir].fslots;
+		active |= FCUR(v)[!dir].fslots;
+	}
 
-	tf("tdm%d sno:%d w:%d %s err:%d enable:%d slots:%d:%d:%d\n",
-		eno, sno0, slots, DirStr(dir), err, enable,
-		fn->fslots, e->fhw[dir].fslots, e->frx.fslots);
+	err = __tdm_enable(sess, dir, enable, sno0, slots);
+	e = v->e[eb];
+
+	if (!e)
+		e = v->e[!eb];
+
+	if (!e) {
+		err = -EBUSY;
+		goto unlock;
+	}
+	eno = e->eno;
+
+
+	/* whole-engine start/stop, TODO: move some/all to kickstart/kickstop */
 	if (!err && enable && !active) {
-		if (IsTx(dir))
-			tdm_irq_enable(eno, tdm_txbits);
-		else
-			tdm_irq_enable(eno, tdm_rxbits);
+		tdm_irq_enable(eno, tdm_clkbits | xxbits[dir]);
 		/* ignore any pending startup FSYNC errors */
 		tdm_irq_ack(eno, tdm_clkbits);
-	} else if (!err && !IsTx(dir) && !enable) {
-		/* clear out stale frx state */
-		int sno;
-
-		for (sno = sno0; sno < sno0 + slots; sno++)
-			if (test_and_clear_bit(sno, e->frx.fmask))
-				e->frx.fslots--;
 	}
-	spin_unlock_irqrestore(&E_LOCK(e), flags);
 
-	tf("tdm%d sno:%d w:%d %s err:%d enable:%d live:%d:%d:%d\n",
-		eno, sno0, slots, DirStr(dir), err, enable,
-		fn->fslots, e->fhw[dir].fslots, e->frx.fslots);
+unlock:
+	spin_unlock_irqrestore(&TDM_LOCK(v), flags);
 
 	if (err)
 		return err;
-	tf("ena%d %x t%dc %llx d%dc %llx\n",
-		eno, e->ena, eno, e->tc.u64, eno, e->dc.u64);
 
 	return 0;
 }
 
 static int tdm_teardown(void)
 {
-	int eno;
+	int i;
 
-	down(&starting);
+	for (i = 0; i < NR_TDM_BUSES; i++)
+		down(&veng[i].sem_bind);
 
 #ifdef CONFIG_PROC_FS
 	if (proc_tdm)
@@ -1342,12 +2141,16 @@ static int tdm_teardown(void)
 	proc_tdm = NULL;
 #endif /* CONFIG_PROC_FS */
 
-	for (eno = 0; eno < NR_TDM_ENGINES; eno++) {
-		cvmx_write_sync(CVMX_PCMX_TDM_CFG(eno), 0);
-		tdm_exit(eno, tx_tdm);
-		tdm_exit(eno, rx_tdm);
-		device_destroy(tdmmodule_class, MKDEV(tdmdrv_major, eno));
+	for (i = 0; i < NR_TDM_ENGINES; i++)
+		write_tc(i, (union cavium_tdm_cfg) 0ULL);
+
+	for (i = 0; i < NR_TDM_BUSES; i++) {
+		tdm_exit(i, tx);
+		tdm_exit(i, rx);
+		device_destroy(tdmmodule_class,
+				MKDEV(tdmdrv_major, i));
 	}
+
 	class_destroy(tdmmodule_class);
 	unregister_chrdev(tdmdrv_major, DEVNAME);
 	tdmdrv_major = 0;
@@ -1358,56 +2161,62 @@ static int tdm_teardown(void)
 }
 
 /* Tx path Consumer: pull N frames' TX payload from write fifo */
-static int write_actor(struct tdm_slot *s, u64 *b64, int frames, int stride)
+/* caller holds lock */
+static int write_actor(struct tdm_slot *s, u8 *dma, int frames,
+	int stride, bool bno, int *offp)
 {
 	int done = 0;
-	int supers = frames / 8;
+	int supers = (frames + 7) / 8;
 	int width = s->sample_bytes;
+	int left = tdm_fifo_content(s);
 
-	WARN(frames % 8, "frames:%d not 8fold\n", supers);
-
-	for (; supers > 0; supers--) {
-		u64 *linear;
-		int idx = s->data_off;
+	for (; supers > 0; supers--, frames -= 8) {
+		int idx = *offp;
 		int j, k;
-		bool empty = (tdm_fifo_content(s) < width);
+		u8 *l8;
+		int swept = 0;
+		int squelch = 0;
 
 		idx &= tdm_fifo_mask(s);
 
-		linear = &s->fifo[idx];
+		l8 = &s->fifo[idx];
 
-		/* Superframe is always big-endian, so 1-slot case is easy */
-		if (big_endian && width == 1) {
-			*b64 = *linear;
-		} else {
-			u8 *b8 = (u8 *)b64;
-			u8 *l8 = (u8 *)linear;
-			/*
-			 * interleave 8 N-byte samples over
-			 * N successive slots of a frame
-			 * TODO: generalize logic for cpu_endian +/- LSBFIRST
-			 */
-			for (k = 0; k < width; k++) {
-				for (j = 0; j < 8; j++) {
-					int i = 7 - j;
+		/*
+		 * interleave 8 N-byte samples over
+		 * N successive slots of a frame
+		 * TODO: generalize logic for cpu_endian +/- LSBFIRST
+		 */
+		for (k = 0; k < width; k++) {
+			for (j = 0; j < 8 && j < frames; j++) {
+				int i = 7 - j;
+				u8 jth;
+				int src;
 
-					if (big_endian)
-						i = j;
-					b8[8 * k + i] = l8[j * width + k];
+				if (big_endian)
+					i = j;
+				src = idx + j * width + k;
+				src &= tdm_fifo_mask(s);
+				jth = s->fifo[src];
+				if (unlikely(left <= width * j)) {
+					jth = silence[(j + k) & 3];
+					squelch++;
 				}
+				dma[8 * k + i] = jth;
+				swept++;
 			}
 		}
-		tr_tdm(t_wr, "%p: %llx\n", b64, *b64);
 
-		if (!empty)
-			s->data_off += width;
-		b64 += stride;
-		done += width;
+		done += swept;
+		swept -= squelch;
+		left -= swept;
+		if (swept > tdm_fifo_content(s)) {
+			tr_tdm(t_on, "tdm%d.s%d WARN swept %x but %x content\n",
+				s->vno, s->sno, swept, tdm_fifo_content(s));
+			swept = tdm_fifo_content(s);
+		}
+		*offp += swept;
+		dma += 8 * stride;
 	}
-	CVMX_SYNC;
-
-	if (done)
-		wake_up(&s->fifo_have_space);
 
 	return done;
 }
@@ -1416,64 +2225,93 @@ static int write_actor(struct tdm_slot *s, u64 *b64, int frames, int stride)
  * Rx path Producer: push N frames' RX payload to read fifo, unless full.
  * TODO: consider overwriting old samples if full, by rolling data_off forward
  */
-static int read_actor(struct tdm_slot *s, u64 *b64, int frames, int stride)
+/* caller holds lock */
+static int read_actor(struct tdm_slot *s, u8 *dma, int frames,
+	int stride, bool bno, int *offp)
 {
 	int done = 0;
-	int supers = frames / 8;
+	int supers = (frames + 7) / 8;
 	int width = s->sample_bytes;
+	int left = tdm_fifo_space(s);
 
-	WARN(frames % 8, "frames:%d not 8fold\n", supers);
+	for (; dma && supers > 0; supers--, frames -= 8) {
+		int j = 0, k;	/* time sequence, or fifo sample sequence */
+		int idx = *offp;
+		int swept = 0;
+		int chunks = left / width;
 
-	for (; b64 && supers > 0; supers--) {
-		u64 *linear;
-		int j, k;	/* time sequence, or fifo sample sequence */
-		int idx = s->free_off;
 
-		idx &= tdm_fifo_mask(s);
+		/*
+		 * Transcode 8 samples from DMA ring to fifo:
+		 * combine hi/low bytes of 8 N-byte samples
+		 * from N successive slots of a frame
+		 * TODO: generalize logic for cpu_endian +/- LSBFIRST
+		 */
+		for (k = 0; k < width; k++) {
 
-		linear = &s->fifo[idx];
+			for (j = 0; j < 8 && j < frames && j < chunks; j++) {
+				int i = 7 - j;
+				u8 jth;
+				int dest;
 
-		if (tdm_fifo_space(s) < width)
-			break;
+				if (big_endian)
+					i = j;
+				jth = dma[8 * k + i];
+				if (s->skip > j)
+					continue;
 
-		/* transcode 8 samples from DMA ring to fifo */
-		tr_tdm(t_rd, "%p: %llx\n", b64, *b64);
-		/* Superframe is always big-endian, so 1-slot case is easy */
-		if (big_endian && width == 1) {
-			*linear = *b64;
-		} else {
-			u8 *b8 = (u8 *)b64;
-			u8 *l8 = (u8 *)linear;
-			/*
-			 * combine hi/low bytes of 8 N-byte samples
-			 * from N successive slots of a frame
-			 * TODO: generalize logic for cpu_endian +/- LSBFIRST
-			 */
-			for (k = 0; k < width; k++) {
-				for (j = 0; j < 8; j++) {
-					int i = 7 - j;
+				dest = idx + j * width + k;
+				dest &= tdm_fifo_mask(s);
+				s->fifo[dest] = jth;
+				swept++;
 
-					if (big_endian)
-						i = j;
-					l8[j * width + k] = b8[8 * k + i];
-				}
 			}
 		}
 
-		s->free_off += width;
-		done += width;
-		b64 += stride;
+		if (s->skip > 0)
+			s->skip -= j;
+
+		if (swept > tdm_fifo_space(s)) {
+			tr_tdm(t_on, "tdm%d.s%d WARN swept %x but %x space\n",
+				s->vno, s->sno, swept, tdm_fifo_space(s));
+			swept = tdm_fifo_space(s);
+		}
+		*offp += swept;
+		done += swept;
+		dma += 8 * stride;
+		left -= swept;
 	}
 
-	if (done)
-		wake_up(&s->fifo_have_content);
 	return done;
 }
 
+static inline void scanlog(struct tdm_engine *e, int dir, bool bno,
+	int stride, int frames, u8 *sbase)
+{
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
+	struct tdm_bus *v = e->v;
+	int eno = e->eno;
+	u64 *sb64 = (u64 *) sbase;
+	u64 *end = (u64 *) (sbase + frames * stride) - 4;
+	int off, seen = 0;
+
+	/* show first two active slots, that are not all one-or-zero */
+	for (off = 0; sb64 && sb64 + off <= end && seen < 2; off++) {
+		if (!sb64[off] || !~sb64[off])
+			continue;
+		tved("sbase@%p b%d s%d +%x/%x %llx:%llx:%llx:%llx\n",
+		     sbase, bno, off / frames, off, frames * stride,
+		     sb64[off + 0], sb64[off + 1], sb64[off + 2],
+		     sb64[off + 3]);
+		seen++;
+		off += 3;
+	}
+#endif /*CONFIG_CAVIUM_TDM_DEBUG */
+}
 
 /*
- * tdm_scan_half()
- * irq-thread scanner which transfers between e->super
+ * dma_xfer() - process DMA completed since last call
+ * irq-time scanner which transfers between v->super
  * and the per-slot fifos which read/write clients drain/fill.
  *
  * Walk array of read/write slots (in slot order) calling an actor
@@ -1486,177 +2324,298 @@ static int read_actor(struct tdm_slot *s, u64 *b64, int frames, int stride)
  * at runtime, but for efficiency a specialized 8-or-16-bit actor could
  * be assigned at slot creation time.
  */
-static int tdm_scan_half(struct tdm_engine *e, u64 *base,
-	int stride, bool dir, struct tdm_flow *f)
+/* caller holds lock */
+static void dma_xfer(struct tdm_engine *e, bool dir, bool bno,
+	int stride, int frames, u8 *sbase, dma_addr_t hbase)
 {
-	struct tdm_slot **slop = e->slop[dir];
+	struct tdm_bus *v;
+	struct tdm_flow *f;
+#ifdef SPARSE_SLOTS
+	struct tdm_slot **slop;
+#else /* !SPARSE_SLOTS */
+	struct tdm_slot *slop;
+#endif /* !SPARSE_SLOTS */
+	/* irq every SUPERS/irqs_per_wrap, dma_cfg[rxst,txrd] each IRQ_THRESH */
 	int moved = 0;
 	int slots = 0;
-	int n;
+	int sno; /* slot number, scanning dma buffer */
+	int vno;
+	int (*actor)(struct tdm_slot *s, u8 *b8,
+		int frames, int stride, bool bno, int *offp);
 
-	for (n = 0; slop && slots < stride && n < e->max_slots[dir]; n++) {
-		struct tdm_slot *s = slop[n];
-		int width = 0;
+	v = e->v;
+	if (!v || !frames || !stride)
+		return;
 
-		if (!s)
+	vno = v->vno;
+	f = &e->flows[dir];
+	slop = v->slop[dir];
+
+	if (!slop)
+		return;
+
+	if (IsRx(dir) && (tdm_trace & t_scan))
+		scanlog(e, dir, bno,
+			stride, frames, sbase);
+
+	for (sno = 0; slots < stride && sno < v->max_slots[dir]; sno++) {
+#ifdef SPARSE_SLOTS
+		struct tdm_slot *s = slop[sno];
+#else /* !SPARSE_SLOTS */
+		struct tdm_slot *s = &slop[sno];
+#endif /* !SPARSE_SLOTS */
+		int done = 0;
+		int *offp;
+
+		/*
+		 * while slop[sno] contains an entry if a slot is active in any
+		 * of FALL..FOLD, the slot consumes space in the current sbase
+		 * DMA buffer only if its bit is set in e->flows[dir].fmask
+		 */
+		if (!test_bit(sno, f->fmask)) {
+			/* if(s) teardown accounting? */
 			continue;
+		}
 
-		if (s->actor)
-			moved +=
-			    s->actor(s, base, FRAMES_PER_HALF, stride);
+		/* in mask, but no s? wide_rx or closed */
+		if (!s || !s->active) {
+			sbase += 8;
+			slots++;
+			continue;
+		}
 
+		/* log setup time */
+		if (v->hands == s_normal && s->sess)
+			geom_stats(v, s->sess);
 
-		if ((tdm_trace & t_scan) &&
-				(base[0]|base[1]|base[2]|base[3]))
-			tf("%s%d base@%p %llx:%llx:%llx:%llx s%d w%d/%d m:%x\n",
-				DirStr(dir), e->eno, base,
-				base[0], base[1], base[2], base[3],
-				n, width, s->sample_bytes, moved);
+		actor = s->actor;
 
-		base += s->sample_bytes;
+		offp = IsTx(dir) ? &s->data_off : &s->free_off;
+
+		if (s->closing && s->active) {
+			geom_stats(v, s->sess);
+			s->active = false;
+		}
+
+		if (!s->active)
+			break;
+
+		if (actor && !s->closing) {
+			done = actor(s, sbase, frames,
+				    stride, bno, offp);
+		}
+
+		moved += done;
+
+		sbase += 8 * s->sample_bytes;
 		slots += s->sample_bytes;
+
+		if (IsTx(dir))
+			wake_up(&s->fifo_have_space);
+		else
+			wake_up(&s->fifo_have_content);
 	}
 
-	return moved;
+	pstat[v->vno][dir].sum += moved;
 }
 
-static void tdm_exit(int eno, int dir)
+static void tdm_exit(int vno, int dir)
 {
-	struct tdm_engine *e = &engines[eno];
+	struct tdm_bus *v = &veng[vno];
 
 	/*
 	 * TODO: no waiting needed here IFF _release waits until
 	 * its slots are gone from all masks
 	 */
-	if (e->super[dir][0] && use_coherent)
-		dma_free_coherent(tdmdev, 2 * e->supersize[dir],
-			e->super[dir][0], e->handle[dir][0]);
+	if (v->super[dir][0] && use_coherent)
+		dma_free_coherent(tdmdev,
+			2 * v->supersize[dir],
+			v->super[dir][0], v->handle[dir][0]);
 	else
-		kfree(e->super[dir][0]);
+		kfree(v->super[dir][0]);
 
-	e->super[dir][0] = NULL;
-	e->super[dir][1] = NULL;
+	v->super[dir][0] = NULL;
+	v->super[dir][1] = NULL;
 
-	kfree(e->slop[dir]);
-	e->slop[dir] = NULL;
+#ifdef SPARSE_SLOTS
+	v->slop[dir] = NULL;
+#endif /* SPARSE_SLOTS */
 }
 
-static int tdm_setbuf(int eno, int dir)
+static int tdm_setbuf(int vno, int dir)
 {
-	struct tdm_engine *e = &engines[eno];
+	struct tdm_bus *v = &veng[vno];
 	int eslots;
 	size_t size8; /* size in u8 of one of a pair of superframe DMA bufs */
 	size_t size64; /* and in u64 to simplify code below */
 	char *how = "kzalloc";
+	bool bno = 0; /* but first used is bno=1 */
+	int i;
 
-	if (e->super[dir][0])
+	if (v->super[dir][0])
 		return -EBUSY;
 
 	/* assume worst, if not limited by TDMSRXBUF/TDMSTXBUF */
-	if (!e->max_slots[dir])
-		e->max_slots[dir] = TDM_MAX_SLOTS;
+	if (!v->max_slots[dir])
+		v->max_slots[dir] = MAX_SLOTS;
 
-	eslots = e->max_slots[dir];
-	size64 = eslots * SUPERS;
-	size8 = 8 * size64;
+	/* range check, for when everything is configurable */
+#if 0
+	if (!SUPERS || SUPERS >= (1<<16))
+		return -EINVAL;
+	if (!IRQ_THRESH || IRQ_THRESH > 0x3ff)
+		return -EINVAL;
+#endif
 
-	/* TODO: make this dynamic, re-alloc'd as growth needed */
+	if (!v->ring_frames[dir]) {
+		if (ring_frames < RING_FRAMES_MIN ||
+		    ring_frames >= RING_FRAMES_MAX)
+			ring_frames = RING_FRAMES_DEFAULT;
+		ring_frames += 7;
+		ring_frames &= ~7;
+		v->ring_frames[dir] = ring_frames;
+	}
+
+	eslots = v->max_slots[dir];
+	size8 = eslots * v->ring_frames[dir];
+	size64 = size8 / 8;
+
+	/* TODO: make this dynamic, re-alloc'd as growth needed? */
 	if (use_coherent) {
-		e->super[dir][0] = dma_alloc_coherent(tdmdev,
-			2 * size8, &e->handle[dir][0], GFP_KERNEL);
-		tf("e%d super[%d] %p/2*%lx\n",
-			eno, dir, e->super[dir][0], 2 * size8);
-		if (e->super[dir][0]) {
-			memset(e->super[dir][0], 0, 2 * size8);
+		v->super[dir][bno] = dma_alloc_coherent(tdmdev,
+			2 * size8, &v->handle[dir][bno], GFP_KERNEL);
+		tf("v%d super[%s] %p/%lx\n",
+			vno, DirStr(dir), v->super[dir][bno], 2 * size8);
+		if (v->super[dir][bno])
 			how = "dma_alloc_coherent";
-		}
-	}
-	if (!e->super[dir][0]) {
-		e->super[dir][0] = kzalloc(2 * size8, GFP_KERNEL | GFP_DMA);
-		tf("e%d super[%d] %p/2*%lx\n",
-			eno, dir, e->super[dir][0], 2 * size8);
-		e->handle[dir][0] =
-		    phys_to_dma(tdmdev, virt_to_phys(e->super[dir][0]));
 	}
 
-	if (!e->super[dir][0])
+	if (!v->super[dir][bno]) {
+		v->super[dir][bno] = kmalloc(2 * size8, GFP_KERNEL | GFP_DMA);
+		tf("v%d super[%s] %p/2*%lx\n",
+			vno, DirStr(dir), v->super[dir][bno], 2 * size8);
+		v->handle[dir][bno] =
+		    phys_to_dma(tdmdev, virt_to_phys(v->super[dir][bno]));
+	}
+
+	if (!v->super[dir][bno])
 		return -ENOMEM;
 
-	e->super[dir][1] = e->super[dir][0] + size64;
-	e->handle[dir][1] = e->handle[dir][0] + size8;
-	e->supersize[dir] = size8;
+	v->super[dir][!bno] = v->super[dir][bno] + size64;
+	v->handle[dir][!bno] = v->handle[dir][bno] + size8;
+	v->supersize[dir] = size8;
 
+	for (i = 0; i < 2; i++) {
+		u8 tag;
 
-	/* init all to TDM idle pattern */
-	memset(e->super[dir][0], 0xff, 2 * size8);
+		tvd("bno%d sbase:%p hbase:%llx sz:%lx\n",
+			i, v->super[dir][i], v->handle[dir][i], size8);
 
-	init_waitqueue_head(&e->mask_event);
+		/* init all to TDM idle pattern, revealing origin */
+		if (!v->super[dir][0])
+			continue;
+		tag = 0xa0 + 0x10 * v->vno + 2 * dir + i;
+		memset(v->super[dir][i], tag, size8);
+	}
 
-	e->slop[dir] = kcalloc(eslots, sizeof(e->slop[0][0]), GFP_KERNEL);
-	tf("e%d slop[%d] %p\n", eno, dir, e->slop[dir]);
+#ifdef SPARSE_SLOTS
+	v->slop[dir] = devm_kcalloc(tdmdev, eslots,
+				    sizeof(v->slop[0][0]), GFP_KERNEL);
+#endif /* SPARSE_SLOTS */
 
-	if (e->slop[dir])
-		return 0;
+	if (!v->slop[dir])
+		goto fail;
 
-	tdm_exit(eno, dir);
+	return 0;
+
+fail:
+	tdm_exit(vno, dir);
 	return -ENOMEM;
 }
 
-static int tdm_init(int eno, int dir)
+static int tdm_init(int vno, int dir)
 {
-	int err = validate_clk(eno, c_on, 0);
-	struct tdm_engine *e = &engines[eno];
+	int err = chk_clk(vno, c_on, 0);
+	struct tdm_bus *v = &veng[vno];
 
 	if (err)
 		return err;
 
-	if (e->super[dir][0])
+	if (v->super[dir][0])
 		return 0;
 
-	e->fnew[dir].fslots = 0;
-
-	err = tdm_setbuf(eno, dir);
-	tf("tdm%d%s err:%d\n", eno, DirStr(dir), err);
+	err = tdm_setbuf(vno, dir);
+	v->valid_flows = !err;
 
 	if (err)
-		tdm_exit(eno, dir);
+		tdm_exit(vno, dir);
 	return err;
 }
 
-static struct tdm_slot *tdm_create_slot(struct tdm_engine *e, int sno,
-	int sample_bytes, size_t fifo_supers, int dir, tdm_actor actor)
+static struct tdm_slot *tdm_create_slot(struct tdm_bus *v,
+	struct tdm_sess *sess,
+	int sno, int sample_bytes, size_t fifo_sz,
+	int dir, tdm_actor actor)
 {
 	struct tdm_slot *s;
-	struct tdm_slot *old_slot;
 	unsigned long flags;
+	int vno = v->vno;
+	bool newslot = false;
 
-	tf("eno:%d.%s sno:%d..%d\n", e->eno, DirStr(dir),
-		sno, sno + sample_bytes - 1);
+	if (!fifo_sz || fifo_sz > MAX_FIFO)
+		fifo_sz = MAX_FIFO;
+
 	if (sno < 0 || sample_bytes < 1 ||
-			sno + sample_bytes > e->max_slots[dir])
+			sno + sample_bytes > v->max_slots[dir])
 		return NULL;
-	if (!e->slop[dir])
+
+#ifdef SPARSE_SLOTS
+	if (!v->slop[dir])
 		return NULL;
-	s = kzalloc(sizeof(*s) + sizeof(s->fifo[0]) * fifo_supers,
-		    GFP_KERNEL);
+	s = v->slop[dir][sno];
+	newslot = !s;
+	if (newslot) {
+#ifdef FIXED_FIFO_SUPERS
+		s = kzalloc(sizeof(*s), GFP_KERNEL);
+#else /* !FIXED_FIFO_SUPERS */
+		s = kzalloc(sizeof(*s) + sizeof(s->fifo[0]) * fifo_sz,
+			    GFP_KERNEL);
+#endif /* !FIXED_FIFO_SUPERS */
+	}
 	if (!s)
 		return NULL;
-	pr_debug("tdm: slot %p %s .sno %d\n", s, DirStr(dir), sno);
+#else /* !SPARSE_SLOTS */
+	s = &v->slop[dir][sno];
+#endif /* !SPARSE_SLOTS */
+
+	spin_lock_irqsave(&TDM_LOCK(v), flags);
+
+	if (newslot) {
+		/* suppress re-init to minimise close() sync */
+		init_waitqueue_head(&s->fifo_have_content);
+		init_waitqueue_head(&s->fifo_have_space);
+	}
 	s->sno = sno;
 	s->sample_bytes = sample_bytes;
-	s->eng = e;
+	s->vno = vno;
+	s->dir = dir;
 	s->actor = actor;
-	s->fifo_sz = fifo_supers;
-	init_waitqueue_head(&s->fifo_have_content);
-	init_waitqueue_head(&s->fifo_have_space);
+	s->closing = false;
+	s->active = true;
+	s->sess = sess;
+	s->fifo_sz = fifo_sz;
+	s->data_off = 0;
+	s->free_off = 0;
 
-	spin_lock_irqsave(&E_LOCK(e), flags);
-	old_slot = e->slop[dir][sno];
-	e->slop[dir][sno] = s;
-	spin_unlock_irqrestore(&E_LOCK(e), flags);
-	tf("replaced e->slop[%d][%d] %p with %p\n", dir, sno, old_slot, s);
-	WARN_ON_ONCE(old_slot);
-	kfree(old_slot);
+	/* 1st rx-irq will have invalid data */
+	s->skip = FRAMES(v, dir) / irqs_per_wrap;
+
+#ifdef SPARSE_SLOTS
+	v->slop[dir][sno] = s;
+#endif /* SPARSE_SLOTS */
+
+	spin_unlock_irqrestore(&TDM_LOCK(v), flags);
+
 
 	return s;
 }
@@ -1664,171 +2623,195 @@ static struct tdm_slot *tdm_create_slot(struct tdm_engine *e, int sno,
 static void tdm_destroy_slot(struct tdm_slot *s, int dir)
 {
 	unsigned long flags;
-	struct tdm_engine *e;
-	int sno;
+	struct tdm_bus *v = NULL;
+	int sno, vno;
 
 	if (!s)
 		return;
-	e = s->eng;
-	if (!e)
-		return;
-	spin_lock_irqsave(&E_LOCK(e), flags);
-	sno = s->sno;
-	if (e->slop[dir] && e->slop[dir][sno]) {
-		WARN_ON_ONCE(e->slop[dir][sno] != s);
-		e->slop[dir][sno] = NULL;
+
+	vno = s->vno;
+	sno = s->sno; /* insecure, just for logging */
+
+
+	if (!chk_vno(vno)) {
+		struct tdm_sess *sess;
+
+		v = &veng[vno];
+		spin_lock_irqsave(&TDM_LOCK(v), flags);
+		sno = s->sno; /* re-get under lock */
+		sess = s->sess;
+
+		if (sess)
+			sess->slot[dir] = NULL;
+		s->sess = NULL;
+
+#ifdef SPARSE_SLOTS
+		if (v->slop[dir] && v->slop[dir][sno]) {
+			WARN_ON_ONCE(v->slop[dir][sno] != s);
+			if (1) /* freed inly in tdm_exit() */
+				s->active = false;
+			else
+				v->slop[dir][sno] = NULL;
+		}
+#endif /* SPARSE_SLOTS */
+		spin_unlock_irqrestore(&TDM_LOCK(v), flags);
 	}
-	spin_unlock_irqrestore(&E_LOCK(e), flags);
+
+#ifdef SPARSE_SLOTS
+	kfree(s);
+#else /* !SPARSE_SLOTS */
+#endif /* !SPARSE_SLOTS */
+}
+
+/* setup v->dc's Tx-FIFO params */
+static void set_txfifo(struct tdm_bus *v)
+{
+	/* defaults work well, but can be tweaked */
+	if (!fetch_size || (unsigned int)fetch_size >= 16)
+		fetch_size = 8;
+	if (!fetch_thresh || (unsigned int)fetch_thresh >= 16)
+		fetch_thresh = 8;
+	v->dc.s.fetchsiz = fetch_size - 1;
+	v->dc.s.thresh = fetch_thresh;
+}
+
+/* setup everything but tx/rxslots */
+/* caller holds lock */
+static union cavium_tdm_dma_cfg _setup_hw_dc(struct tdm_bus *v,
+		int bno, int eno, int line)
+#define setup_hw_dc(v, bno, eno) _setup_hw_dc(v, bno, eno, __LINE__)
+{
+	int rxslots = 0;
+	int txslots = 0;
+	u64 pcmRxCount = 0;
+	u64 pcmTxCount = 0;
+
+	v->dc.s.useldt = (useldt >> eno);
+
+	set_txfifo(v);
+
+	v->dc.s.rxst = FRAMES(v, rx) / irqs_per_wrap;
+	v->dc.s.txrd = FRAMES(v, tx) / irqs_per_wrap;
+
+	if (v->super[rx][bno])
+		pcmRxCount = SUPERS(v, rx);
+
+	if (v->super[tx][bno])
+		pcmTxCount = SUPERS(v, tx);
+
+	_cvmx_write_csr(CVMX_PCMX_RXCNT(eno), pcmRxCount);
+	_cvmx_write_csr(CVMX_PCMX_TXCNT(eno), pcmTxCount);
+
+	/* Set the TDM params but do not yet enable it.  */
+	v->dc.s.txslots = txslots;
+	v->dc.s.rxslots = rxslots;
+
+	return v->dc;
 }
 
 /* (re)init TDM hw engine when tx/rx first enabled */
-static int tdm_hw_init(int eno)
+/* caller holds lock */
+static int tdm_hw_init(struct tdm_bus *v)
 {
-	u64 pcmRxCount;
-	u64 pcmTxCount;
-	int err = validate_clk(eno, c_on, 0);
-	struct tdm_engine *e = &engines[eno];
-	int clk = which_clk(eno);
-	unsigned long flags;
+	int vno = v->vno;
+	bool eb = v->eb;
+	struct tdm_engine *e = v->e[eb];
+	int eno;
+	struct tdm_flow *f;
+	int err = chk_clk(vno, c_on, 0);
+	union cavium_tdm_cfg tc;
+	int m;
 
 	if (err)
 		return err;
+	if (!e)
+		return -EINVAL;
+	f = e->flows;
+	if (!f)
+		return -EINVAL;
 
-	/* already running? */
-	e->tc.u64 = cvmx_read_csr(CVMX_PCMX_TDM_CFG(eno));
-	if (!e->tc.s.enable) {
-		int m;
+	eno = e->eno;
+	tc = v->tc; /* clone from current settings */
+	tc.s.enable = 0;
 
-		e->dc.u64 = 0;
-		e->dc.s.useldt = (useldt >> eno);
+	setup_hw_dc(v, eb, eno);
 
-		/* defaults work well, but can be tweaked */
-		if (!fetch_size || (unsigned int)fetch_size > 8)
-			fetch_size = 8;
-		if (!fetch_thresh || (unsigned int)fetch_thresh > 8)
-			fetch_thresh = 8;
-		e->dc.s.fetchsiz = fetch_size - 1;
-		e->dc.s.thresh = fetch_thresh;
+	/* HW zeroing is the only place 8 is used rather than MASK_REGS */
+	for (m = 0; m < 8; m++) {
+		u64 tm = 0, rm = 0;
+		int hw = m;
 
-		for (m = 0; m < 8; m++) {
-			cvmx_write_sync(CVMX_PCMX_TXMSKX(m, eno), 0);
-			cvmx_write_sync(CVMX_PCMX_RXMSKX(m, eno), 0);
+		if (m < MASK_REGS) {
+			tm = f[tx].fmask[m];
+			rm = f[rx].fmask[m];
 		}
+		_cvmx_write_csr(CVMX_PCMX_TXMSKX(hw, eno), tm);
+		_cvmx_write_csr(CVMX_PCMX_RXMSKX(hw, eno), rm);
 	}
 
-	/* range check, for when everything is configurable */
-	if (!SUPERS || SUPERS >= (1<<16))
-		return -EINVAL;
-	if (!IRQ_THRESH || IRQ_THRESH > 0x3ff)
-		return -EINVAL;
+	v->tc = tc;
 
-	spin_lock_irqsave(&E_LOCK(e), flags);
-
-	e->fhw[rx_tdm].bno = 0;
-	e->fhw[tx_tdm].bno = 0;
-	cvmx_write_sync(CVMX_PCMX_RXSTART(e->eno),
-		e->handle[rx_tdm][0]);
-	cvmx_write_sync(CVMX_PCMX_TXSTART(e->eno),
-		e->handle[tx_tdm][0]);
-	e->frx.bno = 0;
-	e->fnew[rx_tdm].bno = 1;
-	e->fnew[tx_tdm].bno = 1;
-
-	pcmRxCount = e->super[rx_tdm][0] ? SUPERS : 0;
-	pcmTxCount = e->super[tx_tdm][0] ? SUPERS : 0;
-	cvmx_write_csr(CVMX_PCMX_RXCNT(e->eno), pcmRxCount);
-	cvmx_write_csr(CVMX_PCMX_TXCNT(e->eno), pcmTxCount);
-
-	/* Set the TDM params but do not yet enable it.  */
-
-	e->dc.s.txslots = 0;
-	e->dc.s.rxslots = 0;
-
-	spin_unlock_irqrestore(&E_LOCK(e), flags);
-
-	pr_debug("setup TDM%d, using CLK%d\n", eno, clk);
-
-	e->tc.s.enable = 0;
-	tf("CVMX_PCM%d_TDM_CFG w %llx\n", eno, e->tc.u64);
-	cvmx_write_sync(CVMX_PCMX_TDM_CFG(eno), e->tc.u64);
-	CVMX_SYNC;
-
-	/* no slots mapped, no IRQs yet */
-	e->dc.s.rxst = 0;
-	e->dc.s.txrd = 0;
-
-	cvmx_write_sync(CVMX_PCMX_DMA_CFG(eno), e->dc.u64);
-
-	pr_debug("Config TDM chan%d\n", eno);
-	err = await_fsyncgood(clk);
-	if (err)
-		return err;
-
-	if (e->fhw[tx_tdm].fslots)
-		await_rdpend(eno);
-
-	e->tc.s.enable = 1;
-	tf("CVMX_PCM%d_TDM_CFG w %llx\n", eno, e->tc.u64);
-	cvmx_write_sync(CVMX_PCMX_TDM_CFG(eno), e->tc.u64);
-
-	return 0;
+	return err;
 }
 
 /* Rx path Consumer: read samples from fifo, waiting as needed for IRQ */
 static int tdm_reader(struct tdm_slot *s, __user char *samples, int len)
 {
 	int err = -EIO;
+	bool sig = false;
 	int done = 0;
 
 	if (!s)
 		return 0;
+	if (s->closing) {
+		wake_up(&s->fifo_have_space);
+		return 0;
+	}
 
-	/* TODO: remove aligned-to-superframe restriction */
-	while (len >= 8 * s->sample_bytes) {
+	/* TODO: remove aligned-to-superframe restriction? */
+	while (len >= s->sample_bytes) {
 		int start = s->data_off & tdm_fifo_mask(s);
-		int supers = len / 8;
 		int chunk, remain;
 
-		if ((start + supers) > s->fifo_sz)
-			supers = s->fifo_sz - start;
+		if ((start + len) > s->fifo_sz)
+			len = s->fifo_sz - start;
 
 		err = wait_event_interruptible(s->fifo_have_content,
 				   tdm_fifo_content(s) >= s->sample_bytes);
-		if (err && signal_pending_state(TASK_INTERRUPTIBLE, current))
-			err = -EINTR;
-
-		tr_tdm(t_read | t_err * !!err,
-		       "wait(non_empty) err %d, space %x @%p\n", err,
-		       tdm_fifo_content(s), samples);
 		if (err)
-			tr_tdm(t_read, "e=%d\n", err);
+			sig = signal_pending_state(TASK_INTERRUPTIBLE, current);
+
+		tr_tdm(t_read | t_err * (err && err != -ERESTARTSYS),
+		       "tdm%d wait(non_empty) err %d, space %x @%p\n",
+		       s->vno, err, tdm_fifo_content(s), samples);
 		if (err)
-			return err;
+			return sig ? -EINTR : err;
 
-		if (supers > tdm_fifo_content(s))
-			supers = tdm_fifo_content(s);
-
-		chunk = 8 * supers;
-
-		if (chunk > len)
-			chunk = len & ~((8 * s->sample_bytes) - 1);
+		chunk = len;
+		if (chunk > tdm_fifo_content(s))
+			chunk = tdm_fifo_content(s);
 
 		remain =
 		    copy_to_user((__user char *)samples,
 				 (char *)&s->fifo[start], chunk);
 		chunk -= remain;
-		tr_tdm(t_read, "copied %x/%x e=%d\n", chunk, (int)len, remain);
+		tr_tdm(t_read, "tdm%d copied %x/%x e=%d\n",
+			s->vno, chunk, len, remain);
 
-		len -= chunk;
 		samples += chunk;
 		done += chunk;
+		len -= chunk;
 
-		s->data_off += chunk / 8;
+		s->data_off += chunk;
 		wake_up(&s->fifo_have_space);
 	}
+
 	if (done)
-		tr_tdm(t_read, "done=%d space=%x data=%x free=%x err=%d\n",
-		       done, tdm_fifo_space(s), s->data_off, s->free_off, err);
+		tr_tdm(t_read,
+			"tdm%d done=%d space=%x data=%x free=%x err=%d\n",
+		       s->vno, done, tdm_fifo_space(s),
+		       s->data_off, s->free_off, err);
+
 	return done;
 }
 
@@ -1839,435 +2822,638 @@ static int tdm_reader(struct tdm_slot *s, __user char *samples, int len)
 static int tdm_writer(struct tdm_slot *s, const __user char *samples, int len)
 {
 	int err = -EIO;
+	bool sig = false;
 	int done = 0;
 
-	/* TODO: remove aligned-to-superframe restriction */
-	while (len >= 8 * s->sample_bytes) {
+	if (!s || s->sample_bytes <= 0)
+		return 0;
+	if (s->closing) {
+		wake_up(&s->fifo_have_content);
+		return 0;
+	}
+
+	/* TODO: remove aligned-to-superframe restriction? */
+	while (len > 0 && len >= s->sample_bytes) {
 		int start = s->free_off & tdm_fifo_mask(s);
-		int chunk, supers, remain;
+		int chunk, remain;
 
-		tr_tdm(t_write, "space=%d data=%x free=%x\n",
-		       tdm_fifo_space(s), s->data_off, s->free_off);
+		tr_tdm(t_write, "tdm%d space=%d data=%x free=%x\n",
+		       s->vno, tdm_fifo_space(s), s->data_off, s->free_off);
 		err = wait_event_interruptible(s->fifo_have_space,
-			       tdm_fifo_space(s) >= 8 * s->sample_bytes);
-		if (err && signal_pending_state(TASK_INTERRUPTIBLE, current))
-			err = -EINTR;
-		tr_tdm(t_write | t_err * !!err,
-		       "wait(non_full) err %d, space %x\n", err,
-		       tdm_fifo_space(s));
+			       tdm_fifo_space(s) >= s->sample_bytes);
 		if (err)
-			return err;
+			sig = signal_pending_state(TASK_INTERRUPTIBLE, current);
 
-		chunk = 8 * tdm_fifo_space(s);
+		tr_tdm(t_write | t_err * (err && err != -ERESTARTSYS),
+		       "tdm%d wait(non_full) err %d, space %x\n",
+		       s->vno, err, tdm_fifo_space(s));
+		if (err)
+			return sig ? -EINTR : err;
+
+		chunk = tdm_fifo_space(s);
 		if (chunk > len)
 			chunk = len;
 
-		supers = chunk / 8;
+		if ((start + chunk) > s->fifo_sz)
+			chunk = s->fifo_sz - start;
 
-		if ((start + supers) > s->fifo_sz)
-			supers = s->fifo_sz - start;
-
-		/*
-		 * len bytes = len/8 supers = len/sample_bytes samples.
-		 * Sample_bytes is mostly ignored in this flow:
-		 * in 16bit case we know that the free space is always
-		 * produced/consumed in 2*super quantities, and fifo_size
-		 * is not odd, and the while() above protects against
-		 * unbalancing that with single-sample fragments.
-		 * So there's just one more test, to keep 16bit case aligned...
-		 */
-		supers &= ~(s->sample_bytes - 1);
-
-		chunk = 8 * supers;
-		tr_tdm(t_write, "copy_from_user %x/%x ...\n", chunk, (int)len);
+		tr_tdm(t_write, "tdm%d copy_from_user %x/%x ...\n",
+			s->vno, chunk, (int)len);
 		remain =
 		    copy_from_user((char *)&s->fifo[start], samples, chunk);
-		tr_tdm(t_write, "copied %x/%x e=%d\n", chunk, (int)len, remain);
+		tr_tdm(t_write, "tdm%d copied %x/%x e=%d\n",
+			s->vno, chunk, (int)len, remain);
 		chunk -= remain;
 		len -= chunk;
 		samples += chunk;
 		done += chunk;
 
-		s->free_off += chunk / 8;
+		s->free_off += chunk;
+		wake_up(&s->fifo_have_content);
 	}
-	tr_tdm(t_write, "done=%d space=%x data=%x free=%x\n",
-	       done, tdm_fifo_space(s), s->data_off, s->free_off);
+
+	tr_tdm(t_write, "tdm%d done=%d space=%x data=%x free=%x\n",
+	       s->vno, done, tdm_fifo_space(s), s->data_off, s->free_off);
+
 	return done;
 }
 
-/*
- * tdm_process() - process DMA completed since last call
- * 'phase' is which half of fhw's DMA buffer the software owns.
- *  Hardware may be active on other half.
- *  We get interrupts when a TDM engine crosses halfway (RXST=TXRD=frames/2)
- *  so this flips phase.
- *  After a phase switch we have frames/2 frame-times to ready the other half.
- * Note: could be more than 2 phases, if so change "half" teminology everywhere
- */
-static inline int tdm_process(struct tdm_engine *e, bool dir,
-	struct tdm_flow *f, void *sbase, dma_addr_t hbase, dma_addr_t hwhere)
+/* caller should have sync'd tx/rx to same wrapped-state */
+static inline void poll_change(struct tdm_engine *e, bool dir, bool wrap)
 {
 	int eno = e->eno;
-	dma_addr_t halfway;
-	dma_addr_t hend;
-	bool phase;
-	int stride = f->fslots;
-	int irq_thresh = 0;
-	int old_thresh;
-	int max_thresh = (IRQ_THRESH * 3) / 2;
-	int pll_adjust = 0;
-	int impulse = 0;
-	int slice = -1;
-	int unchanged = !!f->fslots;
-	int done;
+	struct tdm_bus *v = e->v;
+	struct tdm_flow *fa = FALL(v);
+	int changing = (v->hands > s_normal);
 
-	hend = hbase + stride * FRAMES;
-	halfway = (hbase + hend) / 2;
+	/* if change pending, prestage to start one frame after wrap */
+	if (!changing && (fa[tx].changed || fa[rx].changed)) {
+		changing = 2;
 
-	/* which phase does software own? The one hw's hwhere is _not_ in! */
-	phase = (hwhere < halfway);
+			/*
+			 * start the handover setup right now,
+			 * so things are in place to begin handover at wrap
+			 */
+		next_clone(v, eno, wrap ? ev_xfer : ev_wrap);
+	}
+}
 
-	/* Now compare DMA address to goal, implementing PhaseLockedLoop:
-	 * Adjust the PLL so interrupt happens 1/4..3/4 thru next phase,
-	 * so DMA has had time to settle, but not so late that processing
-	 * will not complete before wrapped DMA reuses buffer.
-	 * Full buffer length: (stride * SUPERS * 8) == (stride * FRAMES)
-	 * Captured in 2 phases, but the IRQs for these phases should happen
-	 * shortly after DMA crosses into other phase, ~ 1/8 of total buffer.
+
+/* cycle flow status fall->fcur->fold after hw changed */
+/* caller holds lock */
+static void update_flows(struct tdm_bus *v)
+{
+	bool eb = v->eb;
+	struct tdm_engine *e = v->e[eb];
+	/* without dynamic-slot complexity this code can be simplified */
+	bool newgen = true;
+	bool set_hw = true;
+	int dir, m;
+
+	switch (v->hands) {
+	case s_jump:
+		tdm_irq_enable(e->eno, tdm_txwrap | tdm_rxwrap);
+		v->waitfor |= evmask(e->eno, both, ev_wrap);
+		NEW_STATE(v, s_normal);
+		wake_up(&v->mask_event);
+		mark_done();
+		break;
+	default:
+		break;
+	}
+
+	/*
+	 * new slotmap generation: sample action
+	 * sample: snapshot FALL(v) into FNEW(v)
 	 */
-	slice = (hwhere - hbase) / (SUPERS * stride);
-	impulse = 1 - (slice & 3);
-
-	if (impulse > 0)
-		pstat[eno][dir].pll_up++;
-	else if (impulse < 0)
-		pstat[eno][dir].pll_dn++;
-
-	/* apply IRQ threshold adjustments noted in earlier cycles */
-	pll_adjust = e->pll_step[dir]; /* ongoing correction */
-	impulse += e->pll_impulse[dir]; /* onetime correction */
-
-	/* apply phase-shifting impulse, undone next cycle */
-	e->pll_step[dir] = -impulse;
-	e->pll_impulse[dir] = 0;
-	pll_adjust += impulse;
-
-	e->dc.u64 = cvmx_read_csr(CVMX_PCMX_DMA_CFG(eno));
-
-	if (IsTx(dir))
-		old_thresh = irq_thresh = e->dc.s.txrd;
-	else
-		old_thresh = irq_thresh = e->dc.s.rxst;
-
-	irq_thresh += pll_adjust;
-
-	if (irq_thresh > max_thresh)
-		irq_thresh = max_thresh;
-	if (irq_thresh <= 0)
-		irq_thresh = 1;
-
-	if (IsTx(dir))
-		e->dc.s.txrd = irq_thresh;
-	else
-		e->dc.s.rxst = irq_thresh;
-
-	if (irq_thresh != old_thresh) {
-		cvmx_write_sync(CVMX_PCMX_DMA_CFG(eno), e->dc.u64);
-		unchanged = 0;
-		tf("tdm%d%s:%d PLL %+d -> %d %d/8 %llx/%llx/%llx\n",
-			eno, DirStr(dir), f->fslots,
-			pll_adjust, irq_thresh, slice,
-			hbase, hwhere, hend);
+	for (dir = 0; dir < DIRS; dir++) {
+		/* seed FNEW with current FALL, under sem_bind*/
+		FALL(v)[dir].changed |= FNEW(v)[dir].changed;
+		FALL(v)[dir].fgen = v->fgen + 1;
+		FNEW(v)[dir] = FALL(v)[dir];
+		FALL(v)[dir].changed = 0;
+		/* can release sem_bind now */
+		FNEW(v)[dir].bno = FOLD(v)[dir].bno;
 	}
 
-	if (e->last_wrapped[dir] == phase) {
-		/* either a dropped half-buf, or a too-early IRQ */
-		pstat[eno][dir].drop += unchanged;
-		pstat[eno][dir].hang += unchanged;
-		if (pstat[eno][dir].hang > 6)
-			tdm_dump(eno);
-		if (pstat[eno][dir].drop > 20)
-			tdm_dump(eno);
-		return 0;
+	/*
+	 * include any always-Rx mask bits.
+	 * Policy here might include
+	 * - first/last bits to ensure reliable rxwrap signal
+	 * - all Tx'd bits, for loopback checking
+	 * - every slot, if WIDE(v), to reduce mask churn
+	 * This is the point such considerations are introduced,
+	 * with FALL() knowing nothing of them, so tdm_enable()
+	 * can use the bitmasks for simple availability check.
+	 */
+	for (dir = 0; dir < DIRS; dir++) {
+		for (m = 0; m < ARRAY_SIZE(FNEW(v)[rx].fmask); m++) {
+			u64 extra = 0;
+			int ecount;
+
+			if (v->fixed) {
+				extra |= v->sslot.mask[dir][m];
+				if (LOOP(v->vno))
+					extra |= v->sslot.mask[rx][m];
+			}
+			extra |= FNEW(v)[tx].fmask[m];
+			if (LOOP(v->vno))
+				extra &= ~FNEW(v)[rx].fmask[m];
+			if (extra) {
+				ecount = hweight64(extra);
+				if (LOOP(v->vno)) {
+					FNEW(v)[rx].fslots += ecount;
+					FNEW(v)[rx].fmask[m] |= extra;
+				}
+			}
+
+			/* TODO: merge more of above into for()? */
+			for_dir(dir) {
+				if (FNEW(v)[dir].fmask[m] !=
+				    FCUR(v)[dir].fmask[m])
+					set_bit(m, &FNEW(v)[dir].changed);
+			}
+
+		}
 	}
 
-	pstat[eno][dir].hang = 0;
+	/*
+	 * new slotmap generation: newgen action
+	 * cycle the flow generations, copying current FALL allocation
+	 * map to FNEW, old FNEW to FCUR, old FCUR to FOLD
+	 * (caller holds sem_bind to block changes)
+	 * Because this is done by fgen++, which is referenced within
+	 * all the Fxxx(v), new symbolic access gets new flow.
+	 * But existing engine's e->flows remain unchanged, although
+	 * their name becomes FOLD(v).
+	 * A new FALL() is seeded from the old.
+	 * FNEW copied to FCUR (we have too many states don't need all 4).
+	 */
+	if (newgen) {
+		/* fgen++ jumps the Fxxx() pointers,
+		 * flowing FOLD <- FCUR <- FNEW = FALL.
+		 */
 
-	if (phase)
-		sbase += stride * FRAMES / 2;
+		v->fgen = FNEW(v)[0].fgen;
+		/* old FNEW now FCUR */
 
-	done = tdm_scan_half(e, sbase, stride, dir, f);
-	pstat[eno][dir].sum += done;
-	e->last_wrapped[dir] = phase;
-	return done;
+		for (dir = 0; dir < DIRS; dir++) {
+			FNEW(v)[dir].fgen = v->fgen + 1;
+			FALL(v)[dir].fgen = v->fgen + 1;
+		}
+	}
+
+	/* simplify startup or s_jump by update-in-place */
+	if (set_hw) {
+		bool b;
+		struct tdm_flow *f = FCUR(v);
+
+		f[tx].clksel = v->clksel;
+		f[rx].clksel = v->clksel;
+		b = f[0].bno;
+		e->flows = f;
+		v->eb = b;
+
+		tdm_hw_init(v);
+		change_mappings(e, v->hands == s_jump);
+
+		v->dc = write_dc(e->eno, v->dc);
+	}
+
+	wake_up(&v->mask_event);
 }
 
 /*
- * __change_mapping: move to the new slot-map flow 'fnew'
+ * change_mapping: move to the new slot-map flow 'fnew'
  * Done at the last IRQ before buffer-wrap, so the DMA between old map
  * and user FIFOs is completed, because we're switching to new 'flow'
  * comprising start/cnt/msk registers.
  * Also called from tdm_enable() when first slot activated
  * Caller holds lock.
  */
-static void __change_mapping(struct tdm_engine *e, int dir, bool first)
+/* caller holds lock */
+static inline bool change_mapping(struct tdm_engine *e, int dir, bool first)
 {
-	int eno = e->eno;
-	bool bno = e->fnew[dir].bno;
-	dma_addr_t handle = e->handle[dir][bno];
+	struct tdm_bus *v = e->v;
+	struct tdm_flow *f = &e->flows[dir];
+	bool bno = f->bno;
+	dma_addr_t handle = v->handle[dir][bno];
 	u64 *mask;
 	int m;
-	int eighth = IRQ_THRESH / 4; /* irq target is 1/8 of buffer */
-	bool pause = true;
+	union cavium_tdm_dma_cfg dc;
+	int eno, slots;
 
-	__mark_change();
-	e->dc.u64 = cvmx_read_csr(CVMX_PCMX_DMA_CFG(eno));
-
-	/* frx is the after-DMA flow from buffer to per-slot FIFO */
-	if (!IsTx(dir))
-		e->frx = e->fhw[rx_tdm];
-
-	/* fhw is the flow for next DMA cycle, with new buf & superframe map */
-	e->fhw[dir] = e->fnew[dir];
+	eno = e->eno;
+	dc = v->dc;
 
 	/* intentional type pun: fmask is unsigned long for bitops */
-	mask = (u64 *)e->fhw[dir].fmask;
+	mask = (u64 *)f->fmask;
 
-	/*
-	 * set up fnew for the next round:
-	 * flip to other DMA buffer,
-	 * zero the changed-fmask indicator,
-	 * and remain dormant until something sets .changed
-	 */
-	e->fnew[dir].bno ^= 1;
-	e->fnew[dir].changed = 0;
-	e->last_wrapped[dir] = -1;
+	/* bring in the changed slot masks, acted on at buffer wrap */
+	for (m = 0; m < MASK_REGS; m++) {
+		int hw = m;
 
-	/* need if first time??? */
-	if (!e->tc.s.enable || IsTx(dir))
-		pause = true;
-
-	/* pause engine while reshuffling */
-	if (pause) {
-		// could we just disable dir by xXCNT=0 ?
-		e->tc.s.enable = 0;
-		cvmx_write_sync(CVMX_PCMX_TDM_CFG(eno), e->tc.u64);
+		if (!test_and_clear_bit(m, &f->changed))
+			continue;
+		if (IsTx(dir)) {
+			_cvmx_write_csr(CVMX_PCMX_TXMSKX(hw, eno),
+				mask[m]);
+		} else {
+			_cvmx_write_csr(CVMX_PCMX_RXMSKX(hw, eno),
+				mask[m]);
+		}
 	}
-
-	/* first IRQ corrects period, establishing correct phasing */
-	if (first)
-		e->pll_step[dir] = 3 * eighth;
+	await_rdpend(e->eno);
 
 	if (IsTx(dir)) {
-		e->dc.s.txslots = e->fhw[dir].fslots;
-		if (first) {
-			e->dc.s.txrd = eighth;
-			cvmx_write_sync(CVMX_PCMX_TXADDR(eno), handle);
-			cvmx_write_sync(CVMX_PCMX_TXCNT(eno), SUPERS);
+		if (f->fslots) {
+			_cvmx_write_csr(CVMX_PCMX_TXSTART(eno), handle);
+			if (first)
+				_cvmx_write_csr(CVMX_PCMX_TXCNT(eno),
+					SUPERS(v, dir));
 		}
-		cvmx_write_sync(CVMX_PCMX_TXSTART(eno), handle);
 	} else {
-		e->dc.s.rxslots = e->fhw[dir].fslots;
-		if (first) {
-			e->dc.s.rxst = eighth;
-			cvmx_write_sync(CVMX_PCMX_RXADDR(eno), handle);
-			cvmx_write_sync(CVMX_PCMX_RXCNT(eno), SUPERS);
+		if (f->fslots) {
+			_cvmx_write_csr(CVMX_PCMX_RXSTART(eno), handle);
+			if (first)
+				_cvmx_write_csr(CVMX_PCMX_RXCNT(eno),
+					SUPERS(v, dir));
 		}
-		cvmx_write_sync(CVMX_PCMX_RXSTART(eno), handle);
 	}
 
-	cvmx_write_sync(CVMX_PCMX_DMA_CFG(eno), e->dc.u64);
-	/* bring in the changed slot masks, acted on at buffer wrap */
-	for (m = 0; m < 8; m++) {
-		if (!test_bit(m, &e->fhw[dir].changed))
-			continue;
-		if (IsTx(dir))
-			cvmx_write_sync(CVMX_PCMX_TXMSKX(m, eno), mask[m]);
-		else /* IsRx */
-			cvmx_write_sync(CVMX_PCMX_RXMSKX(m, eno), mask[m]);
-	}
+	slots = STRIDE(f, dir);
+	e->sbase[dir] = v->super[dir][bno];
+	e->hbase[dir] = handle;
+	e->hend[dir] = handle + slots * FRAMES(v, dir);
+	e->half[dir] = (handle + e->hend[dir]) / 2;
 
-	if (e->fhw[dir].fslots)
-		tdm_irq_disable(eno, IsTx(dir) ? tdm_txwrap : tdm_rxwrap);
+
+	await_rdpend(eno);
+
+	v_dc(v, dc);
+
+	if (!STRIDE(f, dir))
+		tdm_irq_enable(eno, tdm_clkbits | xxwrap[dir]);
 	else
-		tdm_irq_enable(eno, IsTx(dir) ? tdm_txwrap : tdm_rxwrap);
+		tdm_irq_disable(eno, xxwrap[dir]);
 
-	if (pause) {
-		e->tc.s.enable = 1;
-		await_rdpend(eno);
-		cvmx_write_sync(CVMX_PCMX_TDM_CFG(eno), e->tc.u64);
-	}
-
-	wake_up(&e->mask_event);
+	return true;
 }
 
+/* caller holds lock */
+static bool change_mappings(struct tdm_engine *e, bool first)
+{
+	struct tdm_bus *v;
+	struct tdm_flow *f;
+	bool changed;
+
+	v = e->v;
+	f = e->flows;
+	changed = change_mapping(e, rx, first)
+			| change_mapping(e, tx, first);
+
+	if (changed) {
+		v->dc.s.txslots = STRIDE(&f[tx], tx);
+		v->dc.s.rxslots = STRIDE(&f[rx], rx);
+		v_dc(v, write_dc(e->eno, v->dc));
+	}
+	return changed;
+}
+
+/*
+ * jump_cut() - single-engine dynamic slotmap change (proxy==0)
+ * try to change geometry, return false if timing wrong
+ */
+/* caller holds lock */
+static bool jump_cut(struct tdm_bus *v)
+{
+	bool flip = change_mappings(v->e[0], false);
+
+	if (flip)
+		update_flows(v);
+
+	flog(v, flip ? "jump completed" : "jump aborted");
+
+	return flip;
+}
+
+/*
+ * tx/rx IRQs happen at 2x buffer-wrap rate*.
+ * When wrap is signalled, DMA has moved to beginning of buf,
+ * so driver processes 2nd half.
+ * When non-wrap IRQ happens, and DMA is seen to be in 2nd half,
+ * driver processes 1st half.
+ * To ensure 1st half is only processed once in a cycle, use
+ * e->wrapped to only process 1 eligible txrd/rxst.
+ * (* 2x wrap rate when irqs_per_wrap==2, but code not generalized
+ *    for number != 2. Can't see a reason to generalize)
+ */
+
 /* handle single engine's signalled irq, called from wrappers below */
-static inline irqreturn_t __tdm_handle_irq(struct tdm_engine *e,
+static inline
+irqreturn_t __tdm_handle_irq(struct tdm_engine *e,
 	u8 sum, u8 ena)
 {
+	ktime_t tstart = ktime_get_boottime();
+	u64 ns_since_wrap[DIRS] = {0, 0};
 	int eno = e->eno;
-	int dir;
+	union cavium_tdm_dma_cfg dc = read_dc(eno);
+	struct tdm_bus *v = e->v;
+	int vno, dir;
+	int old_state;
+	bool primary;
+	u64 oldwait;
+	u64 trigger = 0;
+
+	/* state tracing useful in dynamic bus/engine handover */
+	e->lastirqs <<= 12; /* shift the fifo of { u4 state; u8 irqsum; } */
+	e->lastirqs |= sum;
+
+	if (v) {
+		spin_lock(&TDM_LOCK(v));
+		e->lastirqs |= ((v->hands & 0xf) << 8);
+	}
+
+	primary = v && (e->flows && e->flows[0].bno == v->eb);
+
+	/* "cannot happen" IRQ after engine dead/detached? */
+	if (!v || v != e->v || (v->hands <= s_normal && !primary)) {
+		union cavium_tdm_cfg tc;
+
+		tdm_irq_disable(eno, tdm_irqall);
+		tc = read_tc(eno);
+		tc.s.enable = 0;
+		write_tc(eno, tc);
+		tdm_irq_ack(eno, sum);
+		tf("irq%d s_unpair e%d with NO VNO\n", eno, eno);
+		if (v)
+			spin_unlock(&TDM_LOCK(v));
+		goto bye;
+	}
+
+	vno = v->vno;
+	oldwait = v->waitfor;
+	old_state = v->hands;
 
 	e->cumsum |= sum;
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
 	e->_irqstate[sum]++;
-
-	tf("irq%d ena:%x sum:%x\n", eno, ena, sum);
-
-
-	if (sum & tdm_clkbits)
-		tr_tdm(t_pump, "tdm%d fsync err %x\n", eno, sum);
-
-	for (dir = 0; dir < TXRX; dir++) {
-		struct tdm_flow *f = &e->fhw[dir];
-		void *sbase = e->super[dir][f->bno];
-		dma_addr_t hbase = e->handle[dir][f->bno];
-		dma_addr_t hwhere;
-		/* TODO: drop intake/work and fold actions inline? */
-		u8 work = 0;
-		u8 wrapped = 0;
-		bool tx_intake = false;
-		bool rx_intake = false;
-		bool rx_still_draining = !IsTx(dir) && e->frx.fslots;
-
-		if (!sbase)
-			continue;
-
-		/*
-		 * tx/rx IRQs happen at 2x buffer-wrap rate.
-		 * When wrap is signalled, DMA has moved to beginning of buf,
-		 * so driver processes 2nd half.
-		 * When non-wrap IRQ happens, and DMA is seen to be in 2nd half,
-		 * driver processes 1st half.
-		 * To ensure 1st half is only processed once in a cycle, use
-		 * e->last_wrapped event to only process one eligible txrd/rxst.
-		 *
-		 * if intake, we have a map change coming which
-		 * would conflict with the hw scan and/or rx fifo filling,
-		 * by differently interpreting the superframe space
-		 * under differing tx/rxmask.
-		 * Intake implies next IRQ is at wrap, so must prepare
-		 * flipped registers to latch at wrap.
-		 * But if rx, and frx.live, leave it one more cycle
-		 * to avoid fnew re-using the dma-buffer that is being scanned
-		 * to fifos under old slot-map.
-		 */
-		if (IsTx(dir)) {
-			if ((sum & tdm_txrd) && (ena & tdm_txwrap)) {
-				tdm_irq_enable(eno, tdm_txrd);
-				tdm_irq_disable(eno, tdm_txwrap);
-			}
-
-			if (sum & tdm_txempty)
-				tr_tdm(t_pump, "tdm%d txempty err\n", eno);
-
-			hwhere = cvmx_read_csr(CVMX_PCMX_TXADDR(eno));
-#ifdef CONFIG_MIPS
-			/* for octeon before cn70p2.0, beware errata#16276
-			 *  "TXRD irq happens 1-byte early"
-			 * so must decrement hwhere (modulo wrap)
-			 */
-			if ((OCTEON_IS_MODEL(OCTEON_CN70XX_PASS1_0) ||
-			     OCTEON_IS_MODEL(OCTEON_CN70XX_PASS1_1)) &&
-					hwhere > hbase + 8)
-				hwhere -= 8;
 #endif
-			wrapped = (sum & tdm_txwrap);
-			if (f->fslots) {
-				work = (sum & tdm_txrd);
-				tx_intake = work && !wrapped;
-			} else {
-				tx_intake = wrapped;
-			}
-		} else {
-			if ((sum & tdm_rxst) && (ena & tdm_rxwrap)) {
-				tdm_irq_enable(eno, tdm_rxst);
-				tdm_irq_disable(eno, tdm_rxwrap);
-			}
+	tdm_irq_ack(eno, sum);
 
-			if (sum & tdm_rxovf)
-				tr_tdm(t_pump, "tdm%d rxovf err\n", eno);
+	if (sum & tdm_clkbits) {
+		union cavium_tdm_cfg tc;
 
-			hwhere = cvmx_read_csr(CVMX_PCMX_RXADDR(eno));
-			wrapped = (sum & tdm_rxwrap);
-			if (f->fslots) {
-				work = (sum & tdm_rxst);
-				rx_intake = work && !wrapped;
-			} else {
-				rx_intake = wrapped;
-			}
-		}
+		ten("v%d.fsync err %x\n", vno, sum);
+		tc = read_tc(eno);
 
-		/* DMA must never walk outside buffers */
-		if (hwhere < e->handle[dir][0] ||
-		    hwhere >= e->handle[dir][0] + 2 * e->supersize[dir]) {
-			tf("escaped tdm%d%s handle %llx<%llx<%llx\n",
-				eno, DirStr(dir), e->handle[dir][0], hwhere,
-				e->handle[dir][0] + 2 * e->supersize[dir]);
-			tdm_dump(eno);
-		}
+		/* stop/restart engine */
+		tc.s.enable = 0;
+		write_tc(eno, tc);
+		tc.s.enable = 1;
+		write_tc(eno, tc);
+		tv("FSYNC err %s w%llx toggle e%dtc.enable /%llx\n",
+			s_s(v->hands), v->waitfor, eno, e->lastirqs);
+	}
 
-		if (work)
-			tdm_irq_ack(eno, work | wrapped);
+	if (!e->flows) {
+		pstat[vno][0].noflo++;
+		goto unlock;
+	}
 
-		if (tx_intake && e->fnew[tx_tdm].changed) {
-			/*
-			 * DMA Tx is running on latched values from
-			 * handle[dir][old_bno] and will soon hit
-			 * the wall, restarting from the new_bno values
-			 * installed by __change_mapping()
-			 */
-			__change_mapping(e, tx_tdm, false);
-			/*
-			 * So for the processing of the next scan phase,
-			 * which would usually be lower half of h[d][old_bno]
-			 * we fake the DMA cursor as if in h[d][new_bno],
-			 * as that's the TDM engines's state when it reads.
-			 */
-			sbase = e->super[dir][f->bno];
-			hbase = e->handle[dir][f->bno];
-			hwhere = hbase;
-			hwhere += (f->fslots * FRAMES_PER_HALF) / 4;
 
-		}
+	/* turn off unused engines */
+	if (old_state == s_off) {
+		tdm_irq_disable(eno, tdm_irqall);
+		v->tc.s.enable = 0;
+		write_tc(eno, v->tc);
+		tdm_irq_ack(eno, sum);
+		goto unlock;
+	}
 
-		if (work)
-			tdm_process(e, dir, &e->fhw[dir],
-				sbase, hbase, hwhere);
+	/* note any state-machine triggers */
+	if (sum & tdm_txrd)
+		trigger |= evmask(eno, tx, ev_xfer);
+	if (sum & tdm_rxst)
+		trigger |= evmask(eno, rx, ev_xfer);
+	if (sum & tdm_txwrap)
+		trigger |= evmask(eno, tx, ev_wrap);
+	if (sum & tdm_rxwrap)
+		trigger |= evmask(eno, rx, ev_wrap);
 
-		if (rx_intake && rx_still_draining)
-			e->frx.fslots = 0;
-		else if (rx_intake && e->fnew[rx_tdm].changed)
-			__change_mapping(e, rx_tdm, false);
+	for_dir(dir) {
+		if (sum & xxdma[dir])
+			ns_since_wrap[dir] = ktime_to_ns(
+				ktime_sub(tstart, e->twrap[dir]));
+		if (sum & xxwrap[dir])
+			e->twrap[dir] = tstart;
+	}
 
-		tr_tdm(t_pump, "%s.%d w%x p%d sum:%lld drop:%lld hang:%d\n",
-		       DirStr(dir), eno, wrapped, work,
-		       pstat[eno][dir].sum,
-		       pstat[eno][dir].drop,
-		       pstat[eno][dir].hang);
 
-		if (!work)
-			continue;
+	/* now sequence any engine re-plumbing which had been waiting */
+	if (v->waitfor || old_state > s_normal) {
+		v->waitfor &= ~trigger;
+		trigger &= oldwait;
 
-		/*
-		 * if current flow live, IRQ is from DMA-progress,
-		 * and wrap event is observed, but does not trigger.
-		 * But wrap clocks teardown, when no DMA scheduled
-		 */
-		if (e->fhw[dir].fslots && (tx_intake || rx_intake)) {
-			if (IsTx(dir)) {
-				tdm_irq_enable(eno, tdm_clkbits
-					| (tdm_txbits & ~tdm_txwrap));
-				tdm_irq_disable(eno, tdm_txwrap);
-			} else {
-				tdm_irq_enable(eno, tdm_clkbits
-					| (tdm_rxbits & ~tdm_rxwrap));
-				tdm_irq_disable(eno, tdm_rxwrap);
-			}
+
+		/* precisely one action expected - consider rework */
+		if (!v->waitfor && (trigger & (ev_any_dir * ev_wrap))) {
+			tdm_irq_disable(e->eno, tdm_txwrap | tdm_rxwrap);
+			update_flows(v);
+			NEW_STATE(v, s_normal);
 		}
 	}
 
-	__mark_done();
+	/*
+	 * BEWARE of handover action(), side-effects:
+	 * if v->hands==s_unpair, we may no longer own e,
+	 * or be part of v, but still hold lock.
+	 */
+	primary = (e->flows && e->flows[0].bno == v->eb);
 
+	/*
+	 * handle per-direction DMA actions.
+	 * TODO: some dup'd above/below, not yet weeded
+	 * do rx first for handover timing stability
+	 */
+	for_rx_tx(dir, e && e->flows) {
+		struct tdm_flow *f = &e->flows[dir];
+		int frames = FRAMES(v, dir);
+		void *sbase = e->sbase[dir];
+		dma_addr_t hbase = e->hbase[dir];
+		dma_addr_t hwhere;
+		u64 awhere = IsTx(dir) ?
+			CVMX_PCMX_TXADDR(eno) : CVMX_PCMX_RXADDR(eno);
+		int stride;
+		bool dma_ready = (sum & xxdma[dir]);
+		bool wrapped = (sum & xxwrap[dir]);
+		bool sw_top, hw_top;
+
+		if (!(sum & xxbits[dir])) {
+			if (sum & xxbits[!dir])
+				continue;
+			if (!v->waitfor && !primary && v->hands <= s_normal)
+				goto revoke_both;
+		}
+
+		if (v->hands == s_off)
+			goto silent_revoke_both;
+
+		if (!primary && !v->waitfor)
+			goto revoke_both;
+
+		if (!f)
+			goto revoke;
+
+		stride = STRIDE(f, dir);
+
+		if (!sbase || !stride)
+			goto revoke;
+
+		pstat[vno][dir].irqs++;
+
+		hwhere = _cvmx_read_csr(awhere);
+#ifdef CONFIG_MIPS
+		/* for octeon before cn70p2.0, beware errata#16276
+		 *  "TXRD irq happens 1-byte early"
+		 * so must decrement hwhere (modulo wrap)
+		 */
+		if ((OCTEON_IS_MODEL(OCTEON_CN70XX_PASS1_0) ||
+		     OCTEON_IS_MODEL(OCTEON_CN70XX_PASS1_1)) &&
+				hwhere > e->hbase[dir])
+			hwhere--;
+#endif /* MIPS */
+
+		hw_top = (hwhere >= e->half[dir]);
+		sw_top = !hw_top;
+		poll_change(e, dir, sw_top);
+
+
+		if (dma_ready)
+			trigger |= evmask(eno, dir, ev_xfer);
+		if (wrapped)
+			trigger |= evmask(eno, dir, ev_wrap);
+
+
+		if (!dma_ready && !wrapped)
+			pstat[v->vno][dir].nops++;
+
+		pstat[vno][dir].irqs += (sum & ena & xxdma[dir]);
+
+		if (sum & xxovf[dir]) {
+			pstat[vno][dir].drops++;
+			tr_tdm(t_pump, "tdm%de%d %s err\n",
+				vno, eno,
+				IsTx(dir) ? "txempty" : "rxovf");
+			tdm_irq_ack(eno, xxovf[dir]);
+		}
+
+
+		/* TODO: merge tx/rx here... */
+		if (IsTx(dir)) {
+			if (!(sum & (tdm_txempty|tdm_txrd))
+					&& (ena & tdm_txwrap)) {
+				tdm_irq_enable(eno, tdm_clkbits | tdm_txbits);
+				if (v->hands == s_normal)
+					tdm_irq_disable(eno, tdm_txwrap);
+			}
+		} else {
+			if (!(sum & tdm_rxst) && (ena & tdm_rxwrap)) {
+				tdm_irq_enable(eno, tdm_clkbits | tdm_rxst);
+				if (v->hands == s_normal)
+					tdm_irq_disable(eno, tdm_rxwrap);
+			}
+
+			hwhere = _cvmx_read_csr(awhere);
+		}
+
+		/*
+		 * Per-direction transfer & de-dup actions,
+		 * processing any half-buffer DMA service:
+		 *
+		 * General case: process the half-buffer the DMA
+		 *   cursor is _not_ in. Because txrd/rxst counts are
+		 *   half of (hend - hbase) we know sw can process
+		 *   half buffer each time hw throws xxdma[dir] event
+		 *
+		 * Handover-Begin/-End cases: removed
+		 */
+		if (dma_ready) {
+			int chunk = frames / irqs_per_wrap;
+			int half = chunk * stride;
+			int offset = half * sw_top;
+
+			dma_xfer(e, dir, f->bno,
+				stride, chunk,
+				sbase + offset,
+				hbase + offset);
+		}
+
+		if (sum & xxdma[dir])
+			e->wrapped[dir] = sw_top;
+
+		tr_tdm(t_pump,
+			"tdm%de%d-%s w%d sum:%lld drops:%lld hang:%lld\n",
+			vno, eno, DirStr(dir),
+			dma_ready,
+			pstat[vno][dir].sum,
+			pstat[vno][dir].drops,
+			pstat[vno][dir].hang);
+
+		continue;
+
+silent_revoke_both:
+		tdm_irq_disable(eno, tdm_irqall);
+		break;
+
+revoke_both:
+		tdm_irq_disable(eno, xxbits[!dir]);
+		goto revoke;
+
+revoke:
+		tdm_irq_disable(eno, xxbits[dir]);
+	}
+
+	/* pre-process fnew[tx] on v->e[!eb] */
+	if (old_state == s_jump && !e->wrapped[rx]) {
+		jump_cut(v);
+
+		/* v->waitfor |= NOTHING, as dance is over */
+		NEW_STATE(v, s_normal);
+
+		mark_done();
+	}
+
+unlock:
+	spin_unlock(&TDM_LOCK(v));
+
+	/* should this happen here, or after wrap event signaled by hw? */
+	wake_up(&v->mask_event);
+
+	/*
+	 * Log any IRQs recurring before return.
+	 * These could indicate event loss, if they correlate with other
+	 * issues. By themselves, they're not necessarily a problem.
+	 * The expected chatter of handover mode is demoted to a
+	 * non-logging count in missed[!warn]++
+	 */
+	sum &= cvmx_read_csr(CVMX_PCMX_INT_SUM(eno));
+	if (sum) {
+		int warn = true;
+
+		dc = read_dc(eno);
+
+		if (warn)
+			ten("pending:%x txrd:%d rxst:%d v%df%d%s /%llx\n",
+				sum, dc.s.txrd, dc.s.rxst,
+				vno, v->fgen, s_s(v->hands), e->lastirqs);
+		if (sum & tdm_rxbits)
+			pstat[vno][rx].missed[warn]++;
+		else
+			pstat[vno][tx].missed[warn]++;
+	}
+
+bye:
 	return IRQ_HANDLED;
 }
 
@@ -2278,16 +3464,17 @@ static irqreturn_t tdm_handle_all(int irq, void *irqaction)
 	irqreturn_t any = IRQ_NONE;
 
 	for (eno = 0; eno < NR_TDM_ENGINES; eno++) {
-		struct tdm_engine *e = &engines[eno];
+		struct tdm_engine *e = &eng[eno];
+		struct tdm_bus *v = e->v;
 		u8 sum;
 		u8 ena;
 
-		if (!e->tc.s.enable)
+		if (!v || !v->tc.s.enable)
 			continue;
-		sum = cvmx_read_csr(CVMX_PCMX_INT_SUM(eno));
-		engines[eno].sum = sum;
-		ena = cvmx_read_csr(CVMX_PCMX_INT_ENA(eno));
-		engines[eno].ena = ena;
+		sum = _cvmx_read_csr(CVMX_PCMX_INT_SUM(eno));
+		eng[eno].sum = sum;
+		ena = _cvmx_read_csr(CVMX_PCMX_INT_ENA(eno));
+		eng[eno].ena = ena;
 		if (sum & ena)
 			any |= __tdm_handle_irq(e, sum, ena);
 	}
@@ -2307,84 +3494,117 @@ static irqreturn_t tdm_handle_one(int irq, void *irqaction)
 	u8 ena;
 
 	sum = cvmx_read_csr(CVMX_PCMX_INT_SUM(eno));
-	engines[eno].sum = sum;
+	eng[eno].sum = sum;
 	ena = cvmx_read_csr(CVMX_PCMX_INT_ENA(eno));
-	engines[eno].ena = ena;
+	eng[eno].ena = ena;
 
 	return __tdm_handle_irq(e, sum, ena);
 }
 #endif /* !ONE_TDM_IRQ */
 
 /* detach DMA channels from open file */
+/* caller holds sem_bind */
 static void tdm_unbind(struct file *f)
 {
 	struct tdm_sess *sess = f->private_data;
 	int dir;
 
-	for (dir = 0; sess && dir < TXRX; dir++) {
+	for (dir = 0; sess && dir < DIRS; dir++) {
 		struct tdm_slot *sl = sess->slot[dir];
-		struct tdm_engine *e = &engines[sess->eno];
+		struct tdm_bus *v = sess->v;
 
-		if (!sl)
+		if (!sl || !v)
 			continue;
 
 		/* wait for tx drain: interrupt here only truncates tx data */
 		if (IsTx(dir))
-			wait_event_interruptible(e->mask_event,
-				tdm_fifo_content(sl) < sl->sample_bytes);
+			wait_event_interruptible(sl->fifo_have_space,
+				tdm_fifo_content(sl) < sl->sample_bytes
+				|| !sl->active
+				|| (current->flags & PF_EXITING));
 
 		/* unmap from fnew */
+		sl->closing = true;
 		tdm_enable(f, dir, false, sl->sno, sl->sample_bytes);
-
+		geom_stats(v, sess);
 		tdm_destroy_slot(sl, dir);
-		sess->slot[dir] = NULL;
-		kfree(sl);
 	}
 
 	if (sess)
 		sess->bound = false;
 }
 
-/* (re)attach DMA channels to open file */
-static int tdm_bind(struct file *f, union cavium_tdm_bind *b)
+/* (re)attach DMA channels to an open file, begins the geometry dance */
+/* caller holds sem_bind, dropped on success */
+static int tdm_up(struct tdm_bus *v, bool *upped)
 {
-	struct tdm_sess *sess = f->private_data;
-	int eno = sess->eno;
-	struct tdm_engine *e = &engines[eno];
-	int slots = b->s.slots;
-	int err;
-	int fifo_log = PAGE_SHIFT - 3;
-	int fifo_sz;
+	int err = 0;
 
-	if (b->s.log2fifo)
-		fifo_log = b->s.log2fifo;
-	fifo_sz = (8 << fifo_log);
+	/* Need to launch first-time setup? */
+	if (!v->tc.s.enable) {
+		/*
+		 * we already hold "sem_bind" from ioctl.
+		 * drop early to allow parallel setup/teardown
+		 * to cluster here, and execute in parallel
+		 */
+		up(&v->sem_bind);
+		*upped = true;
 
-	pr_debug("%s tdm%d%s m=%o fifo=%d r%d w%d l%d\n",
-	       __func__, eno,
-	       sess->bound ? " rebind" : "",
-	       f->f_mode, fifo_sz,
-	       b->s.rslot, b->s.wslot, b->s.slots);
+		/* kickstart() success registers change, completed async */
+		err = kickstart(v);
+		if (!err)
+			return 0;
+	}
 
+	return err;
+}
+
+static int chk_tx(struct file *f)
+{
 #ifdef CONFIG_ARM64
 	/* CN81XX pass 1.0/1.1 may not safely Tx on engines 1..3 */
-	if (!b->s.no_tx && eno > 0 &&
-	    MIDR_IS_CPU_MODEL_RANGE(read_cpuid_id(),
-				    MIDR_THUNDERX_81XX, 0x00, 0x00)) {
+	/* vno == eno in this case, as proxy=0 forced */
+	struct tdm_sess *sess = f->private_data;
+	struct tdm_bus *v = sess->v;
+	int vno = v->vno;
+
+	if (vno > 0 && tx0only) {
 		static unsigned long warned;
 
-		if (!test_and_set_bit(eno, &warned))
-			pr_err("tdm%d Tx binding not supported\n", eno);
+		if (!test_and_set_bit(vno, &warned))
+			pr_err("tdm%d Tx binding not supported\n", vno);
+
 		return -EIO;
 	}
 #endif
 
-	err = down_interruptible(&starting);
-	if (err)
+	return 0;
+}
+
+/* (re)attach DMA channels to an open file, begins the geometry dance */
+/* caller holds sem_bind, dropped on success */
+static int tdm_bind_up(struct file *f, union cavium_tdm_bind *b, bool *upped)
+{
+	struct tdm_sess *sess = f->private_data;
+	struct tdm_bus *v = sess->v;
+	int slots = b->s.slots;
+	int fifo_log = MAX_FIFO_LOG;
+	int fifo_sz;
+	int err = chk_tx(f);
+
+	if (!b->s.no_tx && err) {
+		if (!*upped)
+			up(&v->sem_bind);
+		*upped = true;
 		return err;
+	}
+
+	if (b->s.log2fifo && b->s.log2fifo < fifo_log)
+		fifo_log = b->s.log2fifo;
+	fifo_sz = (1 << fifo_log);
 
 	/* check but do not act on binding */
-	err = validate_slots(f, b);
+	err = chk_slots(f, b);
 	if (err)
 		goto teardown;
 
@@ -2392,165 +3612,300 @@ static int tdm_bind(struct file *f, union cavium_tdm_bind *b)
 	if (sess->bound)
 		tdm_unbind(f);
 
+	sess->geom_start[1] = ktime_get_boottime();
+
 	/* impose the binding on hw */
 	if (!b->s.no_rx) {
 		int sno = b->s.rslot;
 
-		err = tdm_enable(f, rx_tdm, true, sno, slots);
+		err = tdm_enable(f, rx, true, sno, slots);
 		if (err)
 			goto teardown;
-		sess->slot[rx_tdm] =
-		    tdm_create_slot(e, sno, b->s.slots,
-				    fifo_sz, rx_tdm, read_actor);
+		sess->slot[rx] =
+		    tdm_create_slot(v, sess, sno, b->s.slots,
+				    fifo_sz, rx, read_actor);
 	}
 	if (!b->s.no_tx) {
 		int sno = b->s.wslot;
 
-		err = tdm_enable(f, tx_tdm, true, sno, slots);
+		err = tdm_enable(f, tx, true, sno, slots);
 		if (err) {
 			if (!b->s.no_rx) {
-				tdm_enable(f, rx_tdm, false, b->s.rslot, slots);
-				tdm_destroy_slot(sess->slot[rx_tdm], rx_tdm);
+				struct tdm_slot *sl =
+					sess->slot[rx];
+
+				tdm_enable(f, rx, false, b->s.rslot, slots);
+				tdm_destroy_slot(sl, rx);
 			}
 			goto teardown;
 		}
-		sess->slot[tx_tdm] =
-		    tdm_create_slot(e, sno, b->s.slots,
-				    fifo_sz, tx_tdm, write_actor);
+		sess->slot[tx] =
+		    tdm_create_slot(v, sess, sno, b->s.slots,
+				    fifo_sz, tx, write_actor);
 	}
 
+	err = tdm_up(v, upped);
+
 teardown:
-	up(&starting);
 	return err;
 }
 
-static inline void tdmgstat(struct tdm_engine *e, struct cavium_tdm_stat *s)
+/* start engine from cold, if appropriate (NOT holding lock) */
+static inline int kickstart(struct tdm_bus *v)
+{
+	unsigned long flags;
+	union cavium_tdm_cfg tc;
+	bool bnew;
+	struct tdm_engine *e;
+	struct tdm_flow *f;
+
+	spin_lock_irqsave(&TDM_LOCK(v), flags);
+	tc = v->tc;
+	bnew = v->eb;  /* reuse engine */
+	e = v->e[bnew];
+
+	if (!e) {
+		v->eb ^= 1;
+		e = v->e[v->eb];
+	}
+	if (!e) {
+		spin_unlock_irqrestore(&TDM_LOCK(v), flags);
+		return -EIO;
+	}
+
+	/*
+	 * If no slots were active, no IRQs will rotate the new slot map in.
+	 * But if no slots were active, no map conflicts exist, so safe.
+	 */
+	NEW_STATE(v, s_jump);
+	update_flows(v);
+
+	/* flip v->eb, cycle flow descriptors */
+	/* update v->tc/dc with FNEW*/
+	tdm_irq_enable(e->eno, tdm_txwrap | tdm_rxwrap);
+	v->waitfor |= evmask(e->eno, both, ev_wrap);
+
+	/* lay out TWO initial Tx half-dmabufs */
+	f = &FCUR(v)[tx];
+	dma_xfer(e, tx, f->bno,
+		STRIDE(f, tx), FRAMES(v, tx),
+		(u8 *)v->super[tx][f->bno],
+		v->handle[tx][f->bno]);
+
+	e->skip_dma[rx] = 3; /* first 3 frames are garbage */
+
+	v->waitfor |= evmask(e->eno, both, ev_wrap);
+	enable_engine(e);
+	spin_unlock_irqrestore(&TDM_LOCK(v), flags);
+
+	return 0;
+}
+
+static inline void tdmgstat(struct tdm_bus *v, struct cavium_tdm_stat *s)
 {
 	int i;
+	struct tdm_flow *f = FCUR(v);
+	struct tdm_engine *e = v->e[v->eb];
+	int eno = e ? e->eno : 0;
 	unsigned long flags;
-	u64 *rm = (u64 *)e->fhw[rx_tdm].fmask;
-	u64 *tm = (u64 *)e->fhw[tx_tdm].fmask;
+	u64 *rm = (u64 *)f[rx].fmask;
+	u64 *tm = (u64 *)f[tx].fmask;
 
-	spin_lock_irqsave(&E_LOCK(e), flags);
+	spin_lock_irqsave(&TDM_LOCK(v), flags);
 	s->ver		= TDM_VER;
 	s->int_sum	= e->cumsum;
 	e->cumsum	= 0;
-	s->supers	= SUPERS;
-	s->rxaddr	= cvmx_read_csr(CVMX_PCMX_RXADDR(e->eno));
-	s->txaddr	= cvmx_read_csr(CVMX_PCMX_TXADDR(e->eno));
-	s->rxsize	= e->fhw[rx_tdm].fslots;
-	s->txsize	= e->fhw[tx_tdm].fslots;
-	s->rxlimit	= cvmx_read_csr(CVMX_PCMX_RXCNT(e->eno));
-	s->txlimit	= cvmx_read_csr(CVMX_PCMX_TXCNT(e->eno));
+	s->rx_supers	= SUPERS(v, rx);
+	s->tx_supers	= SUPERS(v, tx);
+	s->rxaddr	= cvmx_read_csr(CVMX_PCMX_RXADDR(eno));
+	s->txaddr	= cvmx_read_csr(CVMX_PCMX_TXADDR(eno));
+	s->rxsize	= f[rx].fslots;
+	s->txsize	= f[tx].fslots;
+	s->rxlimit	= cvmx_read_csr(CVMX_PCMX_RXCNT(eno));
+	s->txlimit	= cvmx_read_csr(CVMX_PCMX_TXCNT(eno));
 
 	for (i = 0; i < ARRAY_SIZE(s->rxmask); i++) {
 		s->rxmask[i] = rm[i];
 		s->txmask[i] = tm[i];
 	}
-	spin_unlock_irqrestore(&E_LOCK(e), flags);
+	spin_unlock_irqrestore(&TDM_LOCK(v), flags);
 }
 
 static long tdm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct tdm_sess *sess = filp->private_data;
 	void __user *uaddr = (void *)arg;
-	unsigned int eno = sess ? sess->eno : 0;
-	struct tdm_engine *e = &engines[eno];
+	struct tdm_bus *v = sess ? sess->v : NULL;
+	unsigned int vno = v ? v->vno : 0;
+	struct tdm_engine *e = NULL;
+	int eb, eno = -1;
 	union cavium_tdm_clk_cfg cc;
 	union cavium_tdm_clk_gen cg;
 	union cavium_tdm_cfg tc;
 	union cavium_tdm_bind bind;
 	struct cavium_tdm_stat stat;
 	u64 u_64;
-	int ret = validate_eno(eno);
-	int clk = which_clk(eno);
-	int dir = rx_tdm; /* for tx/rx pair ioctls */
+	int ret = chk_vno(vno);
+	int clk = which_clk(vno);
+	int dir = rx; /* for tx/rx pair ioctls */
+	bool early_up = false;
+	int mend = CONFIG_CAVIUM_TDM_MAX_SLOTS /
+		(8 * sizeof(v->sslot.mask[0][0]));
+	int m;
+	int totslots = 0;
+	bool sticky = false;
 
-	pr_debug("ioctl(tdm%d, %x, %lx) ...\n", eno, cmd, arg);
+	if (!sess)
+		return -EINVAL;
+
+	if (ret)
+		return ret;
+
+	/* hold vno->eno mapping */
+	ret = down_interruptible(&v->sem_bind);
+
+	if (ret)
+		return ret;
+
+	ret = -EINVAL;
+
+	/* most ioctl() need a valid engine/bus */
+	switch (cmd) {
+	/* un-named things need bus AND engine */
+	default:
+		if (!v)
+			goto fail;
+		eb = v->eb;
+		e = v->e[eb];
+		if (!e)
+			goto fail;
+		eno = e->eno;
+		break;
+
+	/* some things need only a bus */
+	case TDMGBIND:
+	case TDMGCLKCFG_:
+	case TDMGCLKGEN_:
+	case TDMGCLKCFG:
+	case TDMGCLKGEN:
+	case TDMGCLKSEL:
+	case TDMGFRMHZ:
+	case TDMGSCLK:
+	case TDMGSTAT:
+	case TDMSBIND:
+	case TDMSCLKCFG_:
+	case TDMSCLKGEN_:
+	case TDMSCLKCFG:
+	case TDMSCLKGEN:
+	case TDMSCLKSEL:
+	case TDMSRXBUF:
+	case TDMSRXRING:
+	case TDMSTIM:
+	case TDMSTXBUF:
+	case TDMSTXRING:
+	case TDMGSSLOT:
+	case TDMSSSLOT:
+		if (!v)
+			goto fail;
+		break;
+
+	/* some need neither */
+	case TDMGTIM:
+	case TDMSDROP:
+		break;
+	}
+
+	ret = 0;
 
 	switch (cmd) {
+	case TDMGCLKCFG_:
 	case TDMGCLKCFG:
 		cc.u64 = cvmx_read_csr(CVMX_PCM_CLKX_CFG(clk));
-		pr_debug("TDMGCLKCFG tdm%d %llx\n", eno, cc.u64);
 		ret = copy_to_user(uaddr, &cc, sizeof(cc));
 		if (ret)
 			ret = -EFAULT;
 		break;
+	case TDMSCLKCFG_:
 	case TDMSCLKCFG:
-		pr_debug("TDMSCLKCFG tdm%d clk%d\n", eno, clk);
+		sticky = true;
 		ret = copy_from_user(&cc, uaddr, sizeof(cc));
 		if (ret)
 			ret = -EFAULT;
 		else
-			ret = validate_clk(eno, c_cfg, cc.u64);
+			ret = chk_clk(vno, c_cfg, cc.u64);
 		if (!ret)
-			cvmx_write_sync(CVMX_PCM_CLKX_CFG(clk),
+			cvmx_write_csr(CVMX_PCM_CLKX_CFG(clk),
 				clk_cfg[clk].u64);
 		pr_debug("ret:%d cc:%llx\n", ret, cc.u64);
 		break;
+	case TDMGCLKGEN_:
 	case TDMGCLKGEN:
 		cg.u64 = cvmx_read_csr(CVMX_PCM_CLKX_GEN(clk));
-		pr_debug("TDMGCLKGEN tdm%d clk%d %llx\n", eno, clk, cg.u64);
+		pr_debug("TDMGCLKGEN tdm%d clk%d %llx\n", vno, clk, cg.u64);
 		ret = copy_to_user(uaddr, &cg, sizeof(cg));
 		if (ret)
 			ret = -EFAULT;
 		break;
+	case TDMSCLKGEN_:
 	case TDMSCLKGEN:
-		pr_debug("TDMSCLKGEN tdm%d clk%d\n", eno, clk);
+		sticky = true;
+		pr_debug("TDMSCLKGEN tdm%d clk%d\n", vno, clk);
 		ret = copy_from_user(&cg, uaddr, sizeof(cg));
 		if (ret)
 			ret = -EFAULT;
 		else
-			ret = validate_clk(eno, c_gen, cg.u64);
+			ret = chk_clk(vno, c_gen, cg.u64);
 		if (!ret)
-			cvmx_write_sync(CVMX_PCM_CLKX_GEN(clk),
+			cvmx_write_csr(CVMX_PCM_CLKX_GEN(clk),
 				clk_gen[clk].u64);
 		pr_debug("ret:%d cg:%llx\n", ret, cg.u64);
 		break;
 	case TDMGTIM:
-		tc.u64 = cvmx_read_csr(CVMX_PCMX_TDM_CFG(eno));
-		pr_debug("TDMGTIM tdm%d %llx\n", eno, tc.u64);
+		tc = v->tc;
+		pr_debug("TDMGTIM tdm%d %llx\n", vno, tc.u64);
 		ret = copy_to_user(uaddr, &tc, sizeof(tc));
 		if (ret)
 			ret = -EFAULT;
 		break;
 	case TDMSTIM:
-		pr_debug("TDMSTIM tdm%d\n", eno);
+		sticky = true;
+		pr_debug("TDMSTIM tdm%d\n", vno);
 		ret = copy_from_user(&tc, uaddr, sizeof(tc));
 		if (ret)
 			ret = -EFAULT;
+		if (v->clksel >= 0)
+			tc.s.useclk1 = v->clksel;
 		if (!ret)
-			ret = validate_clk(eno, c_on, 0);
+			ret = chk_clk(vno, c_on, 0);
 		if (!ret)
-			ret = validate_cfg(eno, &tc);
+			ret = chk_cfg(vno, &tc);
 		if (!ret) {
-			e->tc = tc;
-			pr_debug("CVMX_PCM%u_TDM_CFG w %llx\n", eno, e->tc.u64);
-			cvmx_write_sync(CVMX_PCMX_TDM_CFG(eno), e->tc.u64);
-			e->valid_cfg = true;
+			pr_debug("CVMX_PCM%u_TDM_CFG w %llx\n", vno, tc.u64);
+			if (e)
+				write_tc(eno, tc);
 		}
 		break;
 
 		/* other ioctl()s which do not map to registers */
 	case TDMGCLKSEL:
-		ret = e->clksel;
+		ret = v->clksel;
+		pr_debug("TDMGCLKSEL tdm%d e?%d\n", vno, ret);
 		if (ret < 0)
 			ret = -EINVAL;
 		break;
 
 	case TDMSCLKSEL:
-		pr_debug("TDMSCLKSEL tdm%u clk%lu\n", eno, arg);
+		sticky = true;
+		pr_debug("TDMSCLKSEL tdm%u clk%lu\n", vno, arg);
 		/* allow -1 to un-assign a clock */
-		if ((int)arg >= -1 && arg < 2) {
-			e->clksel = arg;
-			ret = 0;
-		} else {
+		if ((int)arg >= -1 && arg < 2)
+			v->clksel = arg;
+		else
 			ret = -EINVAL;
-		}
 		break;
 
 	case TDMGFRMHZ:
-		pr_debug("TDMGFRMHZ tdm%d\n", eno);
+		pr_debug("TDMGFRMHZ tdm%d\n", vno);
 		u_64 = pclk_hz[clk];
 		ret = copy_to_user(uaddr, &u_64, sizeof(u_64));
 		if (ret)
@@ -2558,115 +3913,231 @@ static long tdm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	case TDMSTXBUF:
-		dir = tx_tdm;
+		dir = tx;
 		/* flow into ... */
 	case TDMSRXBUF:
-		pr_debug("TDMS%sBUF tdm%d %lx\n", DirStr(dir), eno, arg);
-		if (e->max_slots[dir])
+		sticky = true;
+		pr_debug("TDMS%sBUF tdm%d %lx\n", DirStr(dir), vno, arg);
+		if (v->max_slots[dir])
 			ret = -EPROTO;
 		else
-			e->max_slots[dir] = arg;
+			v->max_slots[dir] = arg;
 		break;
 
 	case TDMGSTAT:
-		pr_debug("TDMGSTAT tdm%d\n", eno);
-		tdmgstat(e, &stat);
+		pr_debug("TDMGSTAT tdm%d\n", vno);
+		tdmgstat(v, &stat);
 		ret = copy_to_user(uaddr, &stat, sizeof(stat));
 		if (ret)
 			ret = -EFAULT;
 		break;
 
 	case TDMGBIND:
-		pr_debug("TDMGBIND tdm%d\n", eno);
+		pr_debug("TDMGBIND tdm%d\n", vno);
 		ret = copy_to_user(uaddr, &bind, sizeof(bind));
 		if (ret)
 			ret = -EFAULT;
 		break;
 	case TDMSBIND:
-		pr_debug("TDMSBIND tdm%d\n", eno);
+		sticky = true;
+		pr_debug("TDMSBIND tdm%d\n", vno);
 		ret = copy_from_user(&bind, uaddr, sizeof(bind));
 		if (ret)
 			ret = -EFAULT;
 		if (!ret)
-			ret = validate_cfg(eno, NULL);
+			ret = chk_cfg(vno, NULL);
 		if (!ret)
-			ret = validate_clk(eno, c_on, 0);
-		if (!ret)
-			ret = tdm_bind(filp, &bind);
+			ret = chk_clk(vno, c_on, 0);
+
+		/*
+		 * TODO: EBUSY/EAGAIN/etc interaction with NDELAY needed,
+		 * on block/non bind/read/write variants?
+		 */
+		if ((signal_pending_state(TASK_INTERRUPTIBLE, current))
+				|| (current->flags & PF_EXITING)) {
+			ret = -EINTR;
+		} else {
+			ret = tdm_bind_up(filp, &bind, &early_up);
+		}
+
 		break;
 
 	case TDMGSCLK:
 		u_64 = get_sclk();
-		pr_debug("TDMGSCLK tdm%d sclk %lld\n", eno, u_64);
+		pr_debug("TDMGSCLK tdm%d sclk %lld\n", vno, u_64);
 		ret = copy_to_user(uaddr, &u_64, sizeof(u_64));
 		if (ret)
 			ret = -EFAULT;
 		break;
 
 	case TDMSTXRING:
-		dir = tx_tdm;
+		dir = tx;
 		/* flow into ... */
 	case TDMSRXRING:
-		pr_debug("TDMS%sRING tdm%d %lx\n", DirStr(dir), eno, arg);
-		if (e->ring_frames[dir])
+		sticky = true;
+		pr_debug("TDMS%sRING tdm%d %lx\n", DirStr(dir), vno, arg);
+		if (v->ring_frames[dir])
 			ret = -EPROTO;
 		else if ((arg & 0xf) || arg <= 0 || arg >= (8 << 16))
 			ret = -EINVAL;
 		else
-			e->ring_frames[dir] = arg;
+			v->ring_frames[dir] = arg;
+		break;
+
+	case TDMSSILENCE:
+		sticky = true;
+		*(u32 *)silence = arg;
+		break;
+
+	case TDMGSSLOT:
+		ret = copy_to_user(uaddr, &v->sslot, sizeof(v->sslot));
+		break;
+
+	case TDMSSSLOT:
+		/* static slotmap can only be applied before bindings */
+		sticky = true;
+		pr_debug("TDMSSSLOT tdm%d\n", vno);
+		ret = copy_from_user(&v->sslot,
+			uaddr, sizeof(v->sslot));
+
+		/* probe for fixed/dynamic conflict, or unsafe Tx */
+		if (!ret) {
+			u64 tx_msk = 0;
+			int tx_unsafe = chk_tx(filp);
+
+			for (m = 0; tx_unsafe && m < mend; m++)
+				tx_msk |= v->sslot.mask[dir][m];
+
+			/* Ok unless Tx specified on unsafe engine */
+			if (tx_msk)
+				ret = tx_unsafe;
+
+			for_dir(dir) {
+				struct tdm_flow *fa = &FALL(v)[dir];
+				int cnt = 0;
+
+				for (m = 0; m < mend; m++) {
+					u64 msk = v->sslot.mask[dir][m];
+
+					cnt += hweight64(msk);
+				}
+
+				/* cannot combine fixed/dynamic */
+				if (cnt && fa->fslots && !ret)
+					ret = -EBUSY;
+
+				totslots += cnt;
+			}
+
+			/* fixed mask 0/0 erases old TDMSSSLOT */
+			if (!totslots)
+				v->fixed = false;
+		}
+
+		if (!v->fixed && !ret) {
+			for_dir(dir) {
+				struct tdm_flow *fa = &FALL(v)[dir];
+				int cnt = 0;
+
+				for (m = 0; m < mend; m++) {
+					u64 msk = v->sslot.mask[dir][m];
+
+					cnt += hweight64(msk);
+					fa->fmask[m] = msk;
+				}
+				fa->fslots = cnt;
+			}
+			v->fixed = true;
+
+			/* as with TDMSSBIND, this starts clock */
+			ret = chk_dma(vno, NULL);
+			if (!ret)
+				ret = tdm_up(v, &early_up);
+			if (ret == -EIO)
+				ret = 0;
+		}
+		break;
+
+	case TDMSDROP:
+		/* static slotmap can only be applied before bindings */
+		pr_debug("TDMSDROP tdm%d\n", vno);
+		hold(vno, false);
 		break;
 
 	default:
 		ret = -ENOTTY;
 		break;
 	}
+
+fail:
+	if (!early_up)
+		up(&v->sem_bind);
+
 	pr_debug("ioctl(%x) -> %x\n", cmd, ret);
+
+	if (ret >= 0 && sticky)
+		hold(vno, true);
 
 	return ret;
 }
 
-static ssize_t tdm_read(struct file *f, char __user *u, size_t len, loff_t *off)
+/* read TDM data from a previously bound (bus, slot, width) */
+static ssize_t tdm_read(struct file *f, char __user *u,
+			size_t len, loff_t *off)
 {
 	struct tdm_sess *sess = f->private_data;
 	int done;
 
+	if (!sess)
+		return -EINVAL;
+
 	tr_tdm(t_read, "READ %d/%x @%llx ...\n", (int)len, (int)len, *off);
-	if (!sess || !sess->slot[rx_tdm])
+	if (!sess || !sess->slot[rx])
 		return -EIO;
 
-	done = tdm_reader(sess->slot[rx_tdm], u, len);
+	done = tdm_reader(sess->slot[rx], u, len);
 	if (done > 0 && off)
 		*off += done;
 	tr_tdm(t_read, "RX %d/%x @%llx ...\n", done, done, *off);
 	return done;
 }
 
+/* write TDM data to a previously bound (bus, slot, width) */
 static ssize_t tdm_write(struct file *f, const char __user *u,
-		size_t len, loff_t *off)
+				size_t len, loff_t *off)
 {
 	struct tdm_sess *sess = f->private_data;
+	struct tdm_slot *sl;
 	int done;
 
 	tr_tdm(t_write, "WRITE %d/%x @%llx ...\n", (int)len, (int)len, *off);
-	if (!sess || !sess->slot[tx_tdm])
+	if (!sess)
+		return -EIO;
+	sl = sess->slot[tx];
+	if (!sl)
 		return -EIO;
 
-	done = tdm_writer(sess->slot[tx_tdm], u, len);
+	done = tdm_writer(sess->slot[tx], u, len);
 	if (done > 0 && off)
 		*off += done;
 	tr_tdm(t_write, "TX %d/%x @%llx ...\n", done, done, *off);
+
 	return done;
 }
 
 static int tdm_open(struct inode *i, struct file *f)
 {
 	struct tdm_sess *sess = NULL;
-	int eno = iminor(i);
+	int vno = iminor(i);
+	struct tdm_bus *v = &veng[vno];
 	int err;
 
-	pr_debug("%s tdm%d teardown=%d\n", __func__, eno, teardown);
+	pr_debug("%s tdm%d\n", __func__, vno);
 
-	err = down_interruptible(&starting);
+	if (vno >= NR_TDM_BUSES)
+		return -EINVAL;
+
+	err = down_interruptible(&v->sem_bind);
 	if (err)
 		return err;
 
@@ -2674,7 +4145,7 @@ static int tdm_open(struct inode *i, struct file *f)
 
 	if (teardown)
 		goto teardown;
-	err = validate_eno(eno);
+	err = chk_vno(vno);
 	if (err)
 		goto teardown;
 
@@ -2683,29 +4154,40 @@ static int tdm_open(struct inode *i, struct file *f)
 	if (!sess)
 		goto teardown;
 
-	__module_get(THIS_MODULE);
-	sess->eno = eno;
+	sess->v = v;
 	f->f_mode &= ~(FMODE_LSEEK | FMODE_PREAD | FMODE_PWRITE);
 	f->private_data = sess;
 	err = 0;
 
 teardown:
-	up(&starting);
+	up(&v->sem_bind);
 	return err;
 }
 
 static int tdm_release(struct inode *i, struct file *f)
 {
 	struct tdm_sess *sess = f->private_data;
+	struct tdm_bus *v;
+	int vno;
 
-	if (sess) {
-		down(&starting);
-		tdm_unbind(f);
+	if (!sess)
+		return -EINVAL;
+	v = sess->v;
+	if (!v)
+		return 0;
+	vno = v->vno;
+	sess->geom_start[0] = ktime_get_boottime();
+	down(&v->sem_bind);
+	tdm_unbind(f);
+
+	if (!test_bit(vno, &held)) {
+		sess->v = NULL;
 		f->private_data = NULL;
-		up(&starting);
 		kfree(sess);
-		module_put(THIS_MODULE);
 	}
+
+	up(&v->sem_bind);
+
 	return 0;
 }
 
@@ -2715,12 +4197,14 @@ static unsigned int tdm_poll(struct file *f, struct poll_table_struct *p)
 	struct tdm_slot *rs, *ws;
 	int ready = 0;
 	static int was[NR_TDM_ENGINES];
+	int vno;
 
 	if (!sess)
-		return -EIO;
+		return -EINVAL;
 
-	rs = sess->slot[rx_tdm];
-	ws = sess->slot[tx_tdm];
+	vno = sess->v->vno;
+	rs = sess->slot[rx];
+	ws = sess->slot[tx];
 
 	if (rs && tdm_fifo_content(rs) >= rs->sample_bytes)
 		ready |= POLLIN;
@@ -2728,7 +4212,7 @@ static unsigned int tdm_poll(struct file *f, struct poll_table_struct *p)
 	if (ws && tdm_fifo_space(ws) >= ws->sample_bytes)
 		ready |= POLLOUT;
 
-	was[sess->eno] = ready;
+	was[vno] = ready;
 
 	return ready;
 }
