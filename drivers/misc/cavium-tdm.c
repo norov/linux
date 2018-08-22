@@ -101,12 +101,13 @@ enum {
 static int tdm_trace = t_init;
 module_param_named(trace, tdm_trace, int, 0644);
 
+/* event tracing, which collapses to nothing if !defined(DEBUG) */
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
 /* trace_printk logging of interesting events (slot map changes) */
 static int old_trace; /* saved trace flags over change-tracing */
 static int trace_changes; /* count down on exhaustive logging */
 
-/* event tracing, which collapses to nothing if !defined(DEBUG) */
-#define tr_tdm(mask, fmt, ...) do { \
+# define tr_tdm(mask, fmt, ...) do { \
 	/* unless trace_changes, trace only initial N */ \
 	static int _once = 50; \
 	/* TODO: adjust masks on WARN calls, rather than this strstr() */ \
@@ -120,6 +121,12 @@ static int trace_changes; /* count down on exhaustive logging */
 		} \
 	    } \
 	} while (0)
+#else /*!_DEBUG*/
+# define tr_tdm(mask, fmt, ...) do { \
+		if (tdm_trace & (mask)) \
+			pr_debug(DEVNAME " " fmt, ##__VA_ARGS__);\
+	} while (0)
+#endif /*!_DEBUG*/
 
 /*
  * A bus is one or more engines wired-or'd, currently exactly one,
@@ -696,6 +703,7 @@ static struct tdm_bus veng[NR_TDM_ENGINES];
 /* caller holds lock, mark an "interesting" event */
 static inline void mark_change(void)
 {
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
 	bool was_off = !old_trace;
 
 	if (!(tdm_trace & t_change))
@@ -707,11 +715,13 @@ static inline void mark_change(void)
 		trace_printk("tdm tracing on %x |= %x\n",
 			tdm_trace, t_detail);
 	tdm_trace |= t_detail;
+#endif
 }
 
 /* caller holds lock, mark irq-handling done */
 static inline void mark_done(void)
 {
+#ifdef CONFIG_CAVIUM_TDM_DEBUG
 	if (trace_changes <= 0)
 		return;
 	if (--trace_changes)
@@ -719,6 +729,7 @@ static inline void mark_done(void)
 	trace_printk("tdm tracing off\n");
 	tdm_trace = old_trace;
 	old_trace = 0;
+#endif
 }
 
 static unsigned long held;
