@@ -1,0 +1,153 @@
+cavium-tdm handles Octeon/OcteonTX Telephony support,
+using the Time-Division-Multiplex protocols such as T1 & E1
+on a shared time-sliced bus.
+TDM hardware is present on select models of Octeon & OcteonTX SoC,
+supporting telephony interfaces from 1-or-2 line VoIP terminating
+interfaces, interfacing via a SLIC to POTS, to T1/E1 and beyond (T2/E3)
+
+Four TDM engines are available, each of which can do bytewise TX/RX in
+numbered slots of a frame containing up to 512 slots.
+Two clock generators are available, which define the length and bitrate
+of these frames, and either supply FSYNC/BCLK signals to define the bus,
+or sync up to external FSYNC/BCLK signals.
+
+The cavium-tdm device has parallels with sound cards (but 4x 512-channel)
+and isdn hardware, but lacks elements of each.  So it lives in misc, and
+the core code could be extended into either of these realms by usercode.
+
+See the appropriate Octeon/OcteonTX Hardware Reference Manual for details
+of electrical interface, timing, and basic concepts.
+This document details the device-driver interface, the ioctl()s used to set
+up a TDM bus, and to bind a read/write file descriptor to a group of
+contiguous timeslots for read/write of their data stream.
+
+The TDM engines are accessed as /dev/tdm0..3.
+These device files are used both for setting up the engine's clock/frame/dma
+parameters, but also (after assigning timeslots) for read/write of TDM data.
+
+CONFIG BY IOCTL():
+=================
+Ioctl() calls on these engines largely parallel the TDM device register naming,
+layout and function described more deeply in HRM, but driver adds checking and
+locking, and of course buffer allocation, DMA mapping, interrupt handling,
+and the mux/demux of the interlaced slots into distinct read/write streams.
+
+While each engine can both transmit and receive, software design and load
+balancing can sometimes be simplified by splitting TX/RX functions between
+separate TDM engines, sharing a common clock generator.
+This is the model used in most Cavium reference boards, to allow testing
+all engines without excessive ancillary hardware.
+In this case, elsewhere called a two-engine pump, a file descriptor to each
+of the read & write engines should be opened and configured.
+The shared clock need only be configured once.
+
+See cavium-tdm.h for the usermode interface to a TDM subsystem,
+and the simple tdmcat.c example for use in context
+
+Each engine can be driven by one of two clock generators, which define the
+TDM frame. The TDMSCLKSEL ioctl, issued on the desired engine, selects which
+clock generator that engine uses. If not specified, CLK0 is used.
+
+A clock generator must be set up before first use.
+Details of its framing (frame bits, FSYNC/BCLK phase and polarity) are set
+with TDMSCLKCFG.  Its frequency and sampling details are set with TDMSCLKGEN,
+where the Rx sample point and frequency are set in terms of SoC's I/O-system
+clock (known as SCLK or ECLK in Hardware Reference).
+This SCLK (in Hz) is system-wide, retrieved by TDMGSCLK on any tdm engine.
+
+An externally clocked TDM bus is specified by passing n=0 in TDMSCLKGEN.
+
+With clock activated, an engine's TDM interface timing can be set by TDMSTIM,
+specifying lsb/msb-first, Rx sample-point and Tx drive-time, in terms of SCLK.
+
+Now that the TDM engine is active, new file descriptors may be open()ed on it,
+for read/write traffic. Or the same connection which configured the framing
+and clocking can also be used.
+
+But before read/write traffic, there are two further steps:
+- the first is optional - specify the maximum number of slots which can use
+  the TDM bus in given direction. This limits the size of the DMA buffer
+  which would otherwise be sized for the full frame.  When no more than a few
+  slots will ever be concurrently mapped (such as a few SLIC channels scattered
+  over a full T1/E1 frame) this can significantly reduce linear-mapped DMA
+  memory requirements.
+	ioctl(fd, TDMSRXBUF, 4); // no more than 4 Rx slots will ever be bound
+	ioctl(fd, TDMSTXBUF, 16); // up to 16 concurrent Tx slots
+
+- the final step is to bind this file descriptor to a TDM slot,
+  or more generally a range of contiguous slots, in either the read,
+  write, or both directions
+	// bind this fd to TDM slot 3, read+write, 8-bit
+	tdm_bind_t bind = {
+		.s.slots = 1,
+		.s.rslot = 3,	// ignored if .s.no_rx set
+		.s.wslot = 3,	// ignored if .s.no_tx set
+		.s.log2fifo = 6, // optional, override FIFO size
+	};
+	ioctl(fd, TDMSBIND, &bind.u64);
+  The default log2fifo=0 reserves one kernel page for buffering.
+  If set this can tune the depth of buffering, adding memory to reduce the
+  need for timely servicing when latency is unimportant (eg voicemail)
+
+When TDMSBIND returns, the TX/RXMSK[] & tx/rxslots of the TDM engine have been
+adjusted, FIFOs for read/write allocated, DMA is happening between TDM bus and
+those FIFOs.
+
+Now fd may be used for read/write/poll:
+read(fd, buf, size) will block until size bytes are available, as usual,
+and write() will block until size bytes have been sent into FIFO,
+but O_NONBLOCK allows partial read/writes.
+If data accumulates faster than read() drains FIFO, samples are lost.
+If Tx FIFO drains because write()s have not happened, samples are replayed
+as the buffer size set by TDMSTXCNT is rescanned.
+
+Because the kernel/user FIFOs are initially empty, TDMSBIND will begin
+writing zeros into the TDM slot, until a write() supplies data.
+Depending on the codec used, zero may not be an appropriate 'silence'
+value. In that case, a write of up to the buffer size (as set by TDMSTXCNT,
+or retrieved by TDMGTXCNT) can be used to pre-load the FIFO to avoid a glitch.
+
+See the tdmcat program for a simple example, modelled on netcat, which
+sets up a read-or-write channel, then passed data through to stdout/stdin.
+
+While Tx/Rx slots are open, the TDM engine interrupts each time the engine
+wraps around the tx/rx buffers, and each time it passes half-way.
+That's (8kHz/bufcnt * 2) interrupts for each of Tx/Rx directions.
+When a tdm file is closed, its Tx slots (if any) go tri-state, and if the
+number of Tx/Rx slots goes to zero the TDM engine is disableds, but the clock
+continues running.
+
+Current driver state and some stats can be observed via /proc/tdm interface,
+subject to change, but providing developer feedback on such things as dropped
+or empty samples, where usercode did not drain/fill the read()/write()
+interface FIFOs fast enough.
+
+A ONE-WIRE EXAMPLE:
+==================
+using the SLIC risers on TDM-equipped full-size Cavium evaluation boards
+(such as EBB8104) to loop TDM bus from /dev/tdm0 to /dev/tdm1, we can
+   # tdmcat -e0 -b192 -f8000 -c0		# tdm0/clk0 set up as T1 frame
+   # tdmcat -e1 -c0				# tdm1 also uses clk0
+   # yes |  tdmcat -e1 -s3 -w &			# writes "y\n" continually
+   # tdmcat -e0 -s3 -r | od -x
+   0000000 0a79 0a79 0a79 0a79 0a79 0a79 0a79 0a79
+   *
+   (that's "y\n" repeating forever, sent from tdm0.slot3,
+    and received via tdm1.slot3)
+
+On these boards, pairs tdm0/1 and tdm2/3 are routed to the two SLIC risers,
+each compatible with SiliconLabs SLIC daughterboards.
+To loopback tdm0/1, simply connect JS6.3 <-> JS6.5 (PCM_DATA0 & PCM_DATA1).
+By specify a common internal clock, their FSYNC/BCLK are already connected.
+
+The full list of tdm-related signals here are
+JS6 (tdm0/1)
+    JS6.1 BCLK0
+    JS6.3 DATA0
+    JS6.5 DATA1
+    JS6.7 FSYNC0
+JS16 (tdm2/3)
+    JS16.1 BCLK1
+    JS16.3 DATA2
+    JS16.5 DATA3
+    JS16.7 FSYNC1
