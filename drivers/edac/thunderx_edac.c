@@ -675,6 +675,8 @@ static inline int pci_dev_to_mc_idx(struct pci_dev *pdev)
 	return ret;
 }
 
+#define LMC_DEVICE_SYMLINK	"device"
+
 static int thunderx_lmc_probe(struct pci_dev *pdev,
 				const struct pci_device_id *id)
 {
@@ -791,6 +793,15 @@ static int thunderx_lmc_probe(struct pci_dev *pdev,
 		goto err_free;
 	}
 
+	ret = sysfs_create_link(&mci->dev.kobj,
+			&mci->pdev->kobj, LMC_DEVICE_SYMLINK);
+
+	if (ret) {
+		dev_err(&pdev->dev, "Cannot create symlink: %d:\n", ret);
+		goto err_del_mc;
+	}
+
+
 	lmc_int = readq(lmc->regs + LMC_INT);
 	writeq(lmc_int, lmc->regs + LMC_INT);
 
@@ -810,6 +821,9 @@ static int thunderx_lmc_probe(struct pci_dev *pdev,
 
 	return 0;
 
+err_del_mc:
+	edac_mc_del_mc(mci->pdev);
+
 err_free:
 	pci_set_drvdata(pdev, NULL);
 	edac_mc_free(mci);
@@ -824,6 +838,7 @@ static void thunderx_lmc_remove(struct pci_dev *pdev)
 
 	writeq(LMC_INT_ENA_ALL, lmc->regs + LMC_INT_ENA_W1C);
 
+	sysfs_remove_link(&mci->dev.kobj, LMC_DEVICE_SYMLINK);
 	edac_mc_del_mc(&pdev->dev);
 	edac_mc_free(mci);
 }
