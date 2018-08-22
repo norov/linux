@@ -38,6 +38,7 @@ static int octeon_spi_do_transfer(struct octeon_spi *p,
 	bool cpha, cpol;
 	const u8 *tx_buf;
 	u8 *rx_buf;
+	u64 enax = 1ull << (12 + cs);
 	int len;
 	int i;
 
@@ -57,13 +58,15 @@ static int octeon_spi_do_transfer(struct octeon_spi *p,
 	mpi_cfg.s.cslate = cpha ? 1 : 0;
 	mpi_cfg.s.enable = 1;
 
-	if (spi->chip_select < 4)
-		p->cs_enax |= 1ull << (12 + spi->chip_select);
+	if (spi->chip_select < 4 && enax != p->cs_enax)
+		p->cs_enax = enax;
+
 	mpi_cfg.u64 |= p->cs_enax;
 
 	if (mpi_cfg.u64 != p->last_cfg) {
 		p->last_cfg = mpi_cfg.u64;
 		writeq(mpi_cfg.u64, p->register_base + OCTEON_SPI_CFG(p));
+		udelay(100); /* allow CS change to settle */
 	}
 	tx_buf = xfer->tx_buf;
 	rx_buf = xfer->rx_buf;
