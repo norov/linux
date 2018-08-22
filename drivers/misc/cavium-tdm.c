@@ -1770,7 +1770,7 @@ static int tdm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* CN81XX pass 1.0/1.1 may not safely Tx on engines 1..3 */
 	tx0only = MIDR_IS_CPU_MODEL_RANGE(read_cpuid_id(),
-		MIDR_THUNDERX_81XX, 0x00, 0x01);
+		MIDR_OCTEON_T81, 0x00, 0x01);
 
 	err = tdm_pre_probe();
 
