@@ -1763,7 +1763,7 @@ static int pl011_allocate_irq(struct uart_amba_port *uap)
 
 #ifdef CONFIG_ARCH_THUNDER
 	if (MIDR_IS_CPU_MODEL_RANGE(read_cpuid_id(),
-				MIDR_THUNDERX_81XX,
+				MIDR_OCTEON_T81,
 				0x00, 0x00)) {
 		thunderx_81xx_poll_timer[uap->port.line].data =
 							(unsigned long)uap;
