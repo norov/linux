@@ -38,6 +38,7 @@ static int octeon_spi_do_transfer(struct octeon_spi *p,
 	bool cpha, cpol;
 	const u8 *tx_buf;
 	u8 *rx_buf;
+	int cs = msg->spi->chip_select;
 	u64 enax = 1ull << (12 + cs);
 	int len;
 	int i;
