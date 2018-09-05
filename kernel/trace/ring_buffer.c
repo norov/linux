@@ -19,6 +19,7 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/init.h>
+#include <linux/isolation.h>
 #include <linux/hash.h>
 #include <linux/list.h>
 #include <linux/cpu.h>
@@ -1712,8 +1713,14 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size,
 			if (!cpu_buffer->nr_pages_to_update)
 				continue;
 
-			/* Can't run something on an offline CPU. */
-			if (!cpu_online(cpu)) {
+			/*
+			 * Can't run something on an offline CPU.
+			 *
+			 * CPUs running isolated tasks don't need to update
+			 * ring buffers unless they exit task isolation
+			 * because they run userspace.
+			 */
+			if (!cpu_online(cpu) || task_isolation_on_cpu(cpu)) {
 				rb_update_pages(cpu_buffer);
 				cpu_buffer->nr_pages_to_update = 0;
 			} else {
@@ -1757,8 +1764,13 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size,
 
 		get_online_cpus();
 
-		/* Can't run something on an offline CPU. */
-		if (!cpu_online(cpu_id))
+		/*
+		 * Can't run something on an offline CPU.
+		 *
+		 * Don't need to update ring buffer on CPUs running isolated
+		 * tasks immediately.
+		 */
+		if (!cpu_online(cpu_id) || task_isolation_on_cpu(cpu_id))
 			rb_update_pages(cpu_buffer);
 		else {
 			schedule_work_on(cpu_id,
