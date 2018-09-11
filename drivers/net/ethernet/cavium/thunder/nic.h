@@ -250,6 +250,8 @@ struct nicvf_drv_stats {
 	u64 tx_mem_fault;
 	u64 tx_csum_overlap;
 	u64 tx_csum_overflow;
+	u64 tx_csum_derr;
+	u64 tx_csum_perr;
 
 	/* driver debug stats */
 	u64 tx_tso;
