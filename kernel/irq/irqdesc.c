@@ -11,6 +11,7 @@
 #include <linux/slab.h>
 #include <linux/export.h>
 #include <linux/interrupt.h>
+#include <linux/isolation.h>
 #include <linux/kernel_stat.h>
 #include <linux/radix-tree.h>
 #include <linux/bitmap.h>
@@ -847,12 +848,26 @@ int irq_set_percpu_devid(unsigned int irq)
 int irq_get_percpu_devid_partition(unsigned int irq, struct cpumask *affinity)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
+	char buf[100];
 
 	if (!desc || !desc->percpu_enabled)
 		return -EINVAL;
 
-	if (affinity)
-		cpumask_copy(affinity, desc->percpu_affinity);
+	pr_err("irq_get_percpu_devid_partition\n");
+	if (affinity) {
+		cpumap_print_to_pagebuf(1, buf, desc->percpu_affinity);
+		pr_err("desc->percpu_affinity: %s\n", buf);
+
+		cpumap_print_to_pagebuf(1, buf, task_isolation_map);
+		pr_err("task_isolation_map: %s\n", buf);
+
+		//cpumask_copy(affinity, desc->percpu_affinity);
+		cpumask_andnot(affinity, desc->percpu_affinity,
+					 task_isolation_map);
+
+		cpumap_print_to_pagebuf(1, buf, affinity);
+		pr_err("affinity: %s\n", buf);
+	}
 
 	return 0;
 }

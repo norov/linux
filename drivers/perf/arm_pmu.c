@@ -15,6 +15,7 @@
 #include <linux/cpumask.h>
 #include <linux/cpu_pm.h>
 #include <linux/export.h>
+#include <linux/isolation.h>
 #include <linux/kernel.h>
 #include <linux/of_device.h>
 #include <linux/perf/arm_pmu.h>
@@ -26,6 +27,20 @@
 
 #include <asm/cputype.h>
 #include <asm/irq_regs.h>
+
+static void armpmu_set_supported_cpus(struct cpumask *mask)
+{
+	char buf[100];
+#ifdef CONFIG_TASK_ISOLATION
+	cpumask_clear(mask);
+	task_isolation_cpumask(mask);
+	cpumask_complement(mask, mask);
+#else
+	cpumask_setall(mask);
+#endif
+	cpumap_print_to_pagebuf(1, buf, mask);
+	pr_err("armpmu_set_supported_cpus: %s\n", buf);
+}
 
 static int
 armpmu_map_cache_event(const unsigned (*cache_map)
@@ -648,6 +663,7 @@ static int cpu_pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
 	int i, err, irq, irqs;
 	struct platform_device *pmu_device = cpu_pmu->plat_device;
 	struct pmu_hw_events __percpu *hw_events = cpu_pmu->hw_events;
+	char buf[100];
 
 	if (!pmu_device)
 		return -ENODEV;
@@ -667,7 +683,8 @@ static int cpu_pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
 				irq);
 			return err;
 		}
-
+		cpumap_print_to_pagebuf(1, buf, &cpu_pmu->supported_cpus);
+		pr_err("cpu_pmu_request_irq: %s\n", buf);
 		on_each_cpu_mask(&cpu_pmu->supported_cpus,
 				 cpu_pmu_enable_percpu_irq, &irq, 1);
 	} else {
@@ -913,6 +930,7 @@ static int probe_current_pmu(struct arm_pmu *pmu,
 
 static int of_pmu_irq_cfg(struct arm_pmu *pmu)
 {
+	pr_err("of_pmu_irq_cfg enter\n");
 	int *irqs, i = 0;
 	bool using_spi = false;
 	struct platform_device *pdev = pmu->plat_device;
@@ -961,7 +979,7 @@ static int of_pmu_irq_cfg(struct arm_pmu *pmu)
 			pr_warn("Failed to find logical CPU for %s\n",
 				dn->name);
 			of_node_put(dn);
-			cpumask_setall(&pmu->supported_cpus);
+			armpmu_set_supported_cpus(&pmu->supported_cpus);
 			break;
 		}
 		of_node_put(dn);
@@ -975,7 +993,11 @@ static int of_pmu_irq_cfg(struct arm_pmu *pmu)
 		}
 
 		/* Keep track of the CPUs containing this PMU type */
-		cpumask_set_cpu(cpu, &pmu->supported_cpus);
+		if (!is_isolation_cpu(cpu)) {
+			pr_err("of_pmu_irq_cfg : %x\n", cpu);
+			cpumask_set_cpu(cpu, &pmu->supported_cpus);
+		}
+
 		i++;
 	} while (1);
 
@@ -987,6 +1009,7 @@ static int of_pmu_irq_cfg(struct arm_pmu *pmu)
 			/* If using PPIs, check the affinity of the partition */
 			int ret;
 
+			/* XXX */
 			ret = irq_get_percpu_devid_partition(irq, &pmu->supported_cpus);
 			if (ret) {
 				kfree(irqs);
@@ -994,7 +1017,7 @@ static int of_pmu_irq_cfg(struct arm_pmu *pmu)
 			}
 		} else {
 			/* Otherwise default to all CPUs */
-			cpumask_setall(&pmu->supported_cpus);
+			armpmu_set_supported_cpus(&pmu->supported_cpus);
 		}
 	}
 
@@ -1043,7 +1066,7 @@ int arm_pmu_device_probe(struct platform_device *pdev,
 		if (!ret)
 			ret = init_fn(pmu);
 	} else if (probe_table) {
-		cpumask_setall(&pmu->supported_cpus);
+		armpmu_set_supported_cpus(&pmu->supported_cpus);
 		ret = probe_current_pmu(pmu, probe_table);
 	}
 
