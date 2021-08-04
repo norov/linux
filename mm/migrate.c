@@ -58,6 +58,15 @@
 
 #include "internal.h"
 
+unsigned long migrate_demotion_flags __read_mostly =
+#ifdef CONFIG_MIGRATE_DEMOTION_ALWAYS
+	BIT(MIGRATE_DEMOTION_FLAG) |
+#endif
+#ifdef CONFIG_MIGRATE_DEMOTION_MBIND
+	BIT(MIGRATE_DEMOTION_REQ_MBIND_FLAG) |
+#endif
+	0;
+
 int isolate_movable_page(struct page *page, isolate_mode_t mode)
 {
 	struct address_space *mapping;

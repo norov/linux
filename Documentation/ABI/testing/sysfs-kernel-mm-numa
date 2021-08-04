@@ -21,4 +21,48 @@ Description:	Enable/disable demoting pages during reclaim
 		allocating process which might be construed to violate
 		the guarantees of cpusets.  This should not be enabled
 		on systems which need strict cpuset location
-		guarantees.
+		guarantees. This 3-state switch may be one of
+		always/mbind/never. If demotion_enabled is set to
+		mbind, MPOL_F_DEMOTE passed in mbind or set_mempolicy
+		system calls would control demotion for a memory region
+		or on per-task basis correspondingly.
+
+What:		/sys/kernel/mm/numa/demotion_list
+Date:		Aug 2021
+Contact:	Linux memory management mailing list <linux-mm@kvack.org>
+Description:	Set demotion nodes manually
+
+		Kernel makes an attempt to set demotion nodes (DN) for every
+		node in the system. cat /sys/kernel/mm/numa/demotion_list
+		will print such mapping in format "node DN", one online node
+		per line. Updating of DN mapping is implemented by
+		providing new DN for a list of nodes in format "DN>nodelist".
+		Special DN '-1' may be passed to remove a demotion for the node.
+		Offline nodes in nodelist are ignored, only online DN is allowed.
+		Circular demotion paths are not allowed.
+
+		Example 1.
+		Remove demotion for all online nodes:
+			echo "-1>all" > /sys/kernel/mm/numa/demotion_list
+		Example 2.
+		Set node 0 as demotion node for node 8:
+			echo "0>8" > /sys/kernel/mm/numa/demotion_list
+		Example 3.
+		Set DN=0 for all other online nodes:
+			echo "0>1-N" > /sys/kernel/mm/numa/demotion_list
+		Example 4.
+		Set node 0 as demotion node for nodes 8,9,10 and 12:
+			echo "0>8-10,12" > /sys/kernel/mm/numa/demotion_list
+		Example 5.
+		Circular dependencies are not allowed. If the demotion list
+		is like this:
+			# cat /sys/kernel/mm/numa/demotion_list
+			0 1
+			1 2
+			2 3
+			3 -1
+		the page migration path on such system is: 0->1->2->3->swap.
+		Setting any DN to node 3 is not allowed because leads to circular
+		dependency:
+			# echo "2>3" > /sys/kernel/mm/numa/demotion_list
+			bash: echo: write error: Device or resource busy

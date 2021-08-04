@@ -32,6 +32,11 @@ enum migrate_reason {
 	MR_TYPES
 };
 
+enum migrate_demotion_flag {
+	MIGRATE_DEMOTION_FLAG,
+	MIGRATE_DEMOTION_REQ_MBIND_FLAG,
+};
+
 /* In mm/debug.c; also keep sync with include/trace/events/migrate.h */
 extern const char *migrate_reason_names[MR_TYPES];
 
@@ -57,6 +62,7 @@ void folio_migrate_flags(struct folio *newfolio, struct folio *folio);
 void folio_migrate_copy(struct folio *newfolio, struct folio *folio);
 int folio_migrate_mapping(struct address_space *mapping,
 		struct folio *newfolio, struct folio *folio, int extra_count);
+extern unsigned long migrate_demotion_flags;
 #else
 
 static inline void putback_movable_pages(struct list_head *l) {}

@@ -521,7 +521,8 @@ static long add_nr_deferred(long nr, struct shrinker *shrinker,
 
 static bool can_demote(int nid, struct scan_control *sc)
 {
-	if (!numa_demotion_enabled)
+#ifdef CONFIG_MIGRATION
+	if (!test_bit(MIGRATE_DEMOTION_FLAG, &migrate_demotion_flags))
 		return false;
 	if (sc) {
 		if (sc->no_demotion)
@@ -534,6 +535,9 @@ static bool can_demote(int nid, struct scan_control *sc)
 		return false;
 
 	return true;
+#else
+	return false;
+#endif
 }
 
 static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,

@@ -408,6 +408,36 @@ choice
 	  benefit.
 endchoice
 
+choice
+	prompt "NUMA Page Demotion sysfs defaults"
+	depends on MIGRATION
+	default MIGRATE_DEMOTION_MBIND
+	help
+	  Selects the sysfs defaults for NUMA Page Demotion.
+
+	config MIGRATE_DEMOTION_ALWAYS
+		bool "always"
+	help
+	  Enabling NUMA Page Demotion always, can increase pressure
+	  on memory susystem without a guaranteed benefit but it will
+	  work automatically for all applications.
+
+	config MIGRATE_DEMOTION_MBIND
+		bool "mbind"
+	help
+	  Enabling NUMA Page Demotion mbind, will only provide a
+	  performance improvement benefit to the applications using
+	  mbind(MPOL_F_DEMOTE) or set_mempolicy(MPOL_F_DEMOTE) but it
+	  won't risk to increase the memory pressure of applications
+	  without a guaranteed benefit.
+
+	config MIGRATE_DEMOTION_NEVER
+		bool "never"
+	help
+	  Enabling NUMA Page Demotion never, will keep traditional
+	  kernel behavior.
+endchoice
+
 config ARCH_WANTS_THP_SWAP
 	def_bool n
 

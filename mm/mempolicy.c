@@ -2983,28 +2983,46 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 			       nodemask_pr_args(&nodes));
 }
 
-bool numa_demotion_enabled = false;
-
 #ifdef CONFIG_SYSFS
 static ssize_t numa_demotion_enabled_show(struct kobject *kobj,
 					  struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%s\n",
-			  numa_demotion_enabled? "true" : "false");
+	const char *output;
+
+#ifdef CONFIG_MIGRATION
+	if (test_bit(MIGRATE_DEMOTION_FLAG, &migrate_demotion_flags))
+		output = "[always] mbind never";
+	else if (test_bit(MIGRATE_DEMOTION_REQ_MBIND_FLAG, &migrate_demotion_flags))
+		output = "always [mbind] never";
+	else
+#endif
+		output = "always mbind [never]";
+
+	return sysfs_emit(buf, "%s\n", output);
 }
 
 static ssize_t numa_demotion_enabled_store(struct kobject *kobj,
 					   struct kobj_attribute *attr,
 					   const char *buf, size_t count)
 {
-	if (!strncmp(buf, "true", 4) || !strncmp(buf, "1", 1))
-		numa_demotion_enabled = true;
-	else if (!strncmp(buf, "false", 5) || !strncmp(buf, "0", 1))
-		numa_demotion_enabled = false;
-	else
+#ifdef CONFIG_MIGRATION
+	if (sysfs_streq(buf, "always")) {
+		clear_bit(MIGRATE_DEMOTION_REQ_MBIND_FLAG, &migrate_demotion_flags);
+		set_bit(MIGRATE_DEMOTION_FLAG, &migrate_demotion_flags);
+	} else if (sysfs_streq(buf, "mbind")) {
+		clear_bit(MIGRATE_DEMOTION_FLAG, &migrate_demotion_flags);
+		set_bit(MIGRATE_DEMOTION_REQ_MBIND_FLAG, &migrate_demotion_flags);
+	} else if (sysfs_streq(buf, "never")) {
+		clear_bit(MIGRATE_DEMOTION_FLAG, &migrate_demotion_flags);
+		clear_bit(MIGRATE_DEMOTION_REQ_MBIND_FLAG, &migrate_demotion_flags);
+	} else {
 		return -EINVAL;
+	}
 
 	return count;
+#else
+	return -ENOSYS;
+#endif
 }
 
 static struct kobj_attribute numa_demotion_enabled_attr =
