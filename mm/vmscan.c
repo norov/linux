@@ -519,10 +519,24 @@ static long add_nr_deferred(long nr, struct shrinker *shrinker,
 	return atomic_long_add_return(nr, &shrinker->nr_deferred[nid]);
 }
 
+static bool can_demote_page(struct page *page)
+{
+#ifdef CONFIG_MIGRATION
+	if (test_bit(MIGRATE_DEMOTION_FLAG, &migrate_demotion_flags))
+		return true;
+
+	if (test_bit(MIGRATE_DEMOTION_REQ_MBIND_FLAG, &migrate_demotion_flags) &&
+			folio_test_demote(page_folio(page)))
+		return true;
+#endif
+	return false;
+}
+
 static bool can_demote(int nid, struct scan_control *sc)
 {
 #ifdef CONFIG_MIGRATION
-	if (!test_bit(MIGRATE_DEMOTION_FLAG, &migrate_demotion_flags))
+	if (!test_bit(MIGRATE_DEMOTION_FLAG, &migrate_demotion_flags) &&
+		!test_bit(MIGRATE_DEMOTION_REQ_MBIND_FLAG, &migrate_demotion_flags))
 		return false;
 	if (sc) {
 		if (sc->no_demotion)
@@ -1538,7 +1552,7 @@ retry:
 		 * Before reclaiming the page, try to relocate
 		 * its contents to another node.
 		 */
-		if (do_demote_pass &&
+		if (do_demote_pass && can_demote_page(page) &&
 		    (thp_migration_supported() || !PageTransHuge(page))) {
 			list_add(&page->lru, &demote_pages);
 			unlock_page(page);
