@@ -2082,12 +2082,14 @@ static struct page *alloc_pages_preferred_many(gfp_t gfp, unsigned int order,
 struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 		unsigned long addr, int node, bool hugepage)
 {
+	unsigned short mode_flags;
 	struct mempolicy *pol;
 	struct page *page;
 	int preferred_nid;
 	nodemask_t *nmask;
 
 	pol = get_vma_policy(vma, addr);
+	mode_flags = pol->flags;
 
 	if (pol->mode == MPOL_INTERLEAVE) {
 		unsigned nid;
@@ -2149,6 +2151,9 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 	page = __alloc_pages(gfp, order, preferred_nid, nmask);
 	mpol_cond_put(pol);
 out:
+	if (page && (mode_flags & MPOL_F_DEMOTE))
+		folio_set_demote(page_folio(page));
+
 	return page;
 }
 EXPORT_SYMBOL(alloc_pages_vma);

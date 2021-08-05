@@ -42,6 +42,43 @@ extern const char *migrate_reason_names[MR_TYPES];
 
 #ifdef CONFIG_MIGRATION
 
+#ifndef CONFIG_64BIT
+/*
+ * If there is not enough space to store Demotion bit in page flags, use
+ * page ext flags instead.
+ */
+
+static inline bool folio_test_demote(struct folio *folio)
+{
+	struct page_ext *page_ext = lookup_page_ext(&folio->page);
+
+	if (unlikely(!page_ext))
+		return false;
+
+	return test_bit(PAGE_EXT_DEMOTE, &page_ext->flags);
+}
+
+static inline void folio_set_demote(struct folio *folio)
+{
+	struct page_ext *page_ext = lookup_page_ext(&folio->page);
+
+	if (unlikely(!page_ext))
+		return;
+
+	set_bit(PAGE_EXT_DEMOTE, &page_ext->flags);
+}
+
+static inline void folio_clear_demote(struct folio *folio)
+{
+	struct page_ext *page_ext = lookup_page_ext(&folio->page);
+
+	if (unlikely(!page_ext))
+		return;
+
+	clear_bit(PAGE_EXT_DEMOTE, &page_ext->flags);
+}
+#endif /* !CONFIG_64BIT */
+
 extern void putback_movable_pages(struct list_head *l);
 extern int migrate_page(struct address_space *mapping,
 			struct page *newpage, struct page *page,
@@ -88,6 +125,19 @@ static inline int migrate_huge_page_move_mapping(struct address_space *mapping,
 {
 	return -ENOSYS;
 }
+static inline bool folio_test_demote(struct folio *folio)
+{
+	return false;
+}
+
+static inline void folio_set_demote(struct folio *folio)
+{
+}
+
+static inline void folio_clear_demote(struct folio *folio)
+{
+}
+
 #endif /* CONFIG_MIGRATION */
 
 #ifdef CONFIG_COMPACTION

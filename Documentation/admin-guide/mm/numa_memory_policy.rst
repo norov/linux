@@ -334,6 +334,15 @@ MPOL_F_RELATIVE_NODES
 	MPOL_PREFERRED policies that were created with an empty nodemask
 	(local allocation).
 
+MPOL_F_DEMOTE
+	This flag specifies that the memory area mbind'ed to a specific node
+        in case of out-of-memory may be demoted, i.e. migrated to another
+        node with potentially slower memory access as an alternative to
+        swapping. MPOL_F_DEMOTE is a hint which is honored by kernel if
+        /sys/kernel/mm/numa/demotion_enabled is set to mbind, and a node
+        record in /sys/kernel/mm/numa/demotion_list has a valid demotion
+        node.
+
 Memory Policy Reference Counting
 ================================
 

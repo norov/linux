@@ -141,6 +141,9 @@ enum pageflags {
 #ifdef CONFIG_KASAN_HW_TAGS
 	PG_skip_kasan_poison,
 #endif
+#if defined(CONFIG_MIGRATION) && defined(CONFIG_64BIT)
+	PG_demote,
+#endif
 	__NR_PAGEFLAGS,
 
 	PG_readahead = PG_reclaim,
@@ -528,6 +531,10 @@ PAGEFLAG(Idle, idle, PF_ANY)
 PAGEFLAG(SkipKASanPoison, skip_kasan_poison, PF_HEAD)
 #else
 PAGEFLAG_FALSE(SkipKASanPoison, skip_kasan_poison)
+#endif
+
+#if defined(CONFIG_MIGRATION) && defined(CONFIG_64BIT)
+PAGEFLAG(Demote, demote, PF_ANY)
 #endif
 
 /*

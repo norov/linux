@@ -238,6 +238,7 @@ config MIGRATION
 	bool "Page migration"
 	def_bool y
 	depends on (NUMA || ARCH_ENABLE_MEMORY_HOTREMOVE || COMPACTION || CMA) && MMU
+	select PAGE_EXTENSION if !64BIT
 	help
 	  Allows the migration of the physical location of pages of processes
 	  while the virtual addresses are not changed. This is useful in
