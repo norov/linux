@@ -3034,8 +3034,60 @@ static struct kobj_attribute numa_demotion_enabled_attr =
 	__ATTR(demotion_enabled, 0644, numa_demotion_enabled_show,
 	       numa_demotion_enabled_store);
 
+static ssize_t numa_demotion_list_show(struct kobject *kobj,
+					  struct kobj_attribute *attr, char *buf)
+{
+	int len, n, pos = 0;
+
+	for_each_online_node(n) {
+		len = sysfs_emit_at(buf, pos, "%d %d\n", n, node_demotion[n]);
+		if (len > 0)
+			pos += len;
+	}
+
+	return pos;
+}
+
+static ssize_t numa_demotion_list_store(struct kobject *kobj,
+					   struct kobj_attribute *attr,
+					   const char *buf, size_t count)
+{
+	nodemask_t nodes;
+	char *nodelist;
+	int from, to, ret;
+
+	nodelist = strnchr(buf, count, '>');
+	if (!nodelist)
+		return -EINVAL;
+
+	*nodelist++ = 0;
+
+	ret = kstrtoint(buf, 0, &to);
+	if (ret)
+		return ret;
+
+	ret = nodelist_parse(nodelist, nodes);
+	if (ret)
+		return ret;
+
+	for_each_node_mask(from, nodes) {
+		ret = set_demotion_target(from, to);
+		if (ret == -EXDEV)
+			pr_warn("Cross-node loop for demotion: %d>%d\n", to, from);
+		else if (ret)
+			return ret;
+	}
+
+	return count;
+}
+
+static struct kobj_attribute numa_demotion_list_attr =
+	__ATTR(demotion_list, 0644, numa_demotion_list_show,
+	       numa_demotion_list_store);
+
 static struct attribute *numa_attrs[] = {
 	&numa_demotion_enabled_attr.attr,
+	&numa_demotion_list_attr.attr,
 	NULL,
 };
 

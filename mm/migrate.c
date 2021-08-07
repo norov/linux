@@ -1153,7 +1153,7 @@ out:
  * must be held over all reads to ensure that no cycles are
  * observed.
  */
-static int node_demotion[MAX_NUMNODES] __read_mostly =
+int node_demotion[MAX_NUMNODES] __read_mostly =
 	{[0 ...  MAX_NUMNODES - 1] = NUMA_NO_NODE};
 
 /**
@@ -3304,3 +3304,43 @@ static int __init migrate_on_reclaim_init(void)
 }
 late_initcall(migrate_on_reclaim_init);
 #endif /* CONFIG_MEMORY_HOTPLUG */
+
+static void __set_demotion_target(const int node, const int target)
+{
+	get_online_mems();
+	node_demotion[node] = target;
+	synchronize_rcu();
+	put_online_mems();
+}
+
+int set_demotion_target(const int node, const int target)
+{
+	nodemask_t demotion_path;
+	int next, cnt;
+
+	if (target < NUMA_NO_NODE || target >= MAX_NUMNODES)
+		return  -ERANGE;
+
+	if (target != NUMA_NO_NODE && !node_online(target))
+		return -ENXIO;
+
+	/* Ignore offline nodes. */
+	if (!node_online(node))
+		return 0;
+
+	nodes_clear(demotion_path);
+	node_set(node, demotion_path);
+
+	for (next = target, cnt = 0; next != -1 && cnt < MAX_NUMNODES;
+			next = next_demotion_node(next), cnt++) {
+		if (node_test_and_set(next, demotion_path))
+			/* Demotion path has cross-links (loops). */
+			return -EXDEV;
+	}
+
+	/* nodes_demotion[] broken? */
+	WARN_ON(cnt >= MAX_NUMNODES);
+	__set_demotion_target(node, target);
+
+	return 0;
+}

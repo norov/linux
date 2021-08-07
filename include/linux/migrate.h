@@ -40,6 +40,8 @@ enum migrate_demotion_flag {
 /* In mm/debug.c; also keep sync with include/trace/events/migrate.h */
 extern const char *migrate_reason_names[MR_TYPES];
 
+extern int node_demotion[MAX_NUMNODES];
+
 #ifdef CONFIG_MIGRATION
 
 #ifndef CONFIG_64BIT
@@ -229,12 +231,18 @@ int migrate_vma_setup(struct migrate_vma *args);
 void migrate_vma_pages(struct migrate_vma *migrate);
 void migrate_vma_finalize(struct migrate_vma *migrate);
 int next_demotion_node(int node);
+int set_demotion_target(int node, int target);
 
 #else /* CONFIG_MIGRATION disabled: */
 
 static inline int next_demotion_node(int node)
 {
 	return NUMA_NO_NODE;
+}
+
+static int set_demotion_target(int node, int target)
+{
+	return -ENOSYS;
 }
 
 #endif /* CONFIG_MIGRATION */
