@@ -3048,38 +3048,84 @@ static ssize_t numa_demotion_list_show(struct kobject *kobj,
 	return pos;
 }
 
-static ssize_t numa_demotion_list_store(struct kobject *kobj,
-					   struct kobj_attribute *attr,
-					   const char *buf, size_t count)
+static char *parse_demotion_list(const char *buf, size_t count, nodemask_t *nodes, int *to)
 {
-	nodemask_t nodes;
-	char *nodelist;
-	int from, to, ret;
+	char *nodelist, *next;
+	int ret;
 
 	nodelist = strnchr(buf, count, '>');
 	if (!nodelist)
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
 
 	*nodelist++ = 0;
 
-	ret = kstrtoint(buf, 0, &to);
-	if (ret)
-		return ret;
+	next = strnchr(nodelist, count - (nodelist - buf), ';');
+	if (next)
+		*next++ = 0;
 
-	ret = nodelist_parse(nodelist, nodes);
+	ret = kstrtoint(buf, 0, to);
 	if (ret)
-		return ret;
+		return ERR_PTR(ret);
 
-	for_each_node_mask(from, nodes) {
-		ret = set_demotion_target(from, to);
+	ret = nodelist_parse(nodelist, *nodes);
+	if (ret)
+		return ERR_PTR(ret);
+
+	return next;
+}
+
+static int set_demotion_list(nodemask_t *nodes, int target)
+{
+	int from, ret;
+
+	for_each_node_mask(from, *nodes) {
+		ret = set_demotion_target(from, target);
 		if (ret == -EXDEV)
-			pr_warn("Cross-node loop for demotion: %d>%d\n", to, from);
+			pr_warn("Cross-node loop for demotion: %d>%d\n",
+				target, from);
 		else if (ret)
 			return ret;
 	}
 
+	return 0;
+}
+
+static int __numa_demotion_list_store(const char *buf, size_t count)
+{
+	char *ptr = (char *)buf;
+	size_t cnt = count;
+
+	while (cnt) {
+		nodemask_t nodes;
+		int target, ret;
+
+		ptr = parse_demotion_list(ptr, cnt, &nodes, &target);
+		if (IS_ERR(ptr))
+			return PTR_ERR(ptr);
+
+		ret = set_demotion_list(&nodes, target);
+		if (ret)
+			return ret;
+
+		cnt -= ptr - buf;
+	}
+
 	return count;
 }
+
+static ssize_t numa_demotion_list_store(struct kobject *kobj,
+					   struct kobj_attribute *attr,
+					   const char *buf, size_t count)
+{
+	return __numa_demotion_list_store(buf, count);
+}
+
+static int numa_demotoin_list_setup(char *buf)
+{
+	return __numa_demotion_list_store(buf, strlen(buf));
+
+}
+__setup("node_demotion=", numa_demotoin_list_setup);
 
 static struct kobj_attribute numa_demotion_list_attr =
 	__ATTR(demotion_list, 0644, numa_demotion_list_show,
