@@ -9234,7 +9234,7 @@ int sched_cpu_activate(unsigned int cpu)
 	/*
 	 * When going up, increment the number of cores with SMT present.
 	 */
-	if (cpumask_weight(cpu_smt_mask(cpu)) == 2)
+	if (cpumask_weight_eq(cpu_smt_mask(cpu), 2))
 		static_branch_inc_cpuslocked(&sched_smt_present);
 #endif
 	set_cpu_active(cpu, true);
@@ -9310,7 +9310,7 @@ int sched_cpu_deactivate(unsigned int cpu)
 	/*
 	 * When going down, decrement the number of cores with SMT present.
 	 */
-	if (cpumask_weight(cpu_smt_mask(cpu)) == 2)
+	if (cpumask_weight_eq(cpu_smt_mask(cpu), 2))
 		static_branch_dec_cpuslocked(&sched_smt_present);
 
 	sched_core_cpu_deactivate(cpu);
