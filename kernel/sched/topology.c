@@ -168,7 +168,7 @@ static const unsigned int SD_DEGENERATE_GROUPS_MASK =
 
 static int sd_degenerate(struct sched_domain *sd)
 {
-	if (cpumask_weight(sched_domain_span(sd)) == 1)
+	if (cpumask_weight_eq(sched_domain_span(sd), 1))
 		return 1;
 
 	/* Following flags need at least 2 groups */
@@ -1999,7 +1999,7 @@ void sched_update_numa(int cpu, bool online)
 	 * Scheduler NUMA topology is updated when the first CPU of a
 	 * node is onlined or the last CPU of a node is offlined.
 	 */
-	if (cpumask_weight(cpumask_of_node(node)) != 1)
+	if (!cpumask_weight_eq(cpumask_of_node(node), 1))
 		return;
 
 	sched_reset_numa();
