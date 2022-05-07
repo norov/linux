@@ -1605,13 +1605,14 @@ static void remove_siblinginfo(int cpu)
 {
 	int sibling;
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
+	bool last_thread_sibling = cpumask_weight_eq(topology_sibling_cpumask(cpu), 1);
 
 	for_each_cpu(sibling, topology_core_cpumask(cpu)) {
 		cpumask_clear_cpu(cpu, topology_core_cpumask(sibling));
-		/*/
+		/*
 		 * last thread sibling in this cpu core going down
 		 */
-		if (cpumask_weight(topology_sibling_cpumask(cpu)) == 1)
+		if (last_thread_sibling)
 			cpu_data(sibling).booted_cores--;
 	}
 
