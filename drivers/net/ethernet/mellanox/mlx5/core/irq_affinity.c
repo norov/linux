@@ -58,7 +58,7 @@ irq_pool_request_irq(struct mlx5_irq_pool *pool, const struct cpumask *req_mask)
 	if (err)
 		return ERR_PTR(err);
 	if (pool->irqs_per_cpu) {
-		if (cpumask_weight(req_mask) > 1)
+		if (cpumask_weight_gt(req_mask, 1))
 			/* if req_mask contain more then one CPU, set the least loadad CPU
 			 * of req_mask
 			 */
