@@ -6125,7 +6125,7 @@ static void queue_core_balance(struct rq *rq)
 static void sched_core_cpu_starting(unsigned int cpu)
 {
 	const struct cpumask *smt_mask = cpu_smt_mask(cpu);
-	struct rq *rq = cpu_rq(cpu), *core_rq = NULL;
+	struct rq *rq = cpu_rq(cpu), *core_rq;
 	unsigned long flags;
 	int t;
 
@@ -6138,18 +6138,15 @@ static void sched_core_cpu_starting(unsigned int cpu)
 		goto unlock;
 
 	/* find the leader */
-	for_each_cpu(t, smt_mask) {
-		if (t == cpu)
-			continue;
-		rq = cpu_rq(t);
-		if (rq->core == rq) {
-			core_rq = rq;
-			break;
-		}
-	}
-
-	if (WARN_ON_ONCE(!core_rq)) /* whoopsie */
+	t = cpumask_any_but(smt_mask, cpu);
+	if (t >= nr_cpu_ids)
 		goto unlock;
+
+	rq = cpu_rq(t);
+	if (WARN_ON_ONCE(rq->core != rq)) /* whoopsie */
+		goto unlock;
+
+	core_rq = rq;
 
 	/* install and validate core_rq */
 	for_each_cpu(t, smt_mask) {
@@ -6168,7 +6165,7 @@ unlock:
 static void sched_core_cpu_deactivate(unsigned int cpu)
 {
 	const struct cpumask *smt_mask = cpu_smt_mask(cpu);
-	struct rq *rq = cpu_rq(cpu), *core_rq = NULL;
+	struct rq *rq = cpu_rq(cpu), *core_rq;
 	unsigned long flags;
 	int t;
 
@@ -6185,15 +6182,11 @@ static void sched_core_cpu_deactivate(unsigned int cpu)
 		goto unlock;
 
 	/* find a new leader */
-	for_each_cpu(t, smt_mask) {
-		if (t == cpu)
-			continue;
-		core_rq = cpu_rq(t);
-		break;
-	}
-
-	if (WARN_ON_ONCE(!core_rq)) /* impossible */
+	t = cpumask_any_but(smt_mask, cpu);
+	if (t >= nr_cpu_ids)
 		goto unlock;
+
+	core_rq = cpu_rq(t);
 
 	/* copy the shared state to the new leader */
 	core_rq->core_task_seq             = rq->core_task_seq;
