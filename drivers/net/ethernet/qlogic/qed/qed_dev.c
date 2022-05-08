@@ -1702,8 +1702,7 @@ static u16 *qed_init_qm_get_idx_from_flags(struct qed_hwfn *p_hwfn,
 	struct qed_qm_info *qm_info = &p_hwfn->qm_info;
 
 	/* Can't have multiple flags set here */
-	if (bitmap_weight(&pq_flags,
-			  sizeof(pq_flags) * BITS_PER_BYTE) > 1) {
+	if (MANY_BITS(pq_flags)) {
 		DP_ERR(p_hwfn, "requested multiple pq flags 0x%lx\n", pq_flags);
 		goto err;
 	}
