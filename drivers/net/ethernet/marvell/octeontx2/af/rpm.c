@@ -109,7 +109,7 @@ void rpm_lmac_enadis_rx_pause_fwding(void *rpmd, int lmac_id, bool enable)
 		return;
 
 	/* Pause frames are not enabled just return */
-	if (!bitmap_weight(lmac->rx_fc_pfvf_bmap.bmap, lmac->rx_fc_pfvf_bmap.max))
+	if (bitmap_empty(lmac->rx_fc_pfvf_bmap.bmap, lmac->rx_fc_pfvf_bmap.max))
 		return;
 
 	if (enable) {

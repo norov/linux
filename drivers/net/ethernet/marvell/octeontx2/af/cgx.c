@@ -615,7 +615,7 @@ void cgx_lmac_enadis_rx_pause_fwding(void *cgxd, int lmac_id, bool enable)
 		return;
 
 	/* Pause frames are not enabled just return */
-	if (!bitmap_weight(lmac->rx_fc_pfvf_bmap.bmap, lmac->rx_fc_pfvf_bmap.max))
+	if (bitmap_empty(lmac->rx_fc_pfvf_bmap.bmap, lmac->rx_fc_pfvf_bmap.max))
 		return;
 
 	cgx_lmac_get_pause_frm_status(cgx, lmac_id, &rx_pause, &tx_pause);
@@ -870,13 +870,13 @@ int verify_lmac_fc_cfg(void *cgxd, int lmac_id, u8 tx_pause, u8 rx_pause,
 		set_bit(pfvf_idx, lmac->tx_fc_pfvf_bmap.bmap);
 
 	/* check if other pfvfs are using flow control */
-	if (!rx_pause && bitmap_weight(lmac->rx_fc_pfvf_bmap.bmap, lmac->rx_fc_pfvf_bmap.max)) {
+	if (!rx_pause && !bitmap_empty(lmac->rx_fc_pfvf_bmap.bmap, lmac->rx_fc_pfvf_bmap.max)) {
 		dev_warn(&cgx->pdev->dev,
 			 "Receive Flow control disable not permitted as its used by other PFVFs\n");
 		return -EPERM;
 	}
 
-	if (!tx_pause && bitmap_weight(lmac->tx_fc_pfvf_bmap.bmap, lmac->tx_fc_pfvf_bmap.max)) {
+	if (!tx_pause && !bitmap_empty(lmac->tx_fc_pfvf_bmap.bmap, lmac->tx_fc_pfvf_bmap.max)) {
 		dev_warn(&cgx->pdev->dev,
 			 "Transmit Flow control disable not permitted as its used by other PFVFs\n");
 		return -EPERM;
