@@ -1824,7 +1824,7 @@ void iio_buffers_free_sysfs_and_mask(struct iio_dev *indio_dev)
 bool iio_validate_scan_mask_onehot(struct iio_dev *indio_dev,
 	const unsigned long *mask)
 {
-	return bitmap_weight(mask, indio_dev->masklength) == 1;
+	return bitmap_weight_eq(mask, indio_dev->masklength, 1);
 }
 EXPORT_SYMBOL_GPL(iio_validate_scan_mask_onehot);
 

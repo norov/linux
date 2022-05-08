@@ -525,7 +525,7 @@ static bool ad_sd_validate_scan_mask(struct iio_dev *indio_dev, const unsigned l
 {
 	struct ad_sigma_delta *sigma_delta = iio_device_get_drvdata(indio_dev);
 
-	return bitmap_weight(mask, indio_dev->masklength) <= sigma_delta->num_slots;
+	return bitmap_weight_le(mask, indio_dev->masklength, sigma_delta->num_slots);
 }
 
 static const struct iio_buffer_setup_ops ad_sd_buffer_setup_ops = {
