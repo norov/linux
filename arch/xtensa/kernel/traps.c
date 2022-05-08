@@ -203,10 +203,7 @@ static void do_multihit(struct pt_regs *regs)
 
 #if XTENSA_FAKE_NMI
 
-#define IS_POW2(v) (((v) & ((v) - 1)) == 0)
-
-#if !(PROFILING_INTLEVEL == XCHAL_EXCM_LEVEL && \
-      IS_POW2(XTENSA_INTLEVEL_MASK(PROFILING_INTLEVEL)))
+#if (MANY_BITS(XTENSA_INTLEVEL_MASK(PROFILING_INTLEVEL)) || PROFILING_INTLEVEL != XCHAL_EXCM_LEVEL)
 #warning "Fake NMI is requested for PMM, but there are other IRQs at or above its level."
 #warning "Fake NMI will be used, but there will be a bugcheck if one of those IRQs fire."
 
