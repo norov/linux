@@ -3524,6 +3524,7 @@ F:	lib/find_bit_benchmark.c
 F:	lib/nodemask.c
 F:	lib/test_bitmap.c
 F:	scripts/coccinelle/api/bitmap.cocci
+F:	scripts/coccinelle/api/cpumask.cocci
 F:	tools/include/linux/bitmap.h
 F:	tools/include/linux/find.h
 F:	tools/lib/bitmap.c
