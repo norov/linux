@@ -244,6 +244,7 @@ unsigned long find_nth_andnot_bit(const unsigned long *addr1, const unsigned lon
 		return val ? fns(val, n) : size;
 	}
 
+<<<<<<< HEAD
 	return __find_nth_andnot_bit(addr1, addr2, size, n);
 }
 

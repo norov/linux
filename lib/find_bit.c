@@ -103,6 +103,26 @@ unsigned long _find_first_bit(const unsigned long *addr, unsigned long size)
 EXPORT_SYMBOL(_find_first_bit);
 #endif
 
+unsigned long _find_nth_bit(const unsigned long *addr1, const unsigned long *addr2,
+				unsigned long size, unsigned long n, unsigned long invert)
+{
+	unsigned long val, idx, w;
+
+	for (idx = 0; idx * BITS_PER_LONG < size; idx++, n -= w) {
+		val = addr1[idx];
+		if (addr2)
+			val &= addr2[idx] ^ invert;
+
+		w = hweight_long(val);
+		if (w > n)
+			return min(idx * BITS_PER_LONG + fns(val, n), size);
+	}
+
+	return size;
+
+}
+EXPORT_SYMBOL(_find_nth_bit);
+
 #ifndef find_first_and_bit
 /*
  * Find the first set bit in two memory regions.
