@@ -66,6 +66,20 @@ out:										\
 	sz;									\
 })
 
+#define FIND_NTH_BIT(FETCH, size, n)						\
+({										\
+	unsigned long sz = (size), __n = (n), idx, w;				\
+										\
+	for (idx = 0; idx * BITS_PER_LONG < sz; idx++, __n -= w) {		\
+		w = hweight_long(FETCH);					\
+		if (w > __n) {							\
+			sz = min(idx * BITS_PER_LONG + fns(FETCH, __n), sz);	\
+			break;							\
+		}								\
+	}									\
+	sz;									\
+})
+
 #ifndef find_first_bit
 /*
  * Find the first set bit in a memory region.
@@ -108,6 +122,26 @@ unsigned long _find_next_bit(const unsigned long *addr, unsigned long nbits, uns
 }
 EXPORT_SYMBOL(_find_next_bit);
 #endif
+
+unsigned long __find_nth_bit(const unsigned long *addr, unsigned long size, unsigned long n)
+{
+	return FIND_NTH_BIT(addr[idx], size, n);
+}
+EXPORT_SYMBOL(__find_nth_bit);
+
+unsigned long __find_nth_and_bit(const unsigned long *addr1, const unsigned long *addr2,
+				 unsigned long size, unsigned long n)
+{
+	return FIND_NTH_BIT(addr1[idx] & addr2[idx], size, n);
+}
+EXPORT_SYMBOL(__find_nth_and_bit);
+
+unsigned long __find_nth_andnot_bit(const unsigned long *addr1, const unsigned long *addr2,
+				 unsigned long size, unsigned long n)
+{
+	return FIND_NTH_BIT(addr1[idx] & ~addr2[idx], size, n);
+}
+EXPORT_SYMBOL(__find_nth_andnot_bit);
 
 #ifndef find_next_and_bit
 unsigned long _find_next_and_bit(const unsigned long *addr1, const unsigned long *addr2,
