@@ -56,6 +56,26 @@ unsigned long _find_first_zero_bit(const unsigned long *addr, unsigned long size
 EXPORT_SYMBOL(_find_first_zero_bit);
 #endif
 
+unsigned long __find_nth_bit(const unsigned long *addr, unsigned long size, unsigned long n)
+{
+	return FIND_NTH_BIT(addr[idx], size, n);
+}
+EXPORT_SYMBOL(__find_nth_bit);
+
+unsigned long __find_nth_and_bit(const unsigned long *addr1, const unsigned long *addr2,
+				 unsigned long size, unsigned long n)
+{
+	return FIND_NTH_BIT(addr1[idx] & addr2[idx], size, n);
+}
+EXPORT_SYMBOL(__find_nth_and_bit);
+
+unsigned long __find_nth_andnot_bit(const unsigned long *addr1, const unsigned long *addr2,
+				 unsigned long size, unsigned long n)
+{
+	return FIND_NTH_BIT(addr1[idx] & ~addr2[idx], size, n);
+}
+EXPORT_SYMBOL(__find_nth_andnot_bit);
+
 #ifndef find_next_bit
 unsigned long _find_next_bit(const unsigned long *addr, unsigned long nbits, unsigned long start)
 {

@@ -42,4 +42,18 @@ out:										\
 	__nbits;								\
 })
 
+#define FIND_NTH_BIT(EXPRESSION, size, n)						\
+({											\
+	unsigned long __size = (size), __n = (n), idx, w;				\
+											\
+	for (idx = 0; idx * BITS_PER_LONG < __size; idx++, __n -= w) {			\
+		w = hweight_long(EXPRESSION);						\
+		if (w > __n) {								\
+			__size = min(idx*BITS_PER_LONG + fns(EXPRESSION, __n), __size);	\
+			break;								\
+		}									\
+	}										\
+	__size;										\
+})
+
 #endif /* _LIB_FIND_BIT_H */
