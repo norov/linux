@@ -22,6 +22,71 @@
 
 #include "kstrtox.h"
 
+#ifdef CONFIG_DEBUG_BITMAP
+static inline const bool check_overlap(const unsigned long *b1, const unsigned long *b2,
+			  unsigned long nbits)
+{
+	return min(b1, b2) + DIV_ROUND_UP(nbits, BITS_PER_LONG) > max(b1, b2);
+}
+
+bool __bitmap_check_params(const unsigned long *b1, const unsigned long *b2,
+				const unsigned long *b3, const unsigned long nbits,
+				const unsigned long start, const unsigned long off,
+				const unsigned long flags)
+{
+	bool warn = false;
+
+	warn |= WARN_ON(b1 == NULL);
+	warn |= WARN_ON(nbits == 0);
+	warn |= WARN_ON(nbits > NBITS_MAX);
+
+	if (flags & CHECK_B2) {
+		warn |= WARN_ON(b2 == NULL);
+		warn |= WARN_ON(flags & CHECK_OVERLAP12 &&
+				check_overlap(b1, b2, nbits));
+	}
+
+	if (flags & CHECK_B3) {
+		warn |= WARN_ON(b3 == NULL);
+		warn |= WARN_ON(flags & CHECK_OVERLAP13 &&
+				check_overlap(b1, b3, nbits));
+	}
+
+	if (flags & CHECK_OVERLAP23)
+		warn |= WARN_ON(check_overlap(b2, b3, nbits));
+
+	if (flags & CHECK_START)
+		warn |= WARN_ON(start >= nbits);
+
+	if (flags & CHECK_OFF)
+		warn |= WARN_ON(off > nbits);
+
+	if (flags & CHECK_OFF_EQ_0)
+		warn |= WARN_ON(off == 0);
+
+	if (flags & CHECK_START_LE_OFF)
+		warn |= WARN_ON(start > off);
+
+	if (flags & CHECK_B2 && flags & CHECK_B3)
+		warn |= WARN_ON(b2 == b3);
+
+	if (warn) {
+		/*
+		 * Convert kernel addresses to unsigned long because
+		 * %pK hides actual values with the lack of randomization.
+		 */
+		pr_warn("b1:\t\t%lx\n", (unsigned long)b1);
+		pr_warn("b2:\t\t%lx\n", (unsigned long)b2);
+		pr_warn("b3:\t\t%lx\n", (unsigned long)b3);
+		pr_warn("nbits:\t%lu\n", nbits);
+		pr_warn("start:\t%lu\n", start);
+		pr_warn("off:\t%lu\n", off);
+	}
+	return warn;
+}
+EXPORT_SYMBOL(__bitmap_check_params);
+#endif
+
 /**
  * DOC: bitmap introduction
  *
@@ -213,6 +278,9 @@ void bitmap_cut(unsigned long *dst, const unsigned long *src,
 	unsigned int len = BITS_TO_LONGS(nbits);
 	unsigned long keep = 0, carry;
 	int i;
+
+	bitmap_check_params(dst, src, NULL, nbits, first, first + cut,
+				CHECK_B2 | CHECK_START | CHECK_OFF);
 
 	if (first % BITS_PER_LONG) {
 		keep = src[first / BITS_PER_LONG] &
@@ -410,6 +478,10 @@ unsigned long bitmap_find_next_zero_area_off(unsigned long *map,
 					     unsigned long align_offset)
 {
 	unsigned long index, end, i;
+
+	bitmap_check_params(map, NULL, NULL, size, start, start + nr,
+				CHECK_START | CHECK_OFF | CHECK_START_LE_OFF);
+
 again:
 	index = find_next_zero_bit(map, size, start);
 
@@ -797,6 +869,8 @@ int bitmap_parselist(const char *buf, unsigned long *maskp, int nmaskbits)
 	struct region r;
 	long ret;
 
+	bitmap_check(maskp, nmaskbits);
+
 	r.nbits = nmaskbits;
 	bitmap_zero(maskp, r.nbits);
 
@@ -900,6 +974,8 @@ int bitmap_parse(const char *start, unsigned int buflen,
 	int unset_bit;
 	int chunk;
 
+	bitmap_check(maskp, nmaskbits);
+
 	for (chunk = 0; ; chunk++) {
 		end = bitmap_find_region_reverse(start, end);
 		if (start > end)
@@ -950,7 +1026,9 @@ EXPORT_SYMBOL(bitmap_parse);
  */
 static int bitmap_pos_to_ord(const unsigned long *buf, unsigned int pos, unsigned int nbits)
 {
-	if (pos >= nbits || !test_bit(pos, buf))
+	bitmap_check_params(buf, NULL, NULL, nbits, pos, 0, CHECK_START);
+
+	if (!test_bit(pos, buf))
 		return -1;
 
 	return __bitmap_weight(buf, pos);
@@ -1024,8 +1102,13 @@ void bitmap_remap(unsigned long *dst, const unsigned long *src,
 {
 	unsigned int oldbit, w;
 
-	if (dst == src)		/* following doesn't handle inplace remaps */
-		return;
+	bitmap_check_params(dst, src, old, nbits, 0, 0,
+				CHECK_B2 | CHECK_B3 | CHECK_OVERLAP12 |
+				CHECK_OVERLAP13 | CHECK_OVERLAP23);
+	bitmap_check_params(dst, src, new, nbits, 0, 0,
+				CHECK_B2 | CHECK_B3 | CHECK_OVERLAP12 |
+				CHECK_OVERLAP13 | CHECK_OVERLAP23);
+
 	bitmap_zero(dst, nbits);
 
 	w = bitmap_weight(new, nbits);
@@ -1069,8 +1152,13 @@ EXPORT_SYMBOL(bitmap_remap);
 int bitmap_bitremap(int oldbit, const unsigned long *old,
 				const unsigned long *new, int bits)
 {
-	int w = bitmap_weight(new, bits);
-	int n = bitmap_pos_to_ord(old, oldbit, bits);
+	int w, n;
+
+	bitmap_check_params(old, new, NULL, bits, oldbit, 0, CHECK_B2 |
+				CHECK_START | CHECK_OVERLAP12);
+
+	w = bitmap_weight(new, bits);
+	n = bitmap_pos_to_ord(old, oldbit, bits);
 	if (n < 0 || w == 0)
 		return oldbit;
 	else
@@ -1190,8 +1278,9 @@ void bitmap_onto(unsigned long *dst, const unsigned long *orig,
 {
 	unsigned int n, m;	/* same meaning as in above comment */
 
-	if (dst == orig)	/* following doesn't handle inplace mappings */
-		return;
+	bitmap_check_params(dst, orig, relmap, bits, 0, 0, CHECK_B2 | CHECK_B3 |
+				CHECK_OVERLAP12 | CHECK_OVERLAP13 | CHECK_OVERLAP23);
+
 	bitmap_zero(dst, bits);
 
 	/*
@@ -1229,8 +1318,8 @@ void bitmap_fold(unsigned long *dst, const unsigned long *orig,
 {
 	unsigned int oldbit;
 
-	if (dst == orig)	/* following doesn't handle inplace mappings */
-		return;
+	bitmap_check_move(dst, orig, sz);
+
 	bitmap_zero(dst, nbits);
 
 	for_each_set_bit(oldbit, orig, nbits)
@@ -1332,6 +1421,8 @@ int bitmap_find_free_region(unsigned long *bitmap, unsigned int bits, int order)
 {
 	unsigned int pos, end;		/* scans bitmap by regions of size order */
 
+	bitmap_check_params(bitmap, NULL, NULL, bits, (1 << order), 0, CHECK_OFF);
+
 	for (pos = 0 ; (end = pos + (1U << order)) <= bits; pos = end) {
 		if (!__reg_op(bitmap, pos, order, REG_OP_ISFREE))
 			continue;
@@ -1355,6 +1446,8 @@ EXPORT_SYMBOL(bitmap_find_free_region);
  */
 void bitmap_release_region(unsigned long *bitmap, unsigned int pos, int order)
 {
+	bitmap_check_params(bitmap, NULL, NULL, pos + (1 << order), pos, pos + (1 << order),
+				CHECK_START | CHECK_OFF);
 	__reg_op(bitmap, pos, order, REG_OP_RELEASE);
 }
 EXPORT_SYMBOL(bitmap_release_region);
@@ -1372,6 +1465,8 @@ EXPORT_SYMBOL(bitmap_release_region);
  */
 int bitmap_allocate_region(unsigned long *bitmap, unsigned int pos, int order)
 {
+	bitmap_check_params(bitmap, NULL, NULL, pos + (1 << order), pos, pos + (1 << order),
+				CHECK_START | CHECK_OFF);
 	if (!__reg_op(bitmap, pos, order, REG_OP_ISFREE))
 		return -EBUSY;
 	return __reg_op(bitmap, pos, order, REG_OP_ALLOC);
@@ -1390,6 +1485,8 @@ EXPORT_SYMBOL(bitmap_allocate_region);
 void bitmap_copy_le(unsigned long *dst, const unsigned long *src, unsigned int nbits)
 {
 	unsigned int i;
+
+	bitmap_check_move(dst, src, nbits);
 
 	for (i = 0; i < nbits/BITS_PER_LONG; i++) {
 		if (BITS_PER_LONG == 64)
@@ -1476,6 +1573,8 @@ void bitmap_from_arr32(unsigned long *bitmap, const u32 *buf, unsigned int nbits
 {
 	unsigned int i, halfwords;
 
+	bitmap_check_move(bitmap, (unsigned long *)buf, nbits);
+
 	halfwords = DIV_ROUND_UP(nbits, 32);
 	for (i = 0; i < halfwords; i++) {
 		bitmap[i/2] = (unsigned long) buf[i];
@@ -1498,6 +1597,8 @@ EXPORT_SYMBOL(bitmap_from_arr32);
 void bitmap_to_arr32(u32 *buf, const unsigned long *bitmap, unsigned int nbits)
 {
 	unsigned int i, halfwords;
+
+	bitmap_check_move(bitmap, (unsigned long *)buf, nbits);
 
 	halfwords = DIV_ROUND_UP(nbits, 32);
 	for (i = 0; i < halfwords; i++) {
@@ -1523,6 +1624,8 @@ EXPORT_SYMBOL(bitmap_to_arr32);
 void bitmap_from_arr64(unsigned long *bitmap, const u64 *buf, unsigned int nbits)
 {
 	int n;
+
+	bitmap_check_move(bitmap, (unsigned long *)buf, nbits);
 
 	for (n = nbits; n > 0; n -= 64) {
 		u64 val = *buf++;
@@ -1553,6 +1656,8 @@ EXPORT_SYMBOL(bitmap_from_arr64);
 void bitmap_to_arr64(u64 *buf, const unsigned long *bitmap, unsigned int nbits)
 {
 	const unsigned long *end = bitmap + BITS_TO_LONGS(nbits);
+
+	bitmap_check_move(bitmap, (unsigned long *)buf, nbits);
 
 	while (bitmap < end) {
 		*buf = *bitmap++;
