@@ -567,7 +567,7 @@ static void __init test_bitmap_arr32(void)
 
 	memset(arr, 0xa5, sizeof(arr));
 
-	for (nbits = 0; nbits < EXP1_IN_BITS; ++nbits) {
+	for (nbits = 1; nbits < EXP1_IN_BITS; ++nbits) {
 		bitmap_to_arr32(arr, exp1, nbits);
 		bitmap_from_arr32(bmap2, arr, nbits);
 		expect_eq_bitmap(bmap2, exp1, nbits);
@@ -593,7 +593,7 @@ static void __init test_bitmap_arr64(void)
 
 	memset(arr, 0xa5, sizeof(arr));
 
-	for (nbits = 0; nbits < EXP1_IN_BITS; ++nbits) {
+	for (nbits = 1; nbits < EXP1_IN_BITS; ++nbits) {
 		memset(bmap2, 0xff, sizeof(arr));
 		bitmap_to_arr64(arr, exp1, nbits);
 		bitmap_from_arr64(bmap2, arr, nbits);
