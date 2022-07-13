@@ -712,10 +712,13 @@ struct region {
 
 static void bitmap_set_region(const struct region *r, unsigned long *bitmap)
 {
-	unsigned int start;
+	unsigned int start, len;
 
-	for (start = r->start; start <= r->end; start += r->group_len)
-		bitmap_set(bitmap, start, min(r->end - start + 1, r->off));
+	for (start = r->start; start <= r->end; start += r->group_len) {
+		len = min(r->end - start + 1, r->off);
+		if (len > 0)
+			bitmap_set(bitmap, start, len);
+	}
 }
 
 static int bitmap_check_region(const struct region *r)
