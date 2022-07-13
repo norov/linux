@@ -1239,7 +1239,8 @@ static int pcpu_alloc_area(struct pcpu_chunk *chunk, int alloc_bits,
 
 	/* update boundary map */
 	set_bit(bit_off, chunk->bound_map);
-	bitmap_clear(chunk->bound_map, bit_off + 1, alloc_bits - 1);
+	if (alloc_bits > 1)
+		bitmap_clear(chunk->bound_map, bit_off + 1, alloc_bits - 1);
 	set_bit(bit_off + alloc_bits, chunk->bound_map);
 
 	chunk->free_bytes -= alloc_bits * PCPU_MIN_ALLOC_SIZE;
