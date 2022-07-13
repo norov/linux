@@ -2874,7 +2874,8 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
 		cpu_valid_mask = cpu_online_mask;
 	}
 
-	if (!kthread && !cpumask_subset(new_mask, cpu_allowed_mask)) {
+	if (!kthread && new_mask != cpu_allowed_mask &&
+			!cpumask_subset(new_mask, cpu_allowed_mask)) {
 		ret = -EINVAL;
 		goto out;
 	}
