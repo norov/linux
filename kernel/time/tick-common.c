@@ -255,7 +255,7 @@ static void tick_setup_device(struct tick_device *td,
 	 * When the device is not per cpu, pin the interrupt to the
 	 * current cpu:
 	 */
-	if (!cpumask_equal(newdev->cpumask, cpumask))
+	if (newdev->cpumask != cpumask && !cpumask_equal(newdev->cpumask, cpumask))
 		irq_set_affinity(newdev->irq, cpumask);
 
 	/*
