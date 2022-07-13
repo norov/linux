@@ -622,7 +622,7 @@ static void noinline __init test_mem_optimisations(void)
 	unsigned int start, nbits;
 
 	for (start = 0; start < 1024; start += 8) {
-		for (nbits = 0; nbits < 1024 - start; nbits += 8) {
+		for (nbits = 1; nbits < 1024 - start; nbits += 8) {
 			memset(bmap1, 0x5a, sizeof(bmap1));
 			memset(bmap2, 0x5a, sizeof(bmap2));
 
