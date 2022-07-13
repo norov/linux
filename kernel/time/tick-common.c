@@ -290,13 +290,15 @@ static bool tick_check_percpu(struct clock_event_device *curdev,
 {
 	if (!cpumask_test_cpu(cpu, newdev->cpumask))
 		return false;
-	if (cpumask_equal(newdev->cpumask, cpumask_of(cpu)))
+	if (newdev->cpumask == cpumask_of(cpu) ||
+			cpumask_equal(newdev->cpumask, cpumask_of(cpu)))
 		return true;
 	/* Check if irq affinity can be set */
 	if (newdev->irq >= 0 && !irq_can_set_affinity(newdev->irq))
 		return false;
 	/* Prefer an existing cpu local device */
-	if (curdev && cpumask_equal(curdev->cpumask, cpumask_of(cpu)))
+	if (curdev && (curdev->cpumask == cpumask_of(cpu) ||
+			cpumask_equal(curdev->cpumask, cpumask_of(cpu))))
 		return false;
 	return true;
 }
