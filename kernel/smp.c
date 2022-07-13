@@ -880,6 +880,28 @@ EXPORT_SYMBOL_GPL(smp_call_function_any);
 #define SCF_WAIT	(1U << 0)
 #define SCF_RUN_LOCAL	(1U << 1)
 
+/* Check if we need remote execution, i.e., any CPU excluding this one. */
+static inline bool __need_remote_exec(const struct cpumask *mask, unsigned int this_cpu)
+{
+	unsigned int cpu;
+
+	switch (num_online_cpus()) {
+	case 0:
+		return false;
+	case 1:
+		return  cpu_online(this_cpu) ? false : true;
+	default:
+		if (mask == cpu_online_mask)
+			return true;
+	}
+
+	cpu = cpumask_first_and(mask, cpu_online_mask);
+	if (cpu == this_cpu)
+		cpu = cpumask_next_and(cpu, mask, cpu_online_mask);
+
+	return cpu < nr_cpu_ids;
+}
+
 static void smp_call_function_many_cond(const struct cpumask *mask,
 					smp_call_func_t func, void *info,
 					unsigned int scf_flags,
@@ -916,12 +938,7 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 	if ((scf_flags & SCF_RUN_LOCAL) && cpumask_test_cpu(this_cpu, mask))
 		run_local = true;
 
-	/* Check if we need remote execution, i.e., any CPU excluding this one. */
-	cpu = cpumask_first_and(mask, cpu_online_mask);
-	if (cpu == this_cpu)
-		cpu = cpumask_next_and(cpu, mask, cpu_online_mask);
-	if (cpu < nr_cpu_ids)
-		run_remote = true;
+	run_remote = __need_remote_exec(mask, this_cpu);
 
 	if (run_remote) {
 		cfd = this_cpu_ptr(&cfd_data);
