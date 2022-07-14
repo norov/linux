@@ -2211,6 +2211,8 @@ static struct sched_domain *build_sched_domain(struct sched_domain_topology_leve
 static bool topology_span_sane(struct sched_domain_topology_level *tl,
 			      const struct cpumask *cpu_map, int cpu)
 {
+	const struct cpumask *mc = tl->mask(cpu);
+	const struct cpumask *mi;
 	int i;
 
 	/* NUMA levels are allowed to overlap */
@@ -2226,14 +2228,18 @@ static bool topology_span_sane(struct sched_domain_topology_level *tl,
 	for_each_cpu(i, cpu_map) {
 		if (i == cpu)
 			continue;
+
+		mi = tl->mask(i);
+		if (mi == mc)
+			continue;
+
 		/*
 		 * We should 'and' all those masks with 'cpu_map' to exactly
 		 * match the topology we're about to build, but that can only
 		 * remove CPUs, which only lessens our ability to detect
 		 * overlaps
 		 */
-		if (!cpumask_equal(tl->mask(cpu), tl->mask(i)) &&
-		    cpumask_intersects(tl->mask(cpu), tl->mask(i)))
+		if (!cpumask_equal(mc, mi) && cpumask_intersects(mc, mi))
 			return false;
 	}
 
