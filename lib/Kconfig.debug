@@ -533,6 +533,13 @@ config DEBUG_FORCE_WEAK_PER_CPU
 
 endmenu # "Compiler options"
 
+config DEBUG_BITMAP
+	bool "Debug bitmaps"
+	help
+	  Say Y here if you want to check bitmap functions perameters at
+	  the runtime. Most people don't need it. Enabling DEBUG_BITMAP
+	  may affect performance.
+
 menu "Generic Kernel Debugging Instruments"
 
 config MAGIC_SYSRQ
