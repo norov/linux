@@ -877,6 +877,7 @@ static void __init test_bitmap_print_buf(void)
 
 static void __init test_bitmap_const_eval(void)
 {
+#ifndef CONFIG_DEBUG_BITMAP
 	DECLARE_BITMAP(bitmap, BITS_PER_LONG);
 	unsigned long initvar = BIT(2);
 	unsigned long bitopvar = 0;
@@ -934,6 +935,7 @@ static void __init test_bitmap_const_eval(void)
 	/* ~BIT(25) */
 	BUILD_BUG_ON(!__builtin_constant_p(~var));
 	BUILD_BUG_ON(~var != ~BIT(25));
+#endif
 }
 
 static void __init selftest(void)
