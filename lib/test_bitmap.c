@@ -707,10 +707,6 @@ static struct test_bitmap_cut test_cut[] = {
 	{ 15, 16, 32, { 0xa5a5a5a5UL, }, { 0x0000a5a5UL, }, },
 	{ 16, 15, 32, { 0xa5a5a5a5UL, }, { 0x0001a5a5UL, }, },
 
-	{ BITS_PER_LONG, BITS_PER_LONG, BITS_PER_LONG,
-		{ 0xa5a5a5a5UL, 0xa5a5a5a5UL, },
-		{ 0xa5a5a5a5UL, 0xa5a5a5a5UL, },
-	},
 	{ 1, BITS_PER_LONG - 1, BITS_PER_LONG,
 		{ 0xa5a5a5a5UL, 0xa5a5a5a5UL, },
 		{ 0x00000001UL, 0x00000001UL, },
