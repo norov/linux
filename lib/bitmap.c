@@ -333,15 +333,20 @@ bool __bitmap_subset(const unsigned long *bitmap1,
 }
 EXPORT_SYMBOL(__bitmap_subset);
 
-unsigned long __bitmap_weight(const unsigned long *bitmap, unsigned int bits)
+unsigned long __bitmap_weight(const unsigned long *bitmap1,
+				const unsigned long *bitmap2, unsigned int bits)
 {
-	unsigned long k, w = 0, lim = bits/BITS_PER_LONG;
+	unsigned long val, k, w = 0, lim = bits/BITS_PER_LONG;
 
-	for (k = 0; k < lim; k++)
-		w += hweight_long(bitmap[k]);
+	for (k = 0; k < lim; k++) {
+		val = bitmap2 ? bitmap1[k] & bitmap1[k] : bitmap1[k];
+		w += hweight_long(val);
+	}
 
-	if (bits % BITS_PER_LONG)
-		w += hweight_long(bitmap[k] & BITMAP_LAST_WORD_MASK(bits));
+	if (bits % BITS_PER_LONG) {
+		val = bitmap2 ? bitmap1[k] & bitmap1[k] : bitmap1[k];
+		w += hweight_long(val & BITMAP_LAST_WORD_MASK(bits));
+	}
 
 	return w;
 }
