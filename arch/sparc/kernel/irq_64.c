@@ -357,10 +357,8 @@ static int irq_choose_cpu(unsigned int irq, const struct cpumask *affinity)
 	if (cpumask_equal(&mask, cpu_online_mask)) {
 		cpuid = map_to_cpu(irq);
 	} else {
-		cpumask_t tmp;
-
-		empty = !cpumask_and(&tmp, cpu_online_mask, &mask);
-		cpuid = empty ? map_to_cpu(irq) : cpumask_first(&tmp);
+		cpuid = cpumask_empty_and(cpu_online_mask, &mask) ? map_to_cpu(irq)
+								  : cpumask_first(&tmp);
 	}
 
 	return cpuid;
