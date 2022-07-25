@@ -338,17 +338,17 @@ static int cpus_mon_write(struct rdtgroup *rdtgrp, cpumask_var_t newmask,
 {
 	struct rdtgroup *prgrp = rdtgrp->mon.parent, *crgrp;
 	struct list_head *head;
+	bool not_empty;
 
 	/* Check whether cpus belong to parent ctrl group */
-	cpumask_andnot(tmpmask, newmask, &prgrp->cpu_mask);
-	if (!cpumask_empty(tmpmask)) {
+	if (!cpumask_empty_andnot(newmask, &prgrp->cpu_mask)) {
 		rdt_last_cmd_puts("Can only add CPUs to mongroup that belong to parent\n");
 		return -EINVAL;
 	}
 
 	/* Check whether cpus are dropped from this group */
-	cpumask_andnot(tmpmask, &rdtgrp->cpu_mask, newmask);
-	if (!cpumask_empty(tmpmask)) {
+	not_empty = cpumask_andnot(tmpmask, &rdtgrp->cpu_mask, newmask);
+	if (not_empty) {
 		/* Give any dropped cpus to parent rdtgroup */
 		cpumask_or(&prgrp->cpu_mask, &prgrp->cpu_mask, tmpmask);
 		update_closid_rmid(tmpmask, prgrp);
@@ -358,8 +358,8 @@ static int cpus_mon_write(struct rdtgroup *rdtgrp, cpumask_var_t newmask,
 	 * If we added cpus, remove them from previous group that owned them
 	 * and update per-cpu rmid
 	 */
-	cpumask_andnot(tmpmask, newmask, &rdtgrp->cpu_mask);
-	if (!cpumask_empty(tmpmask)) {
+	not_empty = cpumask_andnot(tmpmask, newmask, &rdtgrp->cpu_mask);
+	if (not_empty) {
 		head = &prgrp->mon.crdtgrp_list;
 		list_for_each_entry(crgrp, head, mon.crdtgrp_list) {
 			if (crgrp == rdtgrp)
@@ -391,10 +391,11 @@ static int cpus_ctrl_write(struct rdtgroup *rdtgrp, cpumask_var_t newmask,
 {
 	struct rdtgroup *r, *crgrp;
 	struct list_head *head;
+	bool not_empty;
 
 	/* Check whether cpus are dropped from this group */
-	cpumask_andnot(tmpmask, &rdtgrp->cpu_mask, newmask);
-	if (!cpumask_empty(tmpmask)) {
+	not_empty = cpumask_andnot(tmpmask, &rdtgrp->cpu_mask, newmask);
+	if (not_empty) {
 		/* Can't drop from default group */
 		if (rdtgrp == &rdtgroup_default) {
 			rdt_last_cmd_puts("Can't drop CPUs from default group\n");
@@ -412,13 +413,13 @@ static int cpus_ctrl_write(struct rdtgroup *rdtgrp, cpumask_var_t newmask,
 	 * the prev group's child groups that owned them
 	 * and update per-cpu closid/rmid.
 	 */
-	cpumask_andnot(tmpmask, newmask, &rdtgrp->cpu_mask);
-	if (!cpumask_empty(tmpmask)) {
+	not_empty = cpumask_andnot(tmpmask, newmask, &rdtgrp->cpu_mask);
+	if (not_empty) {
 		list_for_each_entry(r, &rdt_all_groups, rdtgroup_list) {
 			if (r == rdtgrp)
 				continue;
-			cpumask_and(tmpmask1, &r->cpu_mask, tmpmask);
-			if (!cpumask_empty(tmpmask1))
+
+			if (cpumask_and(tmpmask1, &r->cpu_mask, tmpmask))
 				cpumask_rdtgrp_clear(r, tmpmask1);
 		}
 		update_closid_rmid(tmpmask, rdtgrp);
@@ -446,6 +447,7 @@ static ssize_t rdtgroup_cpus_write(struct kernfs_open_file *of,
 {
 	cpumask_var_t tmpmask, newmask, tmpmask1;
 	struct rdtgroup *rdtgrp;
+	bool not_empty;
 	int ret;
 
 	if (!buf)
@@ -487,8 +489,8 @@ static ssize_t rdtgroup_cpus_write(struct kernfs_open_file *of,
 	}
 
 	/* check that user didn't specify any offline cpus */
-	cpumask_andnot(tmpmask, newmask, cpu_online_mask);
-	if (!cpumask_empty(tmpmask)) {
+	not_empty = cpumask_andnot(tmpmask, newmask, cpu_online_mask);
+	if (not_empty) {
 		ret = -EINVAL;
 		rdt_last_cmd_puts("Can only assign online CPUs\n");
 		goto unlock;
