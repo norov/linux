@@ -1576,6 +1576,7 @@ static int its_select_cpu(struct irq_data *d,
 	struct its_device *its_dev = irq_data_get_irq_chip_data(d);
 	cpumask_var_t tmpmask;
 	int cpu, node;
+	bool empty;
 
 	if (!alloc_cpumask_var(&tmpmask, GFP_ATOMIC))
 		return -ENOMEM;
@@ -1589,8 +1590,8 @@ static int its_select_cpu(struct irq_data *d,
 			 * Try the intersection of the affinity mask and the
 			 * node mask (and the online mask, just to be safe).
 			 */
-			cpumask_and(tmpmask, cpumask_of_node(node), aff_mask);
-			cpumask_and(tmpmask, tmpmask, cpu_online_mask);
+			if (cpumask_and(tmpmask, cpumask_of_node(node), aff_mask))
+				cpumask_and(tmpmask, tmpmask, cpu_online_mask);
 
 			/*
 			 * Ideally, we would check if the mask is empty, and
@@ -1616,10 +1617,10 @@ static int its_select_cpu(struct irq_data *d,
 		}
 
 		/* Try the intersection of the affinity and online masks */
-		cpumask_and(tmpmask, aff_mask, cpu_online_mask);
+		empty = !cpumask_and(tmpmask, aff_mask, cpu_online_mask);
 
 		/* If that doesn't fly, the online mask is the last resort */
-		if (cpumask_empty(tmpmask))
+		if (empty)
 			cpumask_copy(tmpmask, cpu_online_mask);
 
 		cpu = cpumask_pick_least_loaded(d, tmpmask);
