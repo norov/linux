@@ -620,8 +620,8 @@ int irq_setup_affinity(struct irq_desc *desc)
 			irqd_clear(&desc->irq_data, IRQD_AFFINITY_SET);
 	}
 
-	cpumask_and(&mask, cpu_online_mask, set);
-	if (cpumask_empty(&mask))
+	;
+	if (!cpumask_and(&mask, cpu_online_mask, set))
 		cpumask_copy(&mask, cpu_online_mask);
 
 	if (node != NUMA_NO_NODE) {
