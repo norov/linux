@@ -420,10 +420,11 @@ static int activate_reserved(struct irq_data *irqd)
 static int activate_managed(struct irq_data *irqd)
 {
 	const struct cpumask *dest = irq_data_get_affinity_mask(irqd);
+	bool empty;
 	int ret;
 
-	cpumask_and(vector_searchmask, dest, cpu_online_mask);
-	if (WARN_ON_ONCE(cpumask_empty(vector_searchmask))) {
+	empty = !cpumask_and(vector_searchmask, dest, cpu_online_mask);
+	if (WARN_ON_ONCE(empty)) {
 		/* Something in the core code broke! Survive gracefully */
 		pr_err("Managed startup for irq %u, but no CPU\n", irqd->irq);
 		return -EINVAL;
