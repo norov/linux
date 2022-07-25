@@ -54,8 +54,7 @@ void flush_icache_mm(struct mm_struct *mm, bool local)
 	 * Flush the I$ of other harts concurrently executing, and mark them as
 	 * flushed.
 	 */
-	cpumask_andnot(&others, mm_cpumask(mm), cpumask_of(cpu));
-	local |= cpumask_empty(&others);
+	local |= !cpumask_andnot(&others, mm_cpumask(mm), cpumask_of(cpu));
 	if (mm == current->active_mm && local) {
 		/*
 		 * It's assumed that at least one strongly ordered operation is
