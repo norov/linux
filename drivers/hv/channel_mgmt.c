@@ -733,6 +733,7 @@ static void init_vp_index(struct vmbus_channel *channel)
 	const struct cpumask *hk_mask = housekeeping_cpumask(HK_TYPE_MANAGED_IRQ);
 	u32 target_cpu;
 	int numa_node;
+	bool empty;
 
 	if (!perf_chn ||
 	    !alloc_cpumask_var(&available_mask, GFP_KERNEL) ||
@@ -765,10 +766,8 @@ static void init_vp_index(struct vmbus_channel *channel)
 		allocated_mask = &hv_context.hv_numa_map[numa_node];
 
 retry:
-		cpumask_xor(available_mask, allocated_mask, cpumask_of_node(numa_node));
-		cpumask_and(available_mask, available_mask, hk_mask);
-
-		if (cpumask_empty(available_mask)) {
+		if (!cpumask_xor(available_mask, allocated_mask, cpumask_of_node(numa_node)) ||
+		    !cpumask_and(available_mask, available_mask, hk_mask)) {
 			/*
 			 * We have cycled through all the CPUs in the node;
 			 * reset the allocated map.
