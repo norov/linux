@@ -851,9 +851,8 @@ static ssize_t store_rps_map(struct netdev_rx_queue *queue,
 	}
 
 	if (!cpumask_empty(mask)) {
-		cpumask_and(mask, mask, housekeeping_cpumask(HK_TYPE_DOMAIN));
-		cpumask_and(mask, mask, housekeeping_cpumask(HK_TYPE_WQ));
-		if (cpumask_empty(mask)) {
+		if (!cpumask_and(mask, mask, housekeeping_cpumask(HK_TYPE_DOMAIN)) ||
+		    !cpumask_and(mask, mask, housekeeping_cpumask(HK_TYPE_WQ))) {
 			free_cpumask_var(mask);
 			return -EINVAL;
 		}
