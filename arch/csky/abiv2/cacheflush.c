@@ -53,6 +53,7 @@ void flush_icache_mm_range(struct mm_struct *mm,
 {
 	unsigned int cpu;
 	cpumask_t others, *mask;
+	bool not_empty;
 
 	preempt_disable();
 
@@ -77,9 +78,9 @@ void flush_icache_mm_range(struct mm_struct *mm,
 	 * Flush the I$ of other harts concurrently executing, and mark them as
 	 * flushed.
 	 */
-	cpumask_andnot(&others, mm_cpumask(mm), cpumask_of(cpu));
+	not_empty = cpumask_andnot(&others, mm_cpumask(mm), cpumask_of(cpu));
 
-	if (mm != current->active_mm || !cpumask_empty(&others)) {
+	if (not_empty || mm != current->active_mm) {
 		on_each_cpu_mask(&others, local_icache_inv_all, NULL, 1);
 		cpumask_clear(mask);
 	}
