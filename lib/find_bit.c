@@ -115,12 +115,12 @@ EXPORT_SYMBOL(_find_nth_bit);
  */
 unsigned long _find_first_and_bit(const unsigned long *addr1,
 				  const unsigned long *addr2,
-				  unsigned long size)
+				  unsigned long size, unsigned long invert)
 {
 	unsigned long idx, val;
 
 	for (idx = 0; idx * BITS_PER_LONG < size; idx++) {
-		val = addr1[idx] & addr2[idx];
+		val = addr1[idx] & (addr2[idx] ^ invert);
 		if (val)
 			return min(idx * BITS_PER_LONG + __ffs(val), size);
 	}

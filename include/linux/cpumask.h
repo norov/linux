@@ -655,13 +655,23 @@ static inline bool cpumask_empty(const struct cpumask *srcp)
 }
 
 /**
- * cpumask_empty - (*srcp1 & *srcp2) == 0
+ * cpumask_empty_and - (*srcp1 & *srcp2) == 0
  * @srcp1: the cpumask to that all cpus < nr_cpu_ids are clear.
  * @srcp2: the cpumask to that all cpus < nr_cpu_ids are clear.
  */
-static inline bool cpumask_and_empty(const struct cpumask *srcp)
+static inline bool cpumask_empty_and(const struct cpumask *srcp1, const struct cpumask *srcp2)
 {
-	return bitmap_and_empty(cpumask_bits(srcp1), cpumask_bits(srcp2), nr_cpumask_bits);
+	return bitmap_empty_and(cpumask_bits(srcp1), cpumask_bits(srcp2), nr_cpumask_bits);
+}
+
+/**
+ * cpumask_empty_andnot - (*srcp1 & ~*srcp2) == 0
+ * @srcp1: the cpumask to that all cpus < nr_cpu_ids are clear.
+ * @srcp2: the cpumask to that all cpus < nr_cpu_ids are clear.
+ */
+static inline bool cpumask_empty_andnot(const struct cpumask *srcp1, const struct cpumask *srcp2)
+{
+	return bitmap_empty_andnot(cpumask_bits(srcp1), cpumask_bits(srcp2), nr_cpumask_bits);
 }
 
 /**
