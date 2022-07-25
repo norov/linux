@@ -109,9 +109,10 @@ unsigned long leon_get_irqmask(unsigned int irq)
 static int irq_choose_cpu(const struct cpumask *affinity)
 {
 	cpumask_t mask;
+	bool empty;
 
-	cpumask_and(&mask, cpu_online_mask, affinity);
-	if (cpumask_equal(&mask, cpu_online_mask) || cpumask_empty(&mask))
+	empty = !cpumask_and(&mask, cpu_online_mask, affinity);
+	if (empty || cpumask_equal(&mask, cpu_online_mask))
 		return boot_cpu_id;
 	else
 		return cpumask_first(&mask);
