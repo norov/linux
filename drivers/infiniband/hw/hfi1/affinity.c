@@ -319,42 +319,31 @@ static int per_cpu_affinity_put_max(cpumask_var_t possible_cpumask,
  */
 static int _dev_comp_vect_cpu_get(struct hfi1_devdata *dd,
 				  struct hfi1_affinity_node *entry,
-				  cpumask_var_t non_intr_cpus,
 				  cpumask_var_t available_cpus)
 	__must_hold(&node_affinity.lock)
 {
-	int cpu;
+	int cpu = -1;
 	struct cpu_mask_set *set = dd->comp_vect;
+	bool has_available_cpus;
 
 	lockdep_assert_held(&node_affinity.lock);
-	if (!non_intr_cpus) {
-		cpu = -1;
+	if (!available_cpus)
 		goto fail;
-	}
 
-	if (!available_cpus) {
-		cpu = -1;
-		goto fail;
-	}
-
-	/* Available CPUs for pinning completion vectors */
+	/*
+	 * Available CPUs for pinning completion vectors without
+	 * SDMA engine interrupts
+	 */
 	_cpu_mask_set_gen_inc(set);
-	cpumask_andnot(available_cpus, &set->mask, &set->used);
-
-	/* Available CPUs without SDMA engine interrupts */
-	cpumask_andnot(non_intr_cpus, available_cpus,
-		       &entry->def_intr.used);
+	has_available_cpus = cpumask_andnot(available_cpus, &set->mask, &set->used);
+	if (!has_available_cpus)
+		goto fail;
 
 	/* If there are non-interrupt CPUs available, use them first */
-	if (!cpumask_empty(non_intr_cpus))
-		cpu = cpumask_first(non_intr_cpus);
-	else /* Otherwise, use interrupt CPUs */
+	cpu = cpumask_first_andnot(available_cpus, &entry->def_intr.used);
+	if (cpu >= nr_cpu_ids)
 		cpu = cpumask_first(available_cpus);
 
-	if (cpu >= nr_cpu_ids) { /* empty */
-		cpu = -1;
-		goto fail;
-	}
 	cpumask_set_cpu(cpu, &set->used);
 
 fail:
@@ -401,18 +390,12 @@ static int _dev_comp_vect_mappings_create(struct hfi1_devdata *dd,
 	__must_hold(&node_affinity.lock)
 {
 	int i, cpu, ret;
-	cpumask_var_t non_intr_cpus;
 	cpumask_var_t available_cpus;
 
 	lockdep_assert_held(&node_affinity.lock);
 
-	if (!zalloc_cpumask_var(&non_intr_cpus, GFP_KERNEL))
+	if (!zalloc_cpumask_var(&available_cpus, GFP_KERNEL))
 		return -ENOMEM;
-
-	if (!zalloc_cpumask_var(&available_cpus, GFP_KERNEL)) {
-		free_cpumask_var(non_intr_cpus);
-		return -ENOMEM;
-	}
 
 	dd->comp_vect_mappings = kcalloc(dd->comp_vect_possible_cpus,
 					 sizeof(*dd->comp_vect_mappings),
@@ -425,8 +408,7 @@ static int _dev_comp_vect_mappings_create(struct hfi1_devdata *dd,
 		dd->comp_vect_mappings[i] = -1;
 
 	for (i = 0; i < dd->comp_vect_possible_cpus; i++) {
-		cpu = _dev_comp_vect_cpu_get(dd, entry, non_intr_cpus,
-					     available_cpus);
+		cpu = _dev_comp_vect_cpu_get(dd, entry, available_cpus);
 		if (cpu < 0) {
 			ret = -EINVAL;
 			goto fail;
@@ -439,12 +421,10 @@ static int _dev_comp_vect_mappings_create(struct hfi1_devdata *dd,
 	}
 
 	free_cpumask_var(available_cpus);
-	free_cpumask_var(non_intr_cpus);
 	return 0;
 
 fail:
 	free_cpumask_var(available_cpus);
-	free_cpumask_var(non_intr_cpus);
 	_dev_comp_vect_mappings_destroy(dd);
 
 	return ret;
@@ -593,7 +573,7 @@ int hfi1_dev_affinity_init(struct hfi1_devdata *dd)
 	struct hfi1_affinity_node *entry;
 	const struct cpumask *local_mask;
 	int curr_cpu, possible, i, ret;
-	bool new_entry = false;
+	bool empty, new_entry = false;
 
 	local_mask = cpumask_of_node(dd->node);
 	if (cpumask_first(local_mask) >= nr_cpu_ids)
@@ -672,21 +652,19 @@ int hfi1_dev_affinity_init(struct hfi1_devdata *dd)
 		}
 
 		/* Determine completion vector CPUs for the entire node */
-		cpumask_and(&entry->comp_vect_mask,
-			    &node_affinity.real_cpu_mask, local_mask);
-		cpumask_andnot(&entry->comp_vect_mask,
-			       &entry->comp_vect_mask,
-			       &entry->rcv_intr.mask);
-		cpumask_andnot(&entry->comp_vect_mask,
-			       &entry->comp_vect_mask,
-			       &entry->general_intr_mask);
+		empty = !cpumask_and(&entry->comp_vect_mask,
+				     &node_affinity.real_cpu_mask, local_mask) ||
+			!cpumask_andnot(&entry->comp_vect_mask,
+				        &entry->comp_vect_mask, &entry->rcv_intr.mask) ||
+			!cpumask_andnot(&entry->comp_vect_mask,
+				        &entry->comp_vect_mask, &entry->general_intr_mask);
 
 		/*
 		 * If there ends up being 0 CPU cores leftover for completion
 		 * vectors, use the same CPU core as the general/control
 		 * context.
 		 */
-		if (cpumask_empty(&entry->comp_vect_mask))
+		if (empty)
 			cpumask_copy(&entry->comp_vect_mask,
 				     &entry->general_intr_mask);
 	}
@@ -1000,6 +978,7 @@ int hfi1_get_proc_affinity(int node)
 		*proc_mask = current->cpus_ptr;
 	struct hfi1_affinity_node_list *affinity = &node_affinity;
 	struct cpu_mask_set *set = &affinity->proc;
+	bool diff_empty = true;
 
 	/*
 	 * check whether process/context affinity has already
@@ -1099,8 +1078,7 @@ int hfi1_get_proc_affinity(int node)
 			 * loop as the used mask gets reset when
 			 * (set->mask == set->used) before this loop.
 			 */
-			cpumask_andnot(diff, hw_thread_mask, &set->used);
-			if (!cpumask_empty(diff))
+			if (!cpumask_empty_andnot(hw_thread_mask, &set->used))
 				break;
 		}
 	}
@@ -1133,8 +1111,8 @@ int hfi1_get_proc_affinity(int node)
 	 *    used for process assignments using the same method as
 	 *    the preferred NUMA node.
 	 */
-	cpumask_andnot(diff, available_mask, intrs_mask);
-	if (!cpumask_empty(diff))
+	diff_empty = !cpumask_andnot(diff, available_mask, intrs_mask);
+	if (!diff_empty)
 		cpumask_copy(available_mask, diff);
 
 	/* If we don't have CPUs on the preferred node, use other NUMA nodes */
