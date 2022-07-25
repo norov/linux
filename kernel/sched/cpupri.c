@@ -99,9 +99,7 @@ static inline int __cpupri_find(struct cpupri *cp, struct task_struct *p,
 	if (cpumask_any_and(&p->cpus_mask, vec->mask) >= nr_cpu_ids)
 		return 0;
 
-	if (lowest_mask) {
-		cpumask_and(lowest_mask, &p->cpus_mask, vec->mask);
-
+	if (lowest_mask && !cpumask_and(lowest_mask, &p->cpus_mask, vec->mask)) {
 		/*
 		 * We have to ensure that we have at least one bit
 		 * still set in the array, since the map could have
@@ -110,8 +108,7 @@ static inline int __cpupri_find(struct cpupri *cp, struct task_struct *p,
 		 * condition, simply act as though we never hit this
 		 * priority level and continue on.
 		 */
-		if (cpumask_empty(lowest_mask))
-			return 0;
+		return 0;
 	}
 
 	return 1;
