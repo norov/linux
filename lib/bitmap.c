@@ -264,14 +264,19 @@ void __bitmap_or(unsigned long *dst, const unsigned long *bitmap1,
 }
 EXPORT_SYMBOL(__bitmap_or);
 
-void __bitmap_xor(unsigned long *dst, const unsigned long *bitmap1,
+bool __bitmap_xor(unsigned long *dst, const unsigned long *bitmap1,
 				const unsigned long *bitmap2, unsigned int bits)
 {
 	unsigned int k;
 	unsigned int nr = BITS_TO_LONGS(bits);
+	bool ret = false;
 
-	for (k = 0; k < nr; k++)
+	for (k = 0; k < nr; k++) {
 		dst[k] = bitmap1[k] ^ bitmap2[k];
+		ret |= dst[k] != 0;
+	}
+
+	return ret;
 }
 EXPORT_SYMBOL(__bitmap_xor);
 

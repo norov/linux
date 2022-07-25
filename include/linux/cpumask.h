@@ -556,12 +556,14 @@ static inline void cpumask_or(struct cpumask *dstp, const struct cpumask *src1p,
  * @dstp: the cpumask result
  * @src1p: the first input
  * @src2p: the second input
+ *
+ * If *@dstp is empty, returns false, else returns true
  */
-static inline void cpumask_xor(struct cpumask *dstp,
+static inline bool cpumask_xor(struct cpumask *dstp,
 			       const struct cpumask *src1p,
 			       const struct cpumask *src2p)
 {
-	bitmap_xor(cpumask_bits(dstp), cpumask_bits(src1p),
+	return bitmap_xor(cpumask_bits(dstp), cpumask_bits(src1p),
 				       cpumask_bits(src2p), nr_cpumask_bits);
 }
 
