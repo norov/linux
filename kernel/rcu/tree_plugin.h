@@ -1226,8 +1226,8 @@ static void rcu_boost_kthread_setaffinity(struct rcu_node *rnp, int outgoingcpu)
 		if ((mask & leaf_node_cpu_bit(rnp, cpu)) &&
 		    cpu != outgoingcpu)
 			cpumask_set_cpu(cpu, cm);
-	cpumask_and(cm, cm, housekeeping_cpumask(HK_TYPE_RCU));
-	if (cpumask_empty(cm))
+
+	if (!cpumask_and(cm, cm, housekeeping_cpumask(HK_TYPE_RCU)))
 		cpumask_copy(cm, housekeeping_cpumask(HK_TYPE_RCU));
 	set_cpus_allowed_ptr(t, cm);
 	mutex_unlock(&rnp->boost_kthread_mutex);
