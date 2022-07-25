@@ -1145,19 +1145,15 @@ static void update_tasks_cpumask(struct cpuset *cs)
  * CPUs are not removed from subparts_cpus, we have to use cpu_active_mask
  * to mask those out.
  */
-static void compute_effective_cpumask(struct cpumask *new_cpus,
+static bool compute_effective_cpumask(struct cpumask *new_cpus,
 				      struct cpuset *cs, struct cpuset *parent)
 {
-	if (parent->nr_subparts_cpus) {
-		bool not_empty = cpumask_or(new_cpus, parent->effective_cpus,
-					    parent->subparts_cpus);
-		if (not_empty)
-			not_empty = cpumask_and(new_cpus, new_cpus, cs->cpus_allowed);
-		if (not_empty)
+	if (parent->nr_subparts_cpus)
+		return cpumask_or(new_cpus, parent->effective_cpus, parent->subparts_cpus) &&
+			cpumask_and(new_cpus, new_cpus, cs->cpus_allowed) &&
 			cpumask_and(new_cpus, new_cpus, cpu_active_mask);
-	} else {
-		cpumask_and(new_cpus, cs->cpus_allowed, parent->effective_cpus);
-	}
+
+	return cpumask_and(new_cpus, cs->cpus_allowed, parent->effective_cpus);
 }
 
 /*
@@ -3143,6 +3139,7 @@ static void cpuset_hotplug_update_tasks(struct cpuset *cs, struct tmpmasks *tmp)
 	static nodemask_t new_mems;
 	bool cpus_updated;
 	bool mems_updated;
+	bool has_new;
 	struct cpuset *parent;
 retry:
 	wait_event(cpuset_attach_wq, cs->attach_in_progress == 0);
@@ -3159,7 +3156,7 @@ retry:
 	}
 
 	parent = parent_cs(cs);
-	compute_effective_cpumask(&new_cpus, cs, parent);
+	has_new = compute_effective_cpumask(&new_cpus, cs, parent);
 	nodes_and(new_mems, cs->mems_allowed, parent->effective_mems);
 
 	if (cs->nr_subparts_cpus)
@@ -3167,7 +3164,7 @@ retry:
 		 * Make sure that CPUs allocated to child partitions
 		 * do not show up in effective_cpus.
 		 */
-		cpumask_andnot(&new_cpus, &new_cpus, cs->subparts_cpus);
+		has_new = cpumask_andnot(&new_cpus, &new_cpus, cs->subparts_cpus);
 
 	if (!tmp || !cs->partition_root_state)
 		goto update_tasks;
@@ -3177,14 +3174,13 @@ retry:
 	 * effective_cpus or its parent becomes erroneous, we have to
 	 * transition it to the erroneous state.
 	 */
-	if (is_partition_root(cs) && (cpumask_empty(&new_cpus) ||
-	   (parent->partition_root_state == PRS_ERROR))) {
+	if (is_partition_root(cs) && (!has_new || parent->partition_root_state == PRS_ERROR)) {
 		if (cs->nr_subparts_cpus) {
 			spin_lock_irq(&callback_lock);
 			cs->nr_subparts_cpus = 0;
 			cpumask_clear(cs->subparts_cpus);
 			spin_unlock_irq(&callback_lock);
-			compute_effective_cpumask(&new_cpus, cs, parent);
+			has_new = compute_effective_cpumask(&new_cpus, cs, parent);
 		}
 
 		/*
@@ -3193,8 +3189,7 @@ retry:
 		 * the current partition and let the child partitions
 		 * fight for available CPUs.
 		 */
-		if ((parent->partition_root_state == PRS_ERROR) ||
-		     cpumask_empty(&new_cpus)) {
+		if ((parent->partition_root_state == PRS_ERROR) || !has_new) {
 			int old_prs;
 
 			update_parent_subparts_cpumask(cs, partcmd_disable,
