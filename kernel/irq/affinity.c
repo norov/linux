@@ -142,11 +142,10 @@ static void alloc_nodes_vectors(unsigned int numvecs,
 	for_each_node_mask(n, nodemsk) {
 		unsigned ncpus;
 
-		cpumask_and(nmsk, cpu_mask, node_to_cpumask[n]);
-		ncpus = cpumask_weight(nmsk);
-
-		if (!ncpus)
+		if (!cpumask_and(nmsk, cpu_mask, node_to_cpumask[n]))
 			continue;
+
+		ncpus = cpumask_weight(nmsk);
 		remaining_ncpus += ncpus;
 		node_vectors[n].ncpus = ncpus;
 	}
