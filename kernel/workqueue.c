@@ -3964,8 +3964,7 @@ apply_wqattrs_prepare(struct workqueue_struct *wq,
 	 * wq_unbound_cpumask, we fallback to the wq_unbound_cpumask.
 	 */
 	copy_workqueue_attrs(new_attrs, attrs);
-	cpumask_and(new_attrs->cpumask, new_attrs->cpumask, wq_unbound_cpumask);
-	if (unlikely(cpumask_empty(new_attrs->cpumask)))
+	if (unlikely(!cpumask_and(new_attrs->cpumask, new_attrs->cpumask, wq_unbound_cpumask)))
 		cpumask_copy(new_attrs->cpumask, wq_unbound_cpumask);
 
 	/*
