@@ -1456,7 +1456,6 @@ out:
 }
 
 static struct cpumask osnoise_cpumask;
-static struct cpumask save_cpumask;
 
 /*
  * osnoise_sleep - sleep until the next period
@@ -1770,20 +1769,18 @@ static int start_kthread(unsigned int cpu)
  */
 static int start_per_cpu_kthreads(void)
 {
-	struct cpumask *current_mask = &save_cpumask;
 	int retval = 0;
 	int cpu;
 
 	cpus_read_lock();
-	/*
-	 * Run only on online CPUs in which osnoise is allowed to run.
-	 */
-	cpumask_and(current_mask, cpu_online_mask, &osnoise_cpumask);
 
 	for_each_possible_cpu(cpu)
 		per_cpu(per_cpu_osnoise_var, cpu).kthread = NULL;
 
-	for_each_cpu(cpu, current_mask) {
+	/*
+	 * Run only on online CPUs in which osnoise is allowed to run.
+	 */
+	for_each_cpu_and(cpu, cpu_online_mask, &osnoise_cpumask) {
 		retval = start_kthread(cpu);
 		if (retval) {
 			stop_per_cpu_kthreads();
