@@ -350,6 +350,7 @@ static unsigned int sun4u_compute_tid(unsigned long imap, unsigned long cpuid)
 static int irq_choose_cpu(unsigned int irq, const struct cpumask *affinity)
 {
 	cpumask_t mask;
+	bool empty;
 	int cpuid;
 
 	cpumask_copy(&mask, affinity);
@@ -358,8 +359,8 @@ static int irq_choose_cpu(unsigned int irq, const struct cpumask *affinity)
 	} else {
 		cpumask_t tmp;
 
-		cpumask_and(&tmp, cpu_online_mask, &mask);
-		cpuid = cpumask_empty(&tmp) ? map_to_cpu(irq) : cpumask_first(&tmp);
+		empty = !cpumask_and(&tmp, cpu_online_mask, &mask);
+		cpuid = empty ? map_to_cpu(irq) : cpumask_first(&tmp);
 	}
 
 	return cpuid;
