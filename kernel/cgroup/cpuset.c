@@ -1493,9 +1493,8 @@ static void update_cpumasks_hier(struct cpuset *cs, struct tmpmasks *tmp)
 			 * let its child partition roots to compete for
 			 * CPUs again.
 			 */
-			cpumask_andnot(cp->effective_cpus, cp->effective_cpus,
-				       cp->subparts_cpus);
-			if (cpumask_empty(cp->effective_cpus)) {
+			if (!cpumask_andnot(cp->effective_cpus, cp->effective_cpus,
+						cp->subparts_cpus)) {
 				cpumask_copy(cp->effective_cpus, tmp->new_cpus);
 				cpumask_clear(cp->subparts_cpus);
 				cp->nr_subparts_cpus = 0;
