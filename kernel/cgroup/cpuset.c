@@ -1149,10 +1149,12 @@ static void compute_effective_cpumask(struct cpumask *new_cpus,
 				      struct cpuset *cs, struct cpuset *parent)
 {
 	if (parent->nr_subparts_cpus) {
-		cpumask_or(new_cpus, parent->effective_cpus,
-			   parent->subparts_cpus);
-		cpumask_and(new_cpus, new_cpus, cs->cpus_allowed);
-		cpumask_and(new_cpus, new_cpus, cpu_active_mask);
+		bool not_empty = cpumask_or(new_cpus, parent->effective_cpus,
+					    parent->subparts_cpus);
+		if (not_empty)
+			not_empty = cpumask_and(new_cpus, new_cpus, cs->cpus_allowed);
+		if (not_empty)
+			cpumask_and(new_cpus, new_cpus, cpu_active_mask);
 	} else {
 		cpumask_and(new_cpus, cs->cpus_allowed, parent->effective_cpus);
 	}
