@@ -100,17 +100,14 @@ static inline int find_unassigned_irq(void)
 
 static inline int find_unassigned_vector(cpumask_t domain)
 {
-	cpumask_t mask;
 	int pos, vector;
 
-	cpumask_and(&mask, &domain, cpu_online_mask);
-	if (cpumask_empty(&mask))
+	if (cpumask_empty_and(&domain, cpu_online_mask))
 		return -EINVAL;
 
 	for (pos = 0; pos < IA64_NUM_DEVICE_VECTORS; pos++) {
 		vector = IA64_FIRST_DEVICE_VECTOR + pos;
-		cpumask_and(&mask, &domain, &vector_table[vector]);
-		if (!cpumask_empty(&mask))
+		if (!cpumask_empty_and(&domain, &vector_table[vector]))
 			continue;
 		return vector;
 	}
