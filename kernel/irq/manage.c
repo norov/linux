@@ -223,6 +223,7 @@ int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	struct irq_desc *desc = irq_data_to_desc(data);
 	struct irq_chip *chip = irq_data_get_irq_chip(data);
 	const struct cpumask  *prog_mask;
+	bool tmp_not_empty;
 	int ret;
 
 	static DEFINE_RAW_SPINLOCK(tmp_mask_lock);
@@ -271,8 +272,8 @@ int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	 * unless we are being asked to force the affinity (in which
 	 * case we do as we are told).
 	 */
-	cpumask_and(&tmp_mask, prog_mask, cpu_online_mask);
-	if (!force && !cpumask_empty(&tmp_mask))
+	tmp_not_empty = cpumask_and(&tmp_mask, prog_mask, cpu_online_mask);
+	if (!force && tmp_not_empty)
 		ret = chip->irq_set_affinity(data, &tmp_mask, force);
 	else if (force)
 		ret = chip->irq_set_affinity(data, mask, force);
