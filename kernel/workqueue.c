@@ -5376,8 +5376,7 @@ int workqueue_set_unbound_cpumask(cpumask_var_t cpumask)
 	 * Not excluding isolated cpus on purpose.
 	 * If the user wishes to include them, we allow that.
 	 */
-	cpumask_and(cpumask, cpumask, cpu_possible_mask);
-	if (!cpumask_empty(cpumask)) {
+	if (cpumask_and(cpumask, cpumask, cpu_possible_mask)) {
 		apply_wqattrs_lock();
 		if (cpumask_equal(cpumask, wq_unbound_cpumask)) {
 			ret = 0;
