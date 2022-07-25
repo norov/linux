@@ -151,7 +151,7 @@ void bitmap_cut(unsigned long *dst, const unsigned long *src,
 		unsigned int first, unsigned int cut, unsigned int nbits);
 bool __bitmap_and(unsigned long *dst, const unsigned long *bitmap1,
 		 const unsigned long *bitmap2, unsigned int nbits);
-void __bitmap_or(unsigned long *dst, const unsigned long *bitmap1,
+bool __bitmap_or(unsigned long *dst, const unsigned long *bitmap1,
 		 const unsigned long *bitmap2, unsigned int nbits);
 bool __bitmap_xor(unsigned long *dst, const unsigned long *bitmap1,
 		  const unsigned long *bitmap2, unsigned int nbits);
@@ -324,13 +324,12 @@ static inline bool bitmap_and(unsigned long *dst, const unsigned long *src1,
 	return __bitmap_and(dst, src1, src2, nbits);
 }
 
-static inline void bitmap_or(unsigned long *dst, const unsigned long *src1,
+static inline bool bitmap_or(unsigned long *dst, const unsigned long *src1,
 			const unsigned long *src2, unsigned int nbits)
 {
 	if (small_const_nbits(nbits))
-		*dst = *src1 | *src2;
-	else
-		__bitmap_or(dst, src1, src2, nbits);
+		return (*dst = (*src1 | *src2) & BITMAP_LAST_WORD_MASK(nbits)) != 0;
+	return __bitmap_or(dst, src1, src2, nbits);
 }
 
 static inline bool bitmap_xor(unsigned long *dst, const unsigned long *src1,
