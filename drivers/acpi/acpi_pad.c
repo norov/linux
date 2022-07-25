@@ -90,6 +90,7 @@ static void round_robin_cpu(unsigned int tsk_index)
 	int cpu;
 	unsigned long min_weight = -1;
 	unsigned long preferred_cpu;
+	bool empty;
 
 	if (!alloc_cpumask_var(&tmp, GFP_KERNEL))
 		return;
@@ -98,11 +99,11 @@ static void round_robin_cpu(unsigned int tsk_index)
 	cpumask_clear(tmp);
 	for_each_cpu(cpu, pad_busy_cpus)
 		cpumask_or(tmp, tmp, topology_sibling_cpumask(cpu));
-	cpumask_andnot(tmp, cpu_online_mask, tmp);
+	empty = !cpumask_andnot(tmp, cpu_online_mask, tmp);
 	/* avoid HT sibilings if possible */
-	if (cpumask_empty(tmp))
-		cpumask_andnot(tmp, cpu_online_mask, pad_busy_cpus);
-	if (cpumask_empty(tmp)) {
+	if (empty)
+		empty = !cpumask_andnot(tmp, cpu_online_mask, pad_busy_cpus);
+	if (empty) {
 		mutex_unlock(&round_robin_lock);
 		free_cpumask_var(tmp);
 		return;
