@@ -395,6 +395,7 @@ init_cpu_capacity_callback(struct notifier_block *nb,
 			   void *data)
 {
 	struct cpufreq_policy *policy = data;
+	bool empty;
 	int cpu;
 
 	if (!raw_capacity)
@@ -407,12 +408,12 @@ init_cpu_capacity_callback(struct notifier_block *nb,
 		 cpumask_pr_args(policy->related_cpus),
 		 cpumask_pr_args(cpus_to_visit));
 
-	cpumask_andnot(cpus_to_visit, cpus_to_visit, policy->related_cpus);
+	empty = !cpumask_andnot(cpus_to_visit, cpus_to_visit, policy->related_cpus);
 
 	for_each_cpu(cpu, policy->related_cpus)
 		per_cpu(freq_factor, cpu) = policy->cpuinfo.max_freq / 1000;
 
-	if (cpumask_empty(cpus_to_visit)) {
+	if (empty) {
 		topology_normalize_cpu_scale();
 		schedule_work(&update_topology_flags_work);
 		free_raw_capacity();
