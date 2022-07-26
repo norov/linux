@@ -7,7 +7,7 @@
 
 lib-y		:= changebit.o csumipv6.o csumpartial.o               \
 		   csumpartialcopy.o csumpartialcopyuser.o clearbit.o \
-		   delay.o delay-loop.o findbit.o memchr.o memcpy.o   \
+		   delay.o delay-loop.o memchr.o memcpy.o             \
 		   memmove.o memset.o setbit.o                        \
 		   strchr.o strrchr.o                                 \
 		   testchangebit.o testclearbit.o testsetbit.o        \
