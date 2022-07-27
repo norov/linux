@@ -13,4 +13,20 @@ unsigned long _find_first_zero_bit_le(const unsigned long *addr, unsigned long s
 	return FIND_FIRST_BIT(~addr[idx], nbits, 0);
 }
 EXPORT_SYMBOL(_find_first_zero_bit_le);
+
+#ifndef find_next_zero_bit_le
+unsigned long _find_next_zero_bit_le(const void *addr, unsigned
+		long size, unsigned long offset)
+{
+	return FIND_NEXT_BIT(~addr[idx], nbits, start);
+}
+#endif
+
+#ifndef find_next_bit_le
+unsigned long _find_next_bit_le(const void *addr, unsigned
+		long size, unsigned long offset)
+{
+	return FIND_NEXT_BIT(addr[idx], nbits, start);
+}
+
 #endif
