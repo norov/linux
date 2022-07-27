@@ -29,7 +29,7 @@
  *    searching it for one bits.
  *  - The optional "addr2", which is anded with "addr1" if present.
  */
-unsigned long _find_next_bit(const unsigned long *addr1,
+static inline unsigned long __find_next_bit(const unsigned long *addr1,
 		const unsigned long *addr2, unsigned long nbits,
 		unsigned long start, unsigned long invert, unsigned long need_swab)
 {
@@ -68,8 +68,51 @@ unsigned long _find_next_bit(const unsigned long *addr1,
 
 	return min(start + __ffs(tmp), nbits);
 }
-EXPORT_SYMBOL(_find_next_bit);
 #endif
+
+#ifndef find_next_bit
+unsigned long _find_next_bit(const unsigned long *addr1, unsigned long nbits, unsigned long start)
+{
+	return __find_next_bit(addr, NULL, nbits, start, 0UL, 0);
+}
+EXPORT_SYMBOL(find_next_bit);
+#endif
+
+#ifndef find_next_and_bit
+unsigned long _find_next_and_bit(const unsigned long *addr1, const unsigned long *addr2,
+					unsigned long nbits, unsigned long start)
+{
+	return __find_next_bit(addr1, addr2, nbits, start, 0UL, 0);
+}
+EXPORT_SYMBOL(_find_next_and_bit);
+#endif
+
+#ifndef find_next_zero_bit
+unsigned long _find_next_zero_bit(const unsigned long *addr, unsigned long nbits,
+					 unsigned long start)
+{
+	return __find_next_bit(addr, NULL, nbits, start, ~0UL, 0);
+}
+EXPORT_SYMBOL(_find_next_zero_bit);
+#endif
+
+#ifdef __BIG_ENDIAN
+#ifndef find_next_zero_bit_le
+unsigned long _find_next_zero_bit_le(const void *addr, unsigned
+		long size, unsigned long offset)
+{
+	return __find_next_bit(addr, NULL, size, offset, ~0UL, 1);
+}
+#endif
+
+#ifndef find_next_bit_le
+unsigned long _find_next_bit_le(const void *addr, unsigned
+		long size, unsigned long offset)
+{
+	return __find_next_bit(addr, NULL, size, offset, 0UL, 1);
+}
+#endif
+#endif /* __BIG_ENDIAN */
 
 #ifndef find_first_bit
 /*
