@@ -31,7 +31,7 @@
  */
 unsigned long _find_next_bit(const unsigned long *addr1,
 		const unsigned long *addr2, unsigned long nbits,
-		unsigned long start, unsigned long invert, unsigned long le)
+		unsigned long start, unsigned long invert, unsigned long need_swab)
 {
 	unsigned long tmp, mask;
 
@@ -45,7 +45,7 @@ unsigned long _find_next_bit(const unsigned long *addr1,
 
 	/* Handle 1st word. */
 	mask = BITMAP_FIRST_WORD_MASK(start);
-	if (le)
+	if (need_swab)
 		mask = swab(mask);
 
 	tmp &= mask;
@@ -63,7 +63,7 @@ unsigned long _find_next_bit(const unsigned long *addr1,
 		tmp ^= invert;
 	}
 
-	if (le)
+	if (need_swab)
 		tmp = swab(tmp);
 
 	return min(start + __ffs(tmp), nbits);
