@@ -547,6 +547,8 @@ early_param("nomca", setup_nomca);
 void __init
 setup_arch (char **cmdline_p)
 {
+	unsigned int ncpus;
+
 	unw_init();
 
 	ia64_patch_vtop((u64) __start___vtop_patchlist, (u64) __end___vtop_patchlist);
@@ -572,9 +574,8 @@ setup_arch (char **cmdline_p)
 #ifdef CONFIG_ACPI_HOTPLUG_CPU
 	prefill_possible_map();
 #endif
-	per_cpu_scan_finalize((cpumask_empty(&early_cpu_possible_map) ?
-		32 : cpumask_weight(&early_cpu_possible_map)),
-		additional_cpus > 0 ? additional_cpus : 0);
+	ncpus = cpumask_weight(&early_cpu_possible_map) ? : 32;
+	per_cpu_scan_finalize(ncpus, additional_cpus > 0 ? additional_cpus : 0);
 #endif /* CONFIG_ACPI_NUMA */
 
 #ifdef CONFIG_SMP
