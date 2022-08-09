@@ -561,7 +561,7 @@ int qman_test_stash(void)
 {
 	int err;
 
-	if (cpumask_weight(cpu_online_mask) < 2) {
+	if (num_online_cpus() < 2) {
 		pr_info("%s(): skip - only 1 CPU\n", __func__);
 		return 0;
 	}
