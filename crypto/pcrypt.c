@@ -177,7 +177,7 @@ static int pcrypt_aead_init_tfm(struct crypto_aead *tfm)
 	struct crypto_aead *cipher;
 
 	cpu_index = (unsigned int)atomic_inc_return(&ictx->tfm_count) %
-		    cpumask_weight(cpu_online_mask);
+		    num_online_cpus();
 
 	ctx->cb_cpu = cpumask_first(cpu_online_mask);
 	for (cpu = 0; cpu < cpu_index; cpu++)
