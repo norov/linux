@@ -1036,11 +1036,13 @@ static void rcu_tasks_be_rude(struct work_struct *work)
 // Wait for one rude RCU-tasks grace period.
 static void rcu_tasks_rude_wait_gp(struct rcu_tasks *rtp)
 {
-	if (num_online_cpus() <= 1)
-		return;	// Fastpath for only one CPU.
+	unsigned int n = num_online_cpus();
 
-	rtp->n_ipis += cpumask_weight(cpu_online_mask);
-	schedule_on_each_cpu(rcu_tasks_be_rude);
+	if (unlikely(n > 1)) {
+		// Slow path for many CPU.
+		rtp->n_ipis += n;
+		schedule_on_each_cpu(rcu_tasks_be_rude);
+	}
 }
 
 void call_rcu_tasks_rude(struct rcu_head *rhp, rcu_callback_t func);
