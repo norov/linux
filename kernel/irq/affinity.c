@@ -129,7 +129,6 @@ static void alloc_nodes_vectors(unsigned int numvecs,
 				cpumask_var_t *node_to_cpumask,
 				const struct cpumask *cpu_mask,
 				const nodemask_t nodemsk,
-				struct cpumask *nmsk,
 				struct node_vectors *node_vectors)
 {
 	unsigned n, remaining_ncpus = 0;
@@ -142,9 +141,7 @@ static void alloc_nodes_vectors(unsigned int numvecs,
 	for_each_node_mask(n, nodemsk) {
 		unsigned ncpus;
 
-		cpumask_and(nmsk, cpu_mask, node_to_cpumask[n]);
-		ncpus = cpumask_weight(nmsk);
-
+		ncpus = cpumask_weight_and(cpu_mask, node_to_cpumask[n]);
 		if (!ncpus)
 			continue;
 		remaining_ncpus += ncpus;
@@ -286,7 +283,7 @@ static int __irq_build_affinity_masks(unsigned int startvec,
 
 	/* allocate vector number for each node */
 	alloc_nodes_vectors(numvecs, node_to_cpumask, cpu_mask,
-			    nodemsk, nmsk, node_vectors);
+			    nodemsk, node_vectors);
 
 	for (i = 0; i < nr_node_ids; i++) {
 		unsigned int ncpus, v;
