@@ -168,6 +168,7 @@ int padata_do_parallel(struct padata_shell *ps,
 		       struct padata_priv *padata, int *cb_cpu)
 {
 	struct padata_instance *pinst = ps->pinst;
+	unsigned int weight;
 	int i, cpu, cpu_index, err;
 	struct parallel_data *pd;
 	struct padata_work *pw;
@@ -181,17 +182,13 @@ int padata_do_parallel(struct padata_shell *ps,
 		goto out;
 
 	if (!cpumask_test_cpu(*cb_cpu, pd->cpumask.cbcpu)) {
-		if (cpumask_empty(pd->cpumask.cbcpu))
+		weight = cpumask_weight(pd->cpumask.cbcpu);
+		if (weight == 0)
 			goto out;
 
 		/* Select an alternate fallback CPU and notify the caller. */
-		cpu_index = *cb_cpu % cpumask_weight(pd->cpumask.cbcpu);
-
-		cpu = cpumask_first(pd->cpumask.cbcpu);
-		for (i = 0; i < cpu_index; i++)
-			cpu = cpumask_next(cpu, pd->cpumask.cbcpu);
-
-		*cb_cpu = cpu;
+		cpu_index = *cb_cpu % weight;
+		*cb_cpu = cpumask_nth(cpu_index, pd->cpumask.cbcpu);
 	}
 
 	err =  -EBUSY;
