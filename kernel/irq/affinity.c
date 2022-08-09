@@ -288,15 +288,17 @@ static int __irq_build_affinity_masks(unsigned int startvec,
 	for (i = 0; i < nr_node_ids; i++) {
 		unsigned int ncpus, v;
 		struct node_vectors *nv = &node_vectors[i];
+		bool empty;
 
 		if (nv->nvectors == UINT_MAX)
 			continue;
 
 		/* Get the cpus on this node which are in the mask */
-		cpumask_and(nmsk, cpu_mask, node_to_cpumask[nv->id]);
-		ncpus = cpumask_weight(nmsk);
-		if (!ncpus)
+		empty = !cpumask_and(nmsk, cpu_mask, node_to_cpumask[nv->id]);
+		if (empty)
 			continue;
+
+		ncpus = cpumask_weight(nmsk);
 
 		WARN_ON_ONCE(nv->nvectors > ncpus);
 
