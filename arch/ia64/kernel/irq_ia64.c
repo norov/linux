@@ -296,7 +296,6 @@ int irq_prepare_move(int irq, int cpu)
 void irq_complete_move(unsigned irq)
 {
 	struct irq_cfg *cfg = &irq_cfg[irq];
-	cpumask_t cleanup_mask;
 	int i;
 
 	if (likely(!cfg->move_in_progress))
@@ -305,9 +304,8 @@ void irq_complete_move(unsigned irq)
 	if (unlikely(cpumask_test_cpu(smp_processor_id(), &cfg->old_domain)))
 		return;
 
-	cpumask_and(&cleanup_mask, &cfg->old_domain, cpu_online_mask);
-	cfg->move_cleanup_count = cpumask_weight(&cleanup_mask);
-	for_each_cpu(i, &cleanup_mask)
+	cfg->move_cleanup_count = cpumask_weight_and(&cfg->old_domain, cpu_online_mask);
+	for_each_cpu_and(i, &cfg->old_domain, cpu_online_mask)
 		ia64_send_ipi(i, IA64_IRQ_MOVE_VECTOR, IA64_IPI_DM_INT, 0);
 	cfg->move_in_progress = 0;
 }
