@@ -27,7 +27,7 @@ static const guid_t apple_prp_guid =
  */
 void acpi_extract_apple_properties(struct acpi_device *adev)
 {
-	unsigned int i, j = 0, newsize = 0, numprops, numvalid;
+	unsigned int i, j = 0, newsize = 0, numprops, numvalid = 0;
 	union acpi_object *props, *newprops;
 	unsigned long *valid = NULL;
 	void *free_space;
@@ -75,12 +75,12 @@ void acpi_extract_apple_properties(struct acpi_device *adev)
 			continue; /* skip invalid properties */
 
 		__set_bit(i, valid);
+		numvalid++;
 		newsize += key->string.length + 1;
 		if ( val->type == ACPI_TYPE_BUFFER)
 			newsize += val->buffer.length;
 	}
 
-	numvalid = bitmap_weight(valid, numprops);
 	if (numprops > numvalid)
 		acpi_handle_info(adev->handle, FW_INFO
 				 "skipped %u properties: wrong type\n",
