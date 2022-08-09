@@ -156,7 +156,6 @@ static int hfi1_netdev_allot_ctxt(struct hfi1_netdev_rx *rx,
 u32 hfi1_num_netdev_contexts(struct hfi1_devdata *dd, u32 available_contexts,
 			     struct cpumask *cpu_mask)
 {
-	cpumask_var_t node_cpu_mask;
 	unsigned int available_cpus;
 
 	if (!HFI1_CAP_IS_KSET(AIP))
@@ -168,16 +167,7 @@ u32 hfi1_num_netdev_contexts(struct hfi1_devdata *dd, u32 available_contexts,
 		return 0;
 	}
 
-	if (!zalloc_cpumask_var(&node_cpu_mask, GFP_KERNEL)) {
-		dd_dev_err(dd, "Unable to allocate cpu_mask for netdevs.\n");
-		return 0;
-	}
-
-	cpumask_and(node_cpu_mask, cpu_mask, cpumask_of_node(dd->node));
-
-	available_cpus = cpumask_weight(node_cpu_mask);
-
-	free_cpumask_var(node_cpu_mask);
+	available_cpus = cpumask_weight_and(cpu_mask, cpumask_of_node(dd->node));
 
 	return min3(available_cpus, available_contexts,
 		    (u32)HFI1_MAX_NETDEV_CTXTS);
