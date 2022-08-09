@@ -643,6 +643,16 @@ static __always_inline bool cpumask_empty(const struct cpumask *srcp)
 }
 
 /**
+ * cpumask_empty_and - (*srcp1 & *srcp2) == 0
+ * @srcp: the cpumask to that all cpus < nr_cpu_ids are clear.
+ */
+static inline bool cpumask_empty_and(const struct cpumask *srcp1,
+					const struct cpumask *srcp2)
+{
+	return bitmap_empty_and(cpumask_bits(srcp1), cpumask_bits(srcp2), nr_cpumask_bits);
+}
+
+/**
  * cpumask_full - *srcp == 0xFFFFFFFF...
  * @srcp: the cpumask to that all cpus < nr_cpu_ids are set.
  */
