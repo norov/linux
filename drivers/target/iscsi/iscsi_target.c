@@ -3625,7 +3625,6 @@ static int iscsit_send_reject(
 void iscsit_thread_get_cpumask(struct iscsit_conn *conn)
 {
 	int ord, cpu;
-	cpumask_var_t conn_allowed_cpumask;
 
 	/*
 	 * bitmap_id is assigned from iscsit_global->ts_bitmap from
@@ -3635,34 +3634,18 @@ void iscsit_thread_get_cpumask(struct iscsit_conn *conn)
 	 * iSCSI connection's RX/TX threads will be scheduled to
 	 * execute upon.
 	 */
-	if (!zalloc_cpumask_var(&conn_allowed_cpumask, GFP_KERNEL)) {
-		ord = conn->bitmap_id % cpumask_weight(cpu_online_mask);
-		for_each_online_cpu(cpu) {
-			if (ord-- == 0) {
-				cpumask_set_cpu(cpu, conn->conn_cpumask);
-				return;
-			}
-		}
-	} else {
-		cpumask_and(conn_allowed_cpumask, iscsit_global->allowed_cpumask,
-			cpu_online_mask);
-
-		cpumask_clear(conn->conn_cpumask);
-		ord = conn->bitmap_id % cpumask_weight(conn_allowed_cpumask);
-		for_each_cpu(cpu, conn_allowed_cpumask) {
-			if (ord-- == 0) {
-				cpumask_set_cpu(cpu, conn->conn_cpumask);
-				free_cpumask_var(conn_allowed_cpumask);
-				return;
-			}
-		}
-		free_cpumask_var(conn_allowed_cpumask);
+	cpumask_clear(conn->conn_cpumask);
+	ord = conn->bitmap_id %
+		cpumask_weight_and(iscsit_global->allowed_cpumask, cpu_online_mask);
+	cpu = cpumask_nth_and(ord, iscsit_global->allowed_cpumask, cpu_online_mask);
+	if (unlikely(cpu >= nr_cpumask_bits)) {
+		/* This should never be reached..  */
+		dump_stack();
+		cpumask_setall(conn->conn_cpumask);
+		return;
 	}
-	/*
-	 * This should never be reached..
-	 */
-	dump_stack();
-	cpumask_setall(conn->conn_cpumask);
+
+	cpumask_set_cpu(cpu, conn->conn_cpumask);
 }
 
 static void iscsit_thread_reschedule(struct iscsit_conn *conn)
