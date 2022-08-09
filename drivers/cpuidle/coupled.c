@@ -624,13 +624,6 @@ out:
 	return entered_state;
 }
 
-static void cpuidle_coupled_update_online_cpus(struct cpuidle_coupled *coupled)
-{
-	cpumask_t cpus;
-	cpumask_and(&cpus, cpu_online_mask, &coupled->coupled_cpus);
-	coupled->online_count = cpumask_weight(&cpus);
-}
-
 /**
  * cpuidle_coupled_register_device - register a coupled cpuidle device
  * @dev: struct cpuidle_device for the current cpu
@@ -669,8 +662,7 @@ have_coupled:
 	if (WARN_ON(!cpumask_equal(&dev->coupled_cpus, &coupled->coupled_cpus)))
 		coupled->prevent++;
 
-	cpuidle_coupled_update_online_cpus(coupled);
-
+	coupled->online_count = cpumask_weight_and(cpu_online_mask, &coupled->coupled_cpus);
 	coupled->refcnt++;
 
 	csd = &per_cpu(cpuidle_coupled_poke_cb, dev->cpu);
@@ -748,7 +740,8 @@ static int coupled_cpu_online(unsigned int cpu)
 
 	dev = per_cpu(cpuidle_devices, cpu);
 	if (dev && dev->coupled) {
-		cpuidle_coupled_update_online_cpus(dev->coupled);
+		dev->coupled->online_count = cpumask_weight_and(cpu_online_mask,
+								&dev->coupled->coupled_cpus);
 		cpuidle_coupled_allow_idle(dev->coupled);
 	}
 
