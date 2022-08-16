@@ -685,6 +685,31 @@ static void __init test_for_each_set_clump8(void)
 		expect_eq_clump8(start, CLUMP_EXP_NUMBITS, clump_exp, &clump);
 }
 
+static void __init test_for_each_wrap(void)
+{
+	DECLARE_BITMAP(orig, 500);
+	DECLARE_BITMAP(copy, 500);
+	unsigned int wr, bit;
+
+	bitmap_zero(orig, CLUMP_EXP_NUMBITS);
+
+	/* Set individual bits */
+	for (bit = 0; bit < 500; bit += 10)
+		bitmap_set(orig, bit, 1);
+
+	/* Set range of bits */
+	bitmap_set(orig, 100, 50);
+
+	for (wr = 0; wr < 500; wr++) {
+		bitmap_zero(copy, 500);
+
+		for_each_set_bit_wrap(bit, orig, 500, wr)
+			bitmap_set(copy, bit, 1);
+
+		expect_eq_bitmap(orig, copy, 500);
+	}
+}
+
 struct test_bitmap_cut {
 	unsigned int first;
 	unsigned int cut;
@@ -952,6 +977,7 @@ static void __init selftest(void)
 	test_bitmap_cut();
 	test_bitmap_print_buf();
 	test_bitmap_const_eval();
+	test_for_each_wrap();
 }
 
 KSTM_MODULE_LOADERS(test_bitmap);
