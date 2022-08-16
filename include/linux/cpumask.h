@@ -14,6 +14,8 @@
 #include <linux/bug.h>
 #include <linux/gfp_types.h>
 #include <linux/numa.h>
+#include <linux/percpu.h>
+#include <linux/percpu-defs.h>
 
 /* Don't assign or return these: may not be this big! */
 typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
@@ -202,10 +204,47 @@ static inline unsigned int cpumask_any_distribute(const struct cpumask *srcp)
 	return cpumask_first(srcp);
 }
 #else
+DECLARE_PER_CPU(int, distribute_cpu_mask_prev);
 unsigned int cpumask_local_spread(unsigned int i, int node);
+
+/**
+ * Returns an arbitrary cpu within srcp1 & srcp2.
+ *
+ * Iterated calls using the same srcp1 and srcp2 will be distributed within
+ * their intersection.
+ *
+ * Returns >= nr_cpu_ids if the intersection is empty.
+ */
+static inline
 unsigned int cpumask_any_and_distribute(const struct cpumask *src1p,
-			       const struct cpumask *src2p);
-unsigned int cpumask_any_distribute(const struct cpumask *srcp);
+			       const struct cpumask *src2p)
+{
+	unsigned int next, prev;
+
+	/* NOTE: our first selection will skip 0. */
+	prev = __this_cpu_read(distribute_cpu_mask_prev);
+
+	next = find_next_and_bit_wrap(cpumask_bits(src1p), cpumask_bits(src2p),
+					nr_cpumask_bits, prev + 1);
+	if (next < nr_cpu_ids)
+		__this_cpu_write(distribute_cpu_mask_prev, next);
+
+	return next;
+}
+
+static inline
+unsigned int cpumask_any_distribute(const struct cpumask *srcp)
+{
+	unsigned int next, prev;
+
+	/* NOTE: our first selection will skip 0. */
+	prev = __this_cpu_read(distribute_cpu_mask_prev);
+	next = find_next_bit_wrap(cpumask_bits(srcp), nr_cpumask_bits, prev + 1);
+	if (next < nr_cpu_ids)
+		__this_cpu_write(distribute_cpu_mask_prev, next);
+
+	return next;
+}
 #endif /* NR_CPUS */
 
 /**
