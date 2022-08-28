@@ -183,7 +183,11 @@ static inline int get_boot_cpu_id(void)
 
 static inline void set_nr_cpu_ids(unsigned int nr)
 {
+#ifdef CONFIG_FORCE_NR_CPUS
+	WARN_ON(nr_cpu_ids != nr);
+#else
 	nr_cpu_ids = nr;
+#endif
 }
 
 #else /* !SMP */
