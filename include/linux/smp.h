@@ -181,6 +181,11 @@ static inline int get_boot_cpu_id(void)
 	return __boot_cpu_id;
 }
 
+static inline void set_nr_cpu_ids(unsigned int nr)
+{
+	nr_cpu_ids = nr;
+}
+
 #else /* !SMP */
 
 static inline void smp_send_stop(void) { }
