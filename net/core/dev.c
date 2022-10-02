@@ -2542,7 +2542,7 @@ int __netif_set_xps_queue(struct net_device *dev, const unsigned long *mask,
 			  u16 index, enum xps_map_type type)
 {
 	struct xps_dev_maps *dev_maps, *new_dev_maps = NULL, *old_dev_maps = NULL;
-	const unsigned long *online_mask = NULL;
+	const unsigned long *online_mask;
 	bool active = false, copy = false;
 	int i, j, tci, numa_node_id = -2;
 	int maps_sz, num_tc = 1, tc = 0;
@@ -2565,9 +2565,11 @@ int __netif_set_xps_queue(struct net_device *dev, const unsigned long *mask,
 
 	if (type == XPS_RXQS) {
 		nr_ids = dev->num_rx_queues;
+		online_mask = bitmap_alloc(nr_ids, GFP_KERNEL);
+		if (!online_mask)
+			return -ENOMEM;
 	} else {
-		if (num_possible_cpus() > 1)
-			online_mask = cpumask_bits(cpu_online_mask);
+		online_mask = cpumask_bits(cpu_online_mask);
 		nr_ids = nr_cpu_ids;
 	}
 
@@ -2593,10 +2595,8 @@ int __netif_set_xps_queue(struct net_device *dev, const unsigned long *mask,
 	     j < nr_ids;) {
 		if (!new_dev_maps) {
 			new_dev_maps = kzalloc(maps_sz, GFP_KERNEL);
-			if (!new_dev_maps) {
-				mutex_unlock(&xps_map_mutex);
-				return -ENOMEM;
-			}
+			if (!new_dev_maps)
+				goto err_out;
 
 			new_dev_maps->nr_ids = nr_ids;
 			new_dev_maps->num_tc = num_tc;
@@ -2718,7 +2718,8 @@ out_no_new_maps:
 
 out_no_maps:
 	mutex_unlock(&xps_map_mutex);
-
+	if (type == XPS_RXQS)
+		bitmap_free(online_mask);
 	return 0;
 error:
 	/* remove any maps that we added */
@@ -2733,8 +2734,10 @@ error:
 		}
 	}
 
+err_out:
 	mutex_unlock(&xps_map_mutex);
-
+	if (type == XPS_RXQS)
+		bitmap_free(online_mask);
 	kfree(new_dev_maps);
 	return -ENOMEM;
 }
