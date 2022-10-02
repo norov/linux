@@ -2563,9 +2563,6 @@ int __netif_set_xps_queue(struct net_device *dev, const unsigned long *mask,
 			return -EINVAL;
 	}
 
-	mutex_lock(&xps_map_mutex);
-
-	dev_maps = xmap_dereference(dev->xps_maps[type]);
 	if (type == XPS_RXQS) {
 		maps_sz = XPS_RXQ_DEV_MAPS_SIZE(num_tc, dev->num_rx_queues);
 		nr_ids = dev->num_rx_queues;
@@ -2578,6 +2575,10 @@ int __netif_set_xps_queue(struct net_device *dev, const unsigned long *mask,
 
 	if (maps_sz < L1_CACHE_BYTES)
 		maps_sz = L1_CACHE_BYTES;
+
+	mutex_lock(&xps_map_mutex);
+
+	dev_maps = xmap_dereference(dev->xps_maps[type]);
 
 	/* The old dev_maps could be larger or smaller than the one we're
 	 * setting up now, as dev->num_tc or nr_ids could have been updated in
