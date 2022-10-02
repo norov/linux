@@ -825,11 +825,8 @@ struct xps_dev_maps {
 	struct xps_map __rcu *attr_map[]; /* Either CPUs map or RXQs map */
 };
 
-#define XPS_CPU_DEV_MAPS_SIZE(_tcs) (sizeof(struct xps_dev_maps) +	\
-	(nr_cpu_ids * (_tcs) * sizeof(struct xps_map *)))
-
-#define XPS_RXQ_DEV_MAPS_SIZE(_tcs, _rxqs) (sizeof(struct xps_dev_maps) +\
-	(_rxqs * (_tcs) * sizeof(struct xps_map *)))
+#define XPS_DEV_MAPS_SIZE(_tcs, nr) (sizeof(struct xps_dev_maps) +\
+	((nr) * (_tcs) * sizeof(struct xps_map *)))
 
 #endif /* CONFIG_XPS */
 
