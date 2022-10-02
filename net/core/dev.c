@@ -2591,8 +2591,7 @@ int __netif_set_xps_queue(struct net_device *dev, const unsigned long *mask,
 		copy = true;
 
 	/* allocate memory for queue storage */
-	for (j = -1; j = netif_attrmask_next_and(j, online_mask, mask, nr_ids),
-	     j < nr_ids;) {
+	for_each_and_bit(j, online_mask, mask ? : online_mask, nr_ids) {
 		if (!new_dev_maps) {
 			new_dev_maps = kzalloc(maps_sz, GFP_KERNEL);
 			if (!new_dev_maps)
