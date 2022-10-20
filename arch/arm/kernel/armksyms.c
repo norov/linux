@@ -150,17 +150,6 @@ EXPORT_SYMBOL(_clear_bit);
 EXPORT_SYMBOL(_test_and_clear_bit);
 EXPORT_SYMBOL(_change_bit);
 EXPORT_SYMBOL(_test_and_change_bit);
-EXPORT_SYMBOL(_find_first_zero_bit_le);
-EXPORT_SYMBOL(_find_next_zero_bit_le);
-EXPORT_SYMBOL(_find_first_bit_le);
-EXPORT_SYMBOL(_find_next_bit_le);
-
-#ifdef __ARMEB__
-EXPORT_SYMBOL(_find_first_zero_bit_be);
-EXPORT_SYMBOL(_find_next_zero_bit_be);
-EXPORT_SYMBOL(_find_first_bit_be);
-EXPORT_SYMBOL(_find_next_bit_be);
-#endif
 
 #ifdef CONFIG_FUNCTION_TRACER
 EXPORT_SYMBOL(__gnu_mcount_nc);

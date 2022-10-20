@@ -157,24 +157,6 @@ extern int _test_and_set_bit(int nr, volatile unsigned long * p);
 extern int _test_and_clear_bit(int nr, volatile unsigned long * p);
 extern int _test_and_change_bit(int nr, volatile unsigned long * p);
 
-/*
- * Little endian assembly bitops.  nr = 0 -> byte 0 bit 0.
- */
-unsigned long _find_first_zero_bit_le(const unsigned long *p, unsigned long size);
-unsigned long _find_next_zero_bit_le(const unsigned long *p,
-				     unsigned long size, unsigned long offset);
-unsigned long _find_first_bit_le(const unsigned long *p, unsigned long size);
-unsigned long _find_next_bit_le(const unsigned long *p, unsigned long size, unsigned long offset);
-
-/*
- * Big endian assembly bitops.  nr = 0 -> byte 3 bit 0.
- */
-unsigned long _find_first_zero_bit_be(const unsigned long *p, unsigned long size);
-unsigned long _find_next_zero_bit_be(const unsigned long *p,
-				     unsigned long size, unsigned long offset);
-unsigned long _find_first_bit_be(const unsigned long *p, unsigned long size);
-unsigned long _find_next_bit_be(const unsigned long *p, unsigned long size, unsigned long offset);
-
 #ifndef CONFIG_SMP
 /*
  * The __* form of bitops are non-atomic and may be reordered.
@@ -194,26 +176,6 @@ unsigned long _find_next_bit_be(const unsigned long *p, unsigned long size, unsi
 #define test_and_set_bit(nr,p)		ATOMIC_BITOP(test_and_set_bit,nr,p)
 #define test_and_clear_bit(nr,p)	ATOMIC_BITOP(test_and_clear_bit,nr,p)
 #define test_and_change_bit(nr,p)	ATOMIC_BITOP(test_and_change_bit,nr,p)
-
-#ifndef __ARMEB__
-/*
- * These are the little endian, atomic definitions.
- */
-#define find_first_zero_bit(p,sz)	_find_first_zero_bit_le(p,sz)
-#define find_next_zero_bit(p,sz,off)	_find_next_zero_bit_le(p,sz,off)
-#define find_first_bit(p,sz)		_find_first_bit_le(p,sz)
-#define find_next_bit(p,sz,off)		_find_next_bit_le(p,sz,off)
-
-#else
-/*
- * These are the big endian, atomic definitions.
- */
-#define find_first_zero_bit(p,sz)	_find_first_zero_bit_be(p,sz)
-#define find_next_zero_bit(p,sz,off)	_find_next_zero_bit_be(p,sz,off)
-#define find_first_bit(p,sz)		_find_first_bit_be(p,sz)
-#define find_next_bit(p,sz,off)		_find_next_bit_be(p,sz,off)
-
-#endif
 
 #if __LINUX_ARM_ARCH__ < 5
 
@@ -237,35 +199,10 @@ unsigned long _find_next_bit_be(const unsigned long *p, unsigned long size, unsi
 #endif
 
 #include <asm-generic/bitops/ffz.h>
-
 #include <asm-generic/bitops/fls64.h>
-
 #include <asm-generic/bitops/sched.h>
 #include <asm-generic/bitops/hweight.h>
 #include <asm-generic/bitops/lock.h>
-
-#ifdef __ARMEB__
-
-static inline int find_first_zero_bit_le(const void *p, unsigned size)
-{
-	return _find_first_zero_bit_le(p, size);
-}
-#define find_first_zero_bit_le find_first_zero_bit_le
-
-static inline int find_next_zero_bit_le(const void *p, int size, int offset)
-{
-	return _find_next_zero_bit_le(p, size, offset);
-}
-#define find_next_zero_bit_le find_next_zero_bit_le
-
-static inline int find_next_bit_le(const void *p, int size, int offset)
-{
-	return _find_next_bit_le(p, size, offset);
-}
-#define find_next_bit_le find_next_bit_le
-
-#endif
-
 #include <asm-generic/bitops/le.h>
 
 /*
