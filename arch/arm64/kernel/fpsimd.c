@@ -1305,15 +1305,16 @@ void __init sme_setup(void)
 	if (!system_supports_sme())
 		return;
 
+	min_bit = find_last_bit(info->vq_map, SVE_VQ_MAX);
+
 	/*
 	 * SME doesn't require any particular vector length be
 	 * supported but it does require at least one.  We should have
 	 * disabled the feature entirely while bringing up CPUs but
 	 * let's double check here.
 	 */
-	WARN_ON(bitmap_empty(info->vq_map, SVE_VQ_MAX));
+	WARN_ON(min_bit >= SVE_VQ_MAX);
 
-	min_bit = find_last_bit(info->vq_map, SVE_VQ_MAX);
 	info->min_vl = sve_vl_from_vq(__bit_to_vq(min_bit));
 
 	smcr = read_sanitised_ftr_reg(SYS_SMCR_EL1);
