@@ -1240,7 +1240,6 @@ void bitmap_fold(unsigned long *dst, const unsigned long *orig,
 
 enum {
 	REG_OP_ISFREE,		/* true if region is all zero bits */
-	REG_OP_RELEASE,		/* clear all bits in region */
 };
 
 static int __reg_op(unsigned long *bitmap, unsigned int pos, int order, int reg_op)
@@ -1279,11 +1278,6 @@ static int __reg_op(unsigned long *bitmap, unsigned int pos, int order, int reg_
 				goto done;
 		}
 		ret = 1;	/* all bits in region free (zero) */
-		break;
-
-	case REG_OP_RELEASE:
-		for (i = 0; i < nlongs_reg; i++)
-			bitmap[index + i] &= ~mask;
 		break;
 	}
 done:
@@ -1331,7 +1325,7 @@ EXPORT_SYMBOL(bitmap_find_free_region);
  */
 void bitmap_release_region(unsigned long *bitmap, unsigned int pos, int order)
 {
-	__reg_op(bitmap, pos, order, REG_OP_RELEASE);
+	bitmap_clear(bitmap, pos, 1U << order);
 }
 EXPORT_SYMBOL(bitmap_release_region);
 
