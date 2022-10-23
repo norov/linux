@@ -1497,6 +1497,7 @@ union apic_ir {
 
 static bool apic_check_and_ack(union apic_ir *irr, union apic_ir *isr)
 {
+	bool isr_map_empty = true;
 	int i, bit;
 
 	/* Read the IRRs */
@@ -1511,19 +1512,17 @@ static bool apic_check_and_ack(union apic_ir *irr, union apic_ir *isr)
 	 * If the ISR map is not empty. ACK the APIC and run another round
 	 * to verify whether a pending IRR has been unblocked and turned
 	 * into a ISR.
+	 *
+	 * There can be multiple ISR bits set when a high priority
+	 * interrupt preempted a lower priority one. Issue an ACK
+	 * per set bit.
 	 */
-	if (!bitmap_empty(isr->map, APIC_IR_BITS)) {
-		/*
-		 * There can be multiple ISR bits set when a high priority
-		 * interrupt preempted a lower priority one. Issue an ACK
-		 * per set bit.
-		 */
-		for_each_set_bit(bit, isr->map, APIC_IR_BITS)
-			ack_APIC_irq();
-		return true;
+	for_each_set_bit(bit, isr->map, APIC_IR_BITS) {
+		ack_APIC_irq();
+		isr_map_empty = false;
 	}
 
-	return !bitmap_empty(irr->map, APIC_IR_BITS);
+	return isr_map_empty == false || !bitmap_empty(irr->map, APIC_IR_BITS);
 }
 
 /*
