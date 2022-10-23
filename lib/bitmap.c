@@ -1315,7 +1315,7 @@ int bitmap_find_free_region(unsigned long *bitmap, unsigned int bits, int order)
 	unsigned int pos, end;		/* scans bitmap by regions of size order */
 
 	for (pos = 0 ; (end = pos + (1U << order)) <= bits; pos = end) {
-		if (!__reg_op(bitmap, pos, order, REG_OP_ISFREE))
+		if (!bitmap_empty_from(bitmap, pos, pos + BIT(order)))
 			continue;
 		bitmap_set(bitmap, pos, pos + BIT(order));
 		return pos;
@@ -1354,7 +1354,7 @@ EXPORT_SYMBOL(bitmap_release_region);
  */
 int bitmap_allocate_region(unsigned long *bitmap, unsigned int pos, int order)
 {
-	if (!__reg_op(bitmap, pos, order, REG_OP_ISFREE))
+	if (!bitmap_empty_from(bitmap, pos, pos + BIT(order)))
 		return -EBUSY;
 	bitmap_set(bitmap, pos, pos + BIT(order));
 	return 0;
