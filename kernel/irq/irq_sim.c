@@ -100,14 +100,12 @@ static struct irq_chip irq_sim_irqchip = {
 static void irq_sim_handle_irq(struct irq_work *work)
 {
 	struct irq_sim_work_ctx *work_ctx;
-	unsigned int offset = 0;
+	unsigned int offset;
 	int irqnum;
 
 	work_ctx = container_of(work, struct irq_sim_work_ctx, work);
 
-	while (!bitmap_empty(work_ctx->pending, work_ctx->irq_count)) {
-		offset = find_next_bit(work_ctx->pending,
-				       work_ctx->irq_count, offset);
+	for_each_set_bit(offset, work_ctx->pending, work_ctx->irq_count) {
 		clear_bit(offset, work_ctx->pending);
 		irqnum = irq_find_mapping(work_ctx->domain, offset);
 		handle_simple_irq(irq_to_desc(irqnum));
