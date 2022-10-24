@@ -4669,7 +4669,7 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 	if (suitable_to_scan(i, young))
 		update_bloom_filter(lruvec, max_seq, pvmw->pmd);
 
-	if (!walk && bitmap_weight(bitmap, MIN_LRU_BATCH) < PAGEVEC_SIZE) {
+	if (!walk && !has_bits(bitmap, MIN_LRU_BATCH, PAGEVEC_SIZE)) {
 		for_each_set_bit(i, bitmap, MIN_LRU_BATCH) {
 			folio = pfn_folio(pte_pfn(pte[i]));
 			folio_activate(folio);

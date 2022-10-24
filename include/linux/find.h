@@ -195,6 +195,19 @@ unsigned long find_nth_bit(const unsigned long *addr, unsigned long size, unsign
 }
 
 /**
+ * has_bits - check if a memory region has n bits
+ * @addr: The address to start the search at
+ * @size: The maximum number of bits to search
+ * @n: The number of bits to check
+ *
+ * Returns true if at least n bits are set.
+ */
+static inline bool has_bits(unsigned long *addr, unsigned long size, unsigned long n)
+{
+	return find_nth_bit(addr, size, n) < size;
+}
+
+/**
  * find_nth_and_bit - find N'th set bit in 2 memory regions
  * @addr1: The 1st address to start the search at
  * @addr2: The 2nd address to start the search at
