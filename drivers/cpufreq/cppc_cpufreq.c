@@ -608,7 +608,7 @@ static int populate_efficiency_class(void)
 		bitmap_set(used_classes, class, 1);
 	}
 
-	if (bitmap_weight(used_classes, 256) <= 1) {
+	if (!has_bits(used_classes, 256, 2)) {
 		pr_debug("Efficiency classes are all equal (=%d). "
 			"No EM registered", class);
 		return -EINVAL;

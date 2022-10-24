@@ -287,7 +287,7 @@ static int otx2_set_channels(struct net_device *dev,
 	if (!channel->rx_count || !channel->tx_count)
 		return -EINVAL;
 
-	if (bitmap_weight(&pfvf->rq_bmap, pfvf->hw.rx_queues) > 1) {
+	if (has_bits(&pfvf->rq_bmap, pfvf->hw.rx_queues, 2) {
 		netdev_err(dev,
 			   "Receive queues are in use by TC police action\n");
 		return -EINVAL;

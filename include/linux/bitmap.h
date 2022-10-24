@@ -432,7 +432,7 @@ static inline bool bitmap_empty_from(const unsigned long *src, unsigned start, u
 			start / BITS_PER_LONG == (start + nbits - 1) / BITS_PER_LONG) {
 		unsigned long val = src[start/BITS_PER_LONG];
 		unsigned long mask = GENMASK((start + nbits - 1) % BITS_PER_LONG,
-						start % BITS_PER_LONG)
+						start % BITS_PER_LONG);
 
 		return !(val & mask);
 	}
