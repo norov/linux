@@ -140,7 +140,8 @@ void __init free_bootmem_cpumask_var(cpumask_var_t mask)
  */
 unsigned int cpumask_local_spread(unsigned int i, int node)
 {
-	unsigned int cpu;
+	const struct cpumask *mask;
+	unsigned int w;
 
 	/* Wrap: we always want a cpu. */
 	i %= num_online_cpus();
