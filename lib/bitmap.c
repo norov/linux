@@ -1315,10 +1315,8 @@ int bitmap_find_free_region(unsigned long *bitmap, unsigned int bits, int order)
 	unsigned int pos, end;		/* scans bitmap by regions of size order */
 
 	for (pos = 0 ; (end = pos + (1U << order)) <= bits; pos = end) {
-		if (!bitmap_empty_from(bitmap, pos, BIT(order)))
-			continue;
-		bitmap_set(bitmap, pos, BIT(order));
-		return pos;
+		if (!bitmap_allocate_region(bitmap, pos, order))
+			return pos;
 	}
 	return -ENOMEM;
 }
