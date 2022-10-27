@@ -49,6 +49,7 @@ struct device;
  *  bitmap_intersects(src1, src2, nbits)        Do *src1 and *src2 overlap?
  *  bitmap_subset(src1, src2, nbits)            Is *src1 a subset of *src2?
  *  bitmap_empty(src, nbits)                    Are all bits zero in *src?
+ *  bitmap_empty_from(src, start, nbits)        Are all bits zero in *src starting from @start?
  *  bitmap_full(src, nbits)                     Are all bits set in *src?
  *  bitmap_weight(src, nbits)                   Hamming Weight: number set bits
  *  bitmap_weight_and(src1, src2, nbits)        Hamming Weight of and'ed bitmap
@@ -431,6 +432,16 @@ static __always_inline bool bitmap_full(const unsigned long *src, unsigned int n
 		return ! (~(*src) & BITMAP_LAST_WORD_MASK(nbits));
 
 	return find_first_zero_bit(src, nbits) == nbits;
+}
+
+static __always_inline
+bool bitmap_empty_from(const unsigned long *src, unsigned int start, unsigned int nbits)
+{
+	if (small_const_nbits_off(nbits, start))
+		return !(src[start/BITS_PER_LONG] &
+			 GENMASK((nbits - 1) % BITS_PER_LONG, start % BITS_PER_LONG));
+
+	return find_next_bit(src, nbits, start) >= nbits;
 }
 
 static __always_inline
