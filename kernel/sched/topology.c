@@ -2132,7 +2132,8 @@ EXPORT_SYMBOL_GPL(sched_numa_find_nth_cpu);
  * @hops: Include CPUs up to that many hops away. 0 means local node.
  *
  * Return: On success, a pointer to a cpumask of CPUs at most @hops away from
- * @node, an error value otherwise.
+ * @node, an error value otherwise. If @node is NUMA_NO_NODE and @hop == 0,
+ * returns cpu_online_mask.
  *
  * Requires rcu_lock to be held. Returned cpumask is only valid within that
  * read-side section, copy it if required beyond that.
@@ -2145,6 +2146,9 @@ EXPORT_SYMBOL_GPL(sched_numa_find_nth_cpu);
 const struct cpumask *sched_numa_hop_mask(unsigned int node, unsigned int hops)
 {
 	struct cpumask ***masks;
+
+	if (node == NUMA_NO_NODE && hops == 0)
+		return cpu_online_mask;
 
 	if (node >= nr_node_ids || hops >= sched_domains_numa_levels)
 		return ERR_PTR(-EINVAL);

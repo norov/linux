@@ -274,10 +274,7 @@ sched_numa_hop_mask(unsigned int node, unsigned int hops)
  */
 #define for_each_numa_hop_mask(mask, prev_mask, node)			       \
 	for (unsigned int __hops = 0;					       \
-	     mask = (node != NUMA_NO_NODE || __hops) ?			       \
-		     sched_numa_hop_mask(node, __hops) :		       \
-		     cpu_online_mask,					       \
-	     !IS_ERR_OR_NULL(mask);					       \
+	     mask = sched_numa_hop_mask(node, __hops), !IS_ERR_OR_NULL(mask);  \
 	     __hops++, prev_mask = mask)
 
 #endif /* _LINUX_TOPOLOGY_H */
