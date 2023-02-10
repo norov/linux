@@ -265,18 +265,19 @@ sched_numa_hop_mask(unsigned int node, unsigned int hops)
  * for_each_numa_hop_mask - iterate over cpumasks of increasing NUMA distance
  *                          from a given node.
  * @mask: the iteration variable.
+ * @prev_mask: previous value of iteration variable, must be initialized as cpu_none_mask.
  * @node: the NUMA node to start the search from.
  *
  * Requires rcu_lock to be held.
  *
  * Yields cpu_online_mask for @node == NUMA_NO_NODE.
  */
-#define for_each_numa_hop_mask(mask, node)				       \
+#define for_each_numa_hop_mask(mask, prev_mask, node)			       \
 	for (unsigned int __hops = 0;					       \
 	     mask = (node != NUMA_NO_NODE || __hops) ?			       \
 		     sched_numa_hop_mask(node, __hops) :		       \
 		     cpu_online_mask,					       \
 	     !IS_ERR_OR_NULL(mask);					       \
-	     __hops++)
+	     __hops++, prev_mask = mask)
 
 #endif /* _LINUX_TOPOLOGY_H */

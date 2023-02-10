@@ -844,13 +844,12 @@ static int comp_irqs_request(struct mlx5_core_dev *dev)
 
 	i = 0;
 	rcu_read_lock();
-	for_each_numa_hop_mask(mask, dev->priv.numa_node) {
+	for_each_numa_hop_mask(mask, prev, dev->priv.numa_node) {
 		for_each_cpu_andnot(cpu, mask, prev) {
 			cpus[i] = cpu;
 			if (++i == ncomp_eqs)
 				goto spread_done;
 		}
-		prev = mask;
 	}
 spread_done:
 	rcu_read_unlock();
