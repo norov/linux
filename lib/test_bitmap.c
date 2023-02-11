@@ -12,6 +12,7 @@
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/topology.h>
 #include <linux/uaccess.h>
 
 #include "../tools/testing/selftests/kselftest_module.h"
@@ -751,6 +752,33 @@ static void __init test_for_each_set_bit_wrap(void)
 	}
 }
 
+static void __init test_for_each_numa(void)
+{
+	unsigned int cpu, node;
+
+	for (node = 0; node < sched_domains_numa_levels; node++) {
+		const struct cpumask *m, *p = cpu_none_mask;
+		unsigned int c = 0;
+
+		rcu_read_lock();
+		for_each_numa_hop_mask(m, node) {
+			for_each_cpu_andnot(cpu, m, p)
+				expect_eq_uint(cpumask_local_spread(c++, node), cpu);
+			p = m;
+		}
+		rcu_read_unlock();
+	}
+
+	for (node = 0; node < sched_domains_numa_levels; node++) {
+		unsigned int hop, c = 0;
+
+		rcu_read_lock();
+		for_each_numa_cpu(cpu, hop, node, cpu_online_mask)
+			expect_eq_uint(cpumask_local_spread(c++, node), cpu);
+		rcu_read_unlock();
+	}
+}
+
 static void __init test_for_each_set_bit(void)
 {
 	DECLARE_BITMAP(orig, 500);
@@ -1237,6 +1265,7 @@ static void __init selftest(void)
 	test_for_each_clear_bitrange_from();
 	test_for_each_set_clump8();
 	test_for_each_set_bit_wrap();
+	test_for_each_numa();
 }
 
 KSTM_MODULE_LOADERS(test_bitmap);
