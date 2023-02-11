@@ -43,6 +43,13 @@
 	for_each_online_node(node)			\
 		if (nr_cpus_node(node))
 
+#ifdef CONFIG_NUMA
+extern int __sched_domains_numa_levels;
+#define sched_domains_numa_levels ((const int)__sched_domains_numa_levels)
+#else
+#define sched_domains_numa_levels (1)
+#endif
+
 int arch_update_cpu_topology(void);
 
 /* Conform to ACPI 2.0 SLIT distance definitions */
