@@ -1508,7 +1508,9 @@ static void claim_allocations(int cpu, struct sched_domain *sd)
 #ifdef CONFIG_NUMA
 enum numa_topology_type sched_numa_topology_type;
 
-static int			sched_domains_numa_levels;
+int				__sched_domains_numa_levels;
+EXPORT_SYMBOL_GPL(__sched_domains_numa_levels);
+
 static int			sched_domains_curr_level;
 
 int				sched_max_numa_distance;
@@ -1872,7 +1874,7 @@ void sched_init_numa(int offline_node)
 	 *
 	 * We reset it to 'nr_levels' at the end of this function.
 	 */
-	sched_domains_numa_levels = 0;
+	__sched_domains_numa_levels = 0;
 
 	masks = kzalloc(sizeof(void *) * nr_levels, GFP_KERNEL);
 	if (!masks)
@@ -1948,7 +1950,7 @@ void sched_init_numa(int offline_node)
 	sched_domain_topology_saved = sched_domain_topology;
 	sched_domain_topology = tl;
 
-	sched_domains_numa_levels = nr_levels;
+	__sched_domains_numa_levels = nr_levels;
 	WRITE_ONCE(sched_max_numa_distance, sched_domains_numa_distance[nr_levels - 1]);
 
 	init_numa_topology_type(offline_node);
@@ -1961,7 +1963,7 @@ static void sched_reset_numa(void)
 	struct cpumask ***masks;
 
 	nr_levels = sched_domains_numa_levels;
-	sched_domains_numa_levels = 0;
+	__sched_domains_numa_levels = 0;
 	sched_max_numa_distance = 0;
 	sched_numa_topology_type = NUMA_DIRECT;
 	distances = sched_domains_numa_distance;
