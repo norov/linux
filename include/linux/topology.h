@@ -39,9 +39,11 @@
 #define nr_cpus_node(node) cpumask_weight(cpumask_of_node(node))
 #endif
 
+#define node_has_cpus(node) (!cpumask_empty(cpumask_of_node(node)))
+
 #define for_each_node_with_cpus(node)			\
 	for_each_online_node(node)			\
-		if (nr_cpus_node(node))
+		if (node_has_cpus(node))
 
 int arch_update_cpu_topology(void);
 
