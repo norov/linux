@@ -277,4 +277,36 @@ sched_numa_hop_mask(unsigned int node, unsigned int hops)
 	     mask = sched_numa_hop_mask(node, __hops), !IS_ERR_OR_NULL(mask);  \
 	     __hops++, prev_mask = mask)
 
+/**
+ * for_each_numa_hop - iterate over NUMA hops (distances from a given node).
+ * @hop: the iteration variable, must be initialized to a desired minimal hop.
+ * @node: the NUMA node to start the search from.
+ *
+ * Requires rcu_lock to be held.
+ *
+ * Yields cpu_online_mask for @node == NUMA_NO_NODE.
+ */
+#define for_each_numa_hop(hop, node)			       \
+	for (const struct cpumask *__pm = cpu_none_mask, *__m;		       \
+	     __m = sched_numa_hop_mask(node, hop), !IS_ERR_OR_NULL(__m);       \
+	     hop++, __pm = __m)
+
+/**
+ * for_each_numa_cpu - iterate over cpus in increasing order taking into account
+ *		       NUMA distances from a given node.
+ * @cpu: the (optionally unsigned) integer iterator
+ * @hop: the iteration variable, must be initialized to a desired minimal hop.
+ * @node: the NUMA node to start the search from.
+ *
+ * Requires rcu_lock to be held.
+ *
+ * Because it's implemented as double-loop, using 'break' inside the body of
+ * iterator may lead to undefined behaviour. Use 'goto' instead.
+ *
+ * Yields cpu_online_mask for @node == NUMA_NO_NODE.
+ */
+#define for_each_numa_cpu(cpu, hop, node, mask)			               \
+	for_each_numa_hop(hop, node)					       \
+		for_each_cpu_and_andnot(cpu, mask, __m, __pm)
+
 #endif /* _LINUX_TOPOLOGY_H */
