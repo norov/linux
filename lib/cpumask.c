@@ -127,16 +127,17 @@ void __init free_bootmem_cpumask_var(cpumask_var_t mask)
  *
  * There's a better alternative based on for_each()-like iterators:
  *
- *	for_each_numa_hop_mask(mask, node) {
- *		for_each_cpu_andnot(cpu, mask, prev)
- *			do_something(cpu);
- *		prev = mask;
- *	}
+ *	for_each_numa_cpu(cpu, hop, node)
+ *		do_something(cpu);
  *
  * It's simpler and more verbose than above. Complexity of iterator-based
  * enumeration is O(sched_domains_numa_levels * nr_cpu_ids), while
  * cpumask_local_spread() when called for each cpu is
  * O(sched_domains_numa_levels * nr_cpu_ids * log(nr_cpu_ids)).
+ *
+ * Notice that for_each_numa_cpu() is a nested-loop macro, which means that
+ * it's unsafe to use 'break' inside the body of the loop. Use 'goto' where
+ * needed.
  */
 unsigned int cpumask_local_spread(unsigned int i, int node)
 {
