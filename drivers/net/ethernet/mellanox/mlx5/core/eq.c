@@ -817,12 +817,10 @@ static void comp_irqs_release(struct mlx5_core_dev *dev)
 static int comp_irqs_request(struct mlx5_core_dev *dev)
 {
 	struct mlx5_eq_table *table = dev->priv.eq_table;
-	const struct cpumask *prev = cpu_none_mask;
-	const struct cpumask *mask;
 	int ncomp_eqs = table->num_comp_eqs;
 	u16 *cpus;
 	int ret;
-	int cpu;
+	int cpu, hop;
 	int i;
 
 	ncomp_eqs = table->num_comp_eqs;
@@ -842,15 +840,12 @@ static int comp_irqs_request(struct mlx5_core_dev *dev)
 		goto free_irqs;
 	}
 
-	i = 0;
+	i = 0, hop = 0;
 	rcu_read_lock();
-	for_each_numa_hop_mask(mask, dev->priv.numa_node) {
-		for_each_cpu_andnot(cpu, mask, prev) {
-			cpus[i] = cpu;
-			if (++i == ncomp_eqs)
-				goto spread_done;
-		}
-		prev = mask;
+	for_each_numa_cpu(cpu, hop, dev->priv.numa_node, cpu_possible_mask) {
+		cpus[i] = cpu;
+		if (++i == ncomp_eqs)
+			goto spread_done;
 	}
 spread_done:
 	rcu_read_unlock();
