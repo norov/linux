@@ -154,7 +154,7 @@ void spu_update_sched_info(struct spu_context *ctx)
 
 static int __node_allowed(struct spu_context *ctx, int node)
 {
-	if (nr_cpus_node(node)) {
+	if (node_has_cpus(node)) {
 		const struct cpumask *mask = cpumask_of_node(node);
 
 		if (cpumask_intersects(mask, &ctx->cpus_allowed))
