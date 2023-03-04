@@ -2130,6 +2130,32 @@ unlock:
 }
 EXPORT_SYMBOL_GPL(sched_numa_find_nth_cpu);
 
+int sched_numa_find_next_cpu(const struct cpumask *cpus, int cpu, int node, unsigned int *hop)
+{
+	unsigned long *cur, *prev;
+	struct cpumask ***masks;
+	unsigned int ret;
+
+	if (*hop >= sched_domains_numa_levels)
+		return nr_cpu_ids;
+
+	masks = rcu_dereference(sched_domains_numa_masks);
+	cur = cpumask_bits(masks[*hop][node]);
+	if (*hop == 0)
+		ret = find_next_and_bit(cpumask_bits(cpus), cur, nr_cpu_ids, cpu);
+	else {
+		prev = cpumask_bits(masks[*hop - 1][node]);
+		ret = find_next_and_andnot_bit(cpumask_bits(cpus), cur, prev, nr_cpu_ids, cpu);
+	}
+
+	if (ret < nr_cpu_ids)
+		return ret;
+
+	*hop += 1;
+	return sched_numa_find_next_cpu(cpus, 0, node, hop);
+}
+EXPORT_SYMBOL_GPL(sched_numa_find_next_cpu);
+
 /**
  * sched_numa_hop_mask() - Get the cpumask of CPUs at most @hops hops away from
  *                         @node
