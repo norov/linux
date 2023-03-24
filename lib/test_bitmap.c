@@ -757,19 +757,6 @@ static void __init test_for_each_numa(void)
 	unsigned int cpu, node;
 
 	for (node = 0; node < sched_domains_numa_levels; node++) {
-		const struct cpumask *m, *p = cpu_none_mask;
-		unsigned int c = 0;
-
-		rcu_read_lock();
-		for_each_numa_hop_mask(m, node) {
-			for_each_cpu_andnot(cpu, m, p)
-				expect_eq_uint(cpumask_local_spread(c++, node), cpu);
-			p = m;
-		}
-		rcu_read_unlock();
-	}
-
-	for (node = 0; node < sched_domains_numa_levels; node++) {
 		unsigned int hop, c = 0;
 
 		rcu_read_lock();
