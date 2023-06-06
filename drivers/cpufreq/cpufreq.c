@@ -710,7 +710,8 @@ static ssize_t show_scaling_cur_freq(struct cpufreq_policy *policy, char *buf)
 	ssize_t ret;
 	unsigned int freq;
 
-	freq = arch_freq_get_on_cpu(policy->cpu);
+	freq = !cpufreq_driver->get ? arch_freq_get_on_cpu(policy->cpu)
+				    : 0;
 	if (freq)
 		ret = sprintf(buf, "%u\n", freq);
 	else if (cpufreq_driver->setpolicy && cpufreq_driver->get)
@@ -747,7 +748,11 @@ store_one(scaling_max_freq, max);
 static ssize_t show_cpuinfo_cur_freq(struct cpufreq_policy *policy,
 					char *buf)
 {
-	unsigned int cur_freq = __cpufreq_get(policy);
+	unsigned int cur_freq;
+
+	cur_freq = arch_freq_get_on_cpu(policy->cpu);
+	if (!cur_freq)
+		cur_freq = __cpufreq_get(policy);
 
 	if (cur_freq)
 		return sprintf(buf, "%u\n", cur_freq);

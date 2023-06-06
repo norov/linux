@@ -17,6 +17,7 @@
 #include <linux/cpufreq.h>
 #include <linux/init.h>
 #include <linux/percpu.h>
+#include <linux/sched/isolation.h>
 
 #include <asm/cpu.h>
 #include <asm/cputype.h>
@@ -250,6 +251,39 @@ static int __init init_amu_fie(void)
 	return ret;
 }
 core_initcall(init_amu_fie);
+
+unsigned int arch_freq_get_on_cpu(int cpu)
+{
+	unsigned int freq;
+	u64 scale;
+
+	if (!cpumask_test_cpu(cpu, amu_fie_cpus))
+		return 0;
+
+	if (!housekeeping_cpu(cpu, HK_TYPE_TICK)) {
+		struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
+		int ref_cpu = nr_cpu_ids;
+
+		if (cpumask_intersects(housekeeping_cpumask(HK_TYPE_TICK),
+				       policy->cpus))
+			ref_cpu = cpumask_nth_and(cpu, policy->cpus,
+						  housekeeping_cpumask(HK_TYPE_TICK));
+		cpufreq_cpu_put(policy);
+		if (ref_cpu >= nr_cpu_ids)
+			return 0;
+		cpu = ref_cpu;
+	}
+	/*
+	 * Reversed computation to the one used to determine
+	 * the arch_freq_scale value
+	 * (see amu_scale_freq_tick for details)
+	 */
+	scale = per_cpu(arch_freq_scale, cpu);
+	scale *= cpufreq_get_hw_max_freq(cpu);
+	freq = scale >> SCHED_CAPACITY_SHIFT;
+
+	return freq;
+}
 
 #ifdef CONFIG_ACPI_CPPC_LIB
 #include <acpi/cppc_acpi.h>
