@@ -1163,6 +1163,9 @@ static void __init test_bitmap_print_buf(void)
 
 static void __init test_bitmap_const_eval(void)
 {
+#if defined (CONFIG_CC_IS_CLANG) && defined (CONFIG_KASAN) && defined (CONFIG_GCOV_PROFILE_ALL)
+#warning "FIXME: Clang breaks compile time evaluations when KASAN and GCOV are enabled"
+#else
 	DECLARE_BITMAP(bitmap, BITS_PER_LONG);
 	unsigned long initvar = BIT(2);
 	unsigned long bitopvar = 0;
@@ -1177,20 +1180,9 @@ static void __init test_bitmap_const_eval(void)
 	 * in runtime.
 	 */
 
-	/*
-	 * Equals to `unsigned long bitmap[1] = { GENMASK(6, 5), }`.
-	 * Clang on s390 optimizes bitops at compile-time as intended, but at
-	 * the same time stops treating @bitmap and @bitopvar as compile-time
-	 * constants after regular test_bit() is executed, thus triggering the
-	 * build bugs below. So, call const_test_bit() there directly until
-	 * the compiler is fixed.
-	 */
+	/* Equals to `unsigned long bitmap[1] = { GENMASK(6, 5), }` */
 	bitmap_clear(bitmap, 0, BITS_PER_LONG);
-#if defined(__s390__) && defined(__clang__)
-	if (!const_test_bit(7, bitmap))
-#else
 	if (!test_bit(7, bitmap))
-#endif
 		bitmap_set(bitmap, 5, 2);
 
 	/* Equals to `unsigned long bitopvar = BIT(20)` */
@@ -1220,6 +1212,7 @@ static void __init test_bitmap_const_eval(void)
 	/* ~BIT(25) */
 	BUILD_BUG_ON(!__builtin_constant_p(~var));
 	BUILD_BUG_ON(~var != ~BIT(25));
+#endif
 }
 
 static void __init selftest(void)
