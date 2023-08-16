@@ -1,0 +1,7 @@
+# Top-level directory owners:
+jonathanh@nvidia.com
+rokhanna@nvidia.com
+
+# Do not uncomment: Not supported in OWNERS file, added for additional info
+#{NVBUGS_MODULE=<to-be-updated-by-owner>}
+#{OWNERS_DL=<to-be-updated-by-owner>}
