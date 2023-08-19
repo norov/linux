@@ -1017,12 +1017,17 @@ EXPORT_SYMBOL(__bitmap_remap);
 int __bitmap_bitremap(int oldbit, const unsigned long *old,
 				const unsigned long *new, int bits)
 {
-	int w = bitmap_weight(new, bits);
-	int n = bitmap_pos_to_ord(old, oldbit, bits);
-	if (n < 0 || w == 0)
+	int w, n;
+
+	w = bitmap_weight(new, bits);
+	if (w == 0)
 		return oldbit;
-	else
-		return find_nth_bit(new, bits, n % w);
+
+	n = bitmap_pos_to_ord(old, oldbit, bits);
+	if (n < 0)
+		return oldbit;
+
+	return find_nth_bit(new, bits, n % w);
 }
 EXPORT_SYMBOL(__bitmap_bitremap);
 
