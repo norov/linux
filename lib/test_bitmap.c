@@ -378,6 +378,85 @@ static void __init test_weight(void)
 	}
 }
 
+static void __init test_remap(void)
+{
+	DECLARE_BITMAP(dst, 8);
+
+	DECLARE_BITMAP(empty, 8) = { 0 };
+	DECLARE_BITMAP(src, 8) = { 0b00101010 };
+	DECLARE_BITMAP(old, 8) = { 0b00011100 };
+	DECLARE_BITMAP(new, 8) = { 0b00111000 };
+	DECLARE_BITMAP(exp0, 8) = { 0b00110010 };
+	DECLARE_BITMAP(exp1, 8) = { 0b00011010 };
+	DECLARE_BITMAP(exp2, 8) = { 0b10000010 };
+
+	DECLARE_BITMAP(perf_exp, 1000);
+	DECLARE_BITMAP(perf_dst, 1000);
+	DECLARE_BITMAP(perf_src, 1000);
+	DECLARE_BITMAP(perf_old, 1000);
+	DECLARE_BITMAP(perf_new, 1000);
+
+	unsigned int i;
+	ktime_t time;
+
+	bitmap_remap(dst, src, old, new, 8);
+	expect_eq_bitmap(exp0, dst, 8);
+
+	/*
+	 * When old mapping is the same as new, source bits are copied to dst.
+	 * Real code must use bitmap_copy() if it's known in advance.
+	 */
+	bitmap_remap(dst, src, old, old, 8);
+	expect_eq_bitmap(src, dst, 8);
+
+	bitmap_remap(dst, src, new, new, 8);
+	expect_eq_bitmap(src, dst, 8);
+
+	/*
+	 * When either old or new mappings are empty, source bits are copied to
+	 * dst. Real code must use bitmap_copy() if it's known in advance.
+	 */
+	bitmap_remap(dst, src, empty, new, 8);
+	expect_eq_bitmap(src, dst, 8);
+
+	bitmap_remap(dst, src, old, empty, 8);
+	expect_eq_bitmap(src, dst, 8);
+
+	bitmap_remap(dst, src, empty, empty, 8);
+	expect_eq_bitmap(src, dst, 8);
+
+	/* Set extra bit in old map to test carry logic */
+	set_bit(5, old);
+	bitmap_remap(dst, src, old, new, 8);
+	expect_eq_bitmap(exp1, dst, 8);
+
+	/* Map old bits to #7 */
+	bitmap_zero(new, 8);
+	set_bit(7, new);
+	bitmap_remap(dst, src, old, new, 8);
+	expect_eq_bitmap(exp2, dst, 8);
+
+	bitmap_fill(perf_src, 1000);
+	bitmap_set(perf_old, 0, 500);
+	bitmap_clear(perf_old, 500, 500);
+
+	for (i = 0; i < 1000; i += 20) {
+		bitmap_set(perf_new, i, 10);
+		bitmap_clear(perf_new, i + 10, 10);
+	}
+
+	bitmap_copy(perf_exp, perf_new, 500);
+	bitmap_set(perf_exp, 500, 500);
+
+	time = ktime_get();
+	bitmap_remap(perf_dst, perf_src, perf_old, perf_new, 1000);
+	time = ktime_get() - time;
+
+	expect_eq_bitmap(perf_exp, perf_dst, 1000);
+	pr_err("bitmap_remap:  %llu ns\n", time);
+
+}
+
 #define EXP2_IN_BITS	(sizeof(exp2) * 8)
 
 static void __init test_replace(void)
@@ -1278,6 +1357,7 @@ static void __init selftest(void)
 	test_bitmap_region();
 	test_replace();
 	test_weight();
+	test_remap();
 	test_bitmap_arr32();
 	test_bitmap_arr64();
 	test_bitmap_parse();
