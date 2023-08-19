@@ -1002,10 +1002,30 @@ static int bitmap_pos_to_ord(const unsigned long *buf, unsigned int pos, unsigne
  *
  * Let @old and @new define a mapping of bit positions, such that
  * whatever position is held by the n-th set bit in @old is mapped
- * to the n-th set bit in @new.  In the more general case, allowing
- * for the possibility that the weight 'w' of @new is less than the
- * weight of @old, map the position of the n-th set bit in @old to
- * the position of the m-th set bit in @new, where m == n % w.
+ * to the n-th set bit in @new. For example lets say that @old has
+ * bits 2 through 4 set, and @new has bits 3 through 5 set:
+ *
+ *	old: 00011100
+ *	     |||///||
+ *	new: 00111000
+ *
+ * This defines the mapping of bit position 2 to 3, 3 to 4 and 4 to 5,
+ * and of all other bit positions unchanged. So if say @src comes into
+ * this routine with bits 1, 3 and 5 set, then @dst should leave with
+ * bits 1, 4 and 5 set:
+ *
+ *	src: 00101010
+ *	       v v v
+ *	old: 00011100
+ *	     |||///||
+ *	new: 00111000
+ *	       vv  v
+ *	dst: 00110010
+ *
+ * In the more general case, allowing for the possibility that the weight
+ * 'w' of @new is less than the weight of @old, map the position of the
+ * n-th set bit in @old to the position of the m-th set bit in @new, where
+ * m == n % w.
  *
  * If either of the @old and @new bitmaps are empty, or if @src and
  * @dst point to the same location, then this routine copies @src
@@ -1016,13 +1036,6 @@ static int bitmap_pos_to_ord(const unsigned long *buf, unsigned int pos, unsigne
  *
  * Apply the above specified mapping to @src, placing the result in
  * @dst, clearing any bits previously set in @dst.
- *
- * For example, lets say that @old has bits 4 through 7 set, and
- * @new has bits 12 through 15 set.  This defines the mapping of bit
- * position 4 to 12, 5 to 13, 6 to 14 and 7 to 15, and of all other
- * bit positions unchanged.  So if say @src comes into this routine
- * with bits 1, 5 and 7 set, then @dst should leave with bits 1,
- * 13 and 15 set.
  */
 void bitmap_remap(unsigned long *dst, const unsigned long *src,
 		const unsigned long *old, const unsigned long *new,
@@ -1053,24 +1066,9 @@ EXPORT_SYMBOL(bitmap_remap);
  *	@new: defines range of map
  *	@bits: number of bits in each of these bitmaps
  *
- * Let @old and @new define a mapping of bit positions, such that
- * whatever position is held by the n-th set bit in @old is mapped
- * to the n-th set bit in @new.  In the more general case, allowing
- * for the possibility that the weight 'w' of @new is less than the
- * weight of @old, map the position of the n-th set bit in @old to
- * the position of the m-th set bit in @new, where m == n % w.
+ * A special case of bitmap_remap(), when a single bit remapping is needed.
  *
- * The positions of unset bits in @old are mapped to themselves
- * (the identity map).
- *
- * Apply the above specified mapping to bit position @oldbit, returning
- * the new bit position.
- *
- * For example, lets say that @old has bits 4 through 7 set, and
- * @new has bits 12 through 15 set.  This defines the mapping of bit
- * position 4 to 12, 5 to 13, 6 to 14 and 7 to 15, and of all other
- * bit positions unchanged.  So if say @oldbit is 5, then this routine
- * returns 13.
+ * Returns: position of remapped bit
  */
 int bitmap_bitremap(int oldbit, const unsigned long *old,
 				const unsigned long *new, int bits)
