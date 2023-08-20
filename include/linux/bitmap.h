@@ -168,6 +168,8 @@ bool __bitmap_subset(const unsigned long *bitmap1,
 unsigned int __bitmap_weight(const unsigned long *bitmap, unsigned int nbits);
 unsigned int __bitmap_weight_and(const unsigned long *bitmap1,
 				 const unsigned long *bitmap2, unsigned int nbits);
+unsigned int __bitmap_weight_from(const unsigned long *bitmap,
+					unsigned int bits, unsigned int start);
 void __bitmap_set(unsigned long *map, unsigned int start, int len);
 void __bitmap_clear(unsigned long *map, unsigned int start, int len);
 
@@ -444,6 +446,18 @@ unsigned long bitmap_weight_and(const unsigned long *src1,
 	if (small_const_nbits(nbits))
 		return hweight_long(*src1 & *src2 & BITMAP_LAST_WORD_MASK(nbits));
 	return __bitmap_weight_and(src1, src2, nbits);
+}
+
+static __always_inline
+unsigned int bitmap_weight_from(const unsigned long *src, unsigned int nbits, unsigned int start)
+{
+	if (unlikely(start >= nbits))
+		return 0;
+
+	if (small_const_nbits(nbits - start) && nbits / BITS_PER_LONG == start / BITS_PER_LONG)
+		return hweight_long(*src & GENMASK(nbits-1, start));
+
+	return __bitmap_weight_from(src, nbits, start);
 }
 
 static __always_inline void bitmap_set(unsigned long *map, unsigned int start,

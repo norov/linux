@@ -361,6 +361,23 @@ static void __init test_bitmap_region(void)
 	expect_eq_uint(bitmap_weight(bmap, 1000), 0);
 }
 
+static void __init test_weight(void)
+{
+	DECLARE_BITMAP(bmap, 1024);
+	unsigned int idx, w;
+
+	for (idx = 0; idx < 1024; idx++)
+		__assign_bit(idx, bmap, idx);
+
+	w = bitmap_weight(bmap, 1024);
+	for (idx = 0; idx < 1024; idx++) {
+		unsigned int w1 = bitmap_weight(bmap, idx);
+		unsigned int w2 = bitmap_weight_from(bmap, 1024, idx);
+
+		expect_eq_uint(w1 + w2, w);
+	}
+}
+
 #define EXP2_IN_BITS	(sizeof(exp2) * 8)
 
 static void __init test_replace(void)
@@ -1260,6 +1277,7 @@ static void __init selftest(void)
 	test_copy();
 	test_bitmap_region();
 	test_replace();
+	test_weight();
 	test_bitmap_arr32();
 	test_bitmap_arr64();
 	test_bitmap_parse();
