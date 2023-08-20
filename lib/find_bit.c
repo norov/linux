@@ -164,6 +164,35 @@ unsigned long __find_nth_and_andnot_bit(const unsigned long *addr1,
 }
 EXPORT_SYMBOL(__find_nth_and_andnot_bit);
 
+#define FIND_NTH_BIT_FROM(FETCH, size, start, nth)				\
+({										\
+	unsigned long mask, idx, tmp, w, sz = (size), __start = (start), n = (nth);\
+										\
+	if (unlikely(__start >= sz || n > sz - __start))			\
+		goto out;							\
+										\
+	mask = BITMAP_FIRST_WORD_MASK(__start);					\
+	idx = __start / BITS_PER_LONG;						\
+										\
+	for (tmp = (FETCH) & mask; (w = hweight_long(tmp)) <= n; tmp = (FETCH)) {\
+		if ((idx + 1) * BITS_PER_LONG >= sz)				\
+			goto out;						\
+		idx++;								\
+		n -= w;								\
+	}									\
+										\
+	sz = min(idx * BITS_PER_LONG + fns(tmp, n), sz);			\
+out:										\
+	sz;									\
+})
+
+unsigned long __find_nth_bit_from(const unsigned long *addr, unsigned long size,
+					unsigned long start, unsigned long nth)
+{
+	return FIND_NTH_BIT_FROM(addr[idx], size, start, nth);
+}
+EXPORT_SYMBOL(__find_nth_bit_from);
+
 #ifndef find_next_and_bit
 unsigned long _find_next_and_bit(const unsigned long *addr1, const unsigned long *addr2,
 					unsigned long nbits, unsigned long start)

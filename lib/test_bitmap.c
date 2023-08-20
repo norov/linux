@@ -223,7 +223,7 @@ static void __init test_zero_clear(void)
 
 static void __init test_find_nth_bit(void)
 {
-	unsigned long b, bit, cnt = 0;
+	unsigned long i, b, bit, cnt = 0;
 	DECLARE_BITMAP(bmap, 64 * 3);
 
 	bitmap_zero(bmap, 64 * 3);
@@ -259,6 +259,14 @@ static void __init test_find_nth_bit(void)
 	for_each_set_bit(bit, exp1, EXP1_IN_BITS) {
 		b = find_nth_bit(exp1, EXP1_IN_BITS, cnt++);
 		expect_eq_uint(b, bit);
+	}
+
+	for (i = 0; i < EXP1_IN_BITS; i++) {
+		bit = i; cnt = 0;
+		for_each_set_bit_from(bit, exp1, EXP1_IN_BITS) {
+			b = find_nth_bit_from(exp1, EXP1_IN_BITS, i, cnt++);
+			expect_eq_uint(b, bit);
+		}
 	}
 }
 
