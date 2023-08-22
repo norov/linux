@@ -996,7 +996,8 @@ void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 		const unsigned long *old, const unsigned long *new,
 		unsigned int nbits)
 {
-	unsigned int oldbit, w = 0, n;
+	unsigned int newbit, oldbit, w = 0, n;
+	unsigned int _oldbit, _newbit;
 
 	if (dst == src)		/* following doesn't handle inplace remaps */
 		return;
@@ -1005,8 +1006,17 @@ void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 	bitmap_andnot(dst, src, old, nbits);
 
 	/* Remapping part */
+	_oldbit = _newbit = 0;
 	for_each_and_bit(oldbit, src, old, nbits) {
-		n = bitmap_weight(old, oldbit);
+		n = bitmap_weight_from(old, oldbit, _oldbit);
+		newbit = find_nth_bit_from(new, nbits, _newbit, n);
+		if (newbit < nbits)
+			goto set_bit;
+
+		/*
+		 * If we're out of bits in 'new' map, wrap
+		 * around and start from the beginning.
+		 */
 		if (w == 0) { /* if not initialized */
 			w = bitmap_weight(new, nbits);
 			if (w == 0) { /* if empty */
@@ -1014,7 +1024,13 @@ void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 				return;
 			}
 		}
-		__set_bit(find_nth_bit(new, nbits, n % w), dst);
+
+		n -= bitmap_weight_from(new, nbits, _newbit);
+		newbit = find_nth_bit(new, nbits, n % w);
+set_bit:
+		__set_bit(newbit, dst);
+		_oldbit = oldbit;
+		_newbit = newbit;
 	}
 }
 EXPORT_SYMBOL(__bitmap_remap);
