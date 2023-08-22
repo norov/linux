@@ -1003,6 +1003,11 @@ void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 	bitmap_zero(dst, nbits);
 
 	w = bitmap_weight(new, nbits);
+	if (w == 0) {
+		bitmap_copy(dst, src, nbits);
+		return;
+	}
+
 	for_each_set_bit(oldbit, src, nbits) {
 		int n = bitmap_pos_to_ord(old, oldbit, nbits);
 
