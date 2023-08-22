@@ -996,16 +996,10 @@ void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 		const unsigned long *old, const unsigned long *new,
 		unsigned int nbits)
 {
-	unsigned int oldbit, w, n;
+	unsigned int oldbit, w = 0, n;
 
 	if (dst == src)		/* following doesn't handle inplace remaps */
 		return;
-
-	w = bitmap_weight(new, nbits);
-	if (w == 0) {
-		bitmap_copy(dst, src, nbits);
-		return;
-	}
 
 	/* Identity part */
 	bitmap_andnot(dst, src, old, nbits);
@@ -1013,6 +1007,13 @@ void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 	/* Remapping part */
 	for_each_and_bit(oldbit, src, old, nbits) {
 		n = bitmap_weight(old, oldbit);
+		if (w == 0) { /* if not initialized */
+			w = bitmap_weight(new, nbits);
+			if (w == 0) { /* if empty */
+				bitmap_copy(dst, src, nbits);
+				return;
+			}
+		}
 		__set_bit(find_nth_bit(new, nbits, n % w), dst);
 	}
 }
