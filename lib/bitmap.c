@@ -992,52 +992,7 @@ static int bitmap_pos_to_ord(const unsigned long *buf, unsigned int pos, unsigne
 	return bitmap_weight(buf, pos);
 }
 
-/**
- * bitmap_remap - Apply map defined by a pair of bitmaps to another bitmap
- *	@dst: remapped result
- *	@src: subset to be remapped
- *	@old: defines domain of map
- *	@new: defines range of map
- *	@nbits: number of bits in each of these bitmaps
- *
- * Let @old and @new define a mapping of bit positions, such that
- * whatever position is held by the n-th set bit in @old is mapped
- * to the n-th set bit in @new. For example lets say that @old has
- * bits 2 through 4 set, and @new has bits 3 through 5 set:
- *
- *	old: 00011100
- *	     |||///||
- *	new: 00111000
- *
- * This defines the mapping of bit position 2 to 3, 3 to 4 and 4 to 5,
- * and of all other bit positions unchanged. So if say @src comes into
- * this routine with bits 1, 3 and 5 set, then @dst should leave with
- * bits 1, 4 and 5 set:
- *
- *	src: 00101010
- *	       v v v
- *	old: 00011100
- *	     |||///||
- *	new: 00111000
- *	       vv  v
- *	dst: 00110010
- *
- * In the more general case, allowing for the possibility that the weight
- * 'w' of @new is less than the weight of @old, map the position of the
- * n-th set bit in @old to the position of the m-th set bit in @new, where
- * m == n % w.
- *
- * If either of the @old and @new bitmaps are empty, or if @src and
- * @dst point to the same location, then this routine copies @src
- * to @dst.
- *
- * The positions of unset bits in @old are mapped to themselves
- * (the identity map).
- *
- * Apply the above specified mapping to @src, placing the result in
- * @dst, clearing any bits previously set in @dst.
- */
-void bitmap_remap(unsigned long *dst, const unsigned long *src,
+void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 		const unsigned long *old, const unsigned long *new,
 		unsigned int nbits)
 {
@@ -1057,7 +1012,7 @@ void bitmap_remap(unsigned long *dst, const unsigned long *src,
 			set_bit(find_nth_bit(new, nbits, n % w), dst);
 	}
 }
-EXPORT_SYMBOL(bitmap_remap);
+EXPORT_SYMBOL(__bitmap_remap);
 
 /**
  * bitmap_bitremap - Apply map defined by a pair of bitmaps to a single bit

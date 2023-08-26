@@ -161,6 +161,8 @@ bool __bitmap_andnot(unsigned long *dst, const unsigned long *bitmap1,
 void __bitmap_replace(unsigned long *dst,
 		      const unsigned long *old, const unsigned long *new,
 		      const unsigned long *mask, unsigned int nbits);
+void __bitmap_remap(unsigned long *dst, const unsigned long *src,
+		const unsigned long *old, const unsigned long *new, unsigned int nbits);
 bool __bitmap_intersects(const unsigned long *bitmap1,
 			 const unsigned long *bitmap2, unsigned int nbits);
 bool __bitmap_subset(const unsigned long *bitmap1,
@@ -211,8 +213,7 @@ int bitmap_parselist(const char *buf, unsigned long *maskp,
 			int nmaskbits);
 int bitmap_parselist_user(const char __user *ubuf, unsigned int ulen,
 			unsigned long *dst, int nbits);
-void bitmap_remap(unsigned long *dst, const unsigned long *src,
-		const unsigned long *old, const unsigned long *new, unsigned int nbits);
+
 int bitmap_bitremap(int oldbit,
 		const unsigned long *old, const unsigned long *new, int bits);
 void bitmap_onto(unsigned long *dst, const unsigned long *orig,
@@ -669,6 +670,67 @@ static inline int bitmap_find_free_region(unsigned long *bitmap, unsigned int bi
 			return pos;
 	}
 	return -ENOMEM;
+}
+
+/**
+ * bitmap_remap - Apply map defined by a pair of bitmaps to another bitmap
+ *	@dst: remapped result
+ *	@src: subset to be remapped
+ *	@old: defines domain of map
+ *	@new: defines range of map
+ *	@nbits: number of bits in each of these bitmaps
+ *
+ * Let @old and @new define a mapping of bit positions, such that
+ * whatever position is held by the n-th set bit in @old is mapped
+ * to the n-th set bit in @new. For example lets say that @old has
+ * bits 2 through 4 set, and @new has bits 3 through 5 set:
+ *
+ *	old: 00011100
+ *	     |||///||
+ *	new: 00111000
+ *
+ * This defines the mapping of bit position 2 to 3, 3 to 4 and 4 to 5,
+ * and of all other bit positions unchanged. So if say @src comes into
+ * this routine with bits 1, 3 and 5 set, then @dst should leave with
+ * bits 1, 4 and 5 set:
+ *
+ *	src: 00101010
+ *	       v v v
+ *	old: 00011100
+ *	     |||///||
+ *	new: 00111000
+ *	       vv  v
+ *	dst: 00110010
+ *
+ * In the more general case, allowing for the possibility that the weight
+ * 'w' of @new is less than the weight of @old, map the position of the
+ * n-th set bit in @old to the position of the m-th set bit in @new, where
+ * m == n % w.
+ *
+ * If either of the @old and @new bitmaps are empty, or if @src and
+ * @dst point to the same location, then this routine copies @src
+ * to @dst.
+ *
+ * The positions of unset bits in @old are mapped to themselves
+ * (the identity map).
+ *
+ * Apply the above specified mapping to @src, placing the result in
+ * @dst, clearing any bits previously set in @dst.
+ */
+static inline void bitmap_remap(unsigned long *dst, const unsigned long *src,
+		const unsigned long *old, const unsigned long *new, unsigned int nbits)
+{
+	if (small_const_nbits(nbits)) {
+		if ((*src & BITMAP_LAST_WORD_MASK(nbits)) == 0 ||
+		    (*old & BITMAP_LAST_WORD_MASK(nbits)) == 0 ||
+		    (*new & BITMAP_LAST_WORD_MASK(nbits)) == 0 ||
+		    ((*new ^ *old) & BITMAP_LAST_WORD_MASK(nbits)) == 0) {
+			*dst = *src & BITMAP_LAST_WORD_MASK(nbits);
+			return;
+		}
+	}
+
+	__bitmap_remap(dst, src, old, new, nbits);
 }
 
 #endif /* __ASSEMBLY__ */
