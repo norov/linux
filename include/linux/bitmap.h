@@ -163,6 +163,8 @@ void __bitmap_replace(unsigned long *dst,
 		      const unsigned long *mask, unsigned int nbits);
 void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 		const unsigned long *old, const unsigned long *new, unsigned int nbits);
+int __bitmap_bitremap(int oldbit,
+		const unsigned long *old, const unsigned long *new, int nbits);
 bool __bitmap_intersects(const unsigned long *bitmap1,
 			 const unsigned long *bitmap2, unsigned int nbits);
 bool __bitmap_subset(const unsigned long *bitmap1,
@@ -214,8 +216,6 @@ int bitmap_parselist(const char *buf, unsigned long *maskp,
 int bitmap_parselist_user(const char __user *ubuf, unsigned int ulen,
 			unsigned long *dst, int nbits);
 
-int bitmap_bitremap(int oldbit,
-		const unsigned long *old, const unsigned long *new, int bits);
 void bitmap_onto(unsigned long *dst, const unsigned long *orig,
 		const unsigned long *relmap, unsigned int bits);
 void bitmap_fold(unsigned long *dst, const unsigned long *orig,
@@ -731,6 +731,38 @@ static inline void bitmap_remap(unsigned long *dst, const unsigned long *src,
 	}
 
 	__bitmap_remap(dst, src, old, new, nbits);
+}
+
+/**
+ * bitmap_bitremap - Apply map defined by a pair of bitmaps to a single bit
+ *	@oldbit: bit position to be mapped
+ *	@old: defines domain of map
+ *	@new: defines range of map
+ *	@nbits: number of bits in each of these bitmaps
+ *
+ * A special case of bitmap_remap(), when a single bit remapping is needed.
+ *
+ * Returns: position of remapped bit
+ */
+static inline int bitmap_bitremap(int oldbit,
+		const unsigned long *old, const unsigned long *new, int nbits)
+{
+	if (small_const_nbits(nbits)) {
+		unsigned int w, n;
+
+		if ((*old & BIT(oldbit)) == 0 ||
+		    (*old & BITMAP_LAST_WORD_MASK(nbits)) == 0 ||
+		    (*new & BITMAP_LAST_WORD_MASK(nbits)) == 0 ||
+		    ((*new ^ *old) & BITMAP_LAST_WORD_MASK(nbits)) == 0) {
+			return oldbit;
+		}
+
+		w = bitmap_weight(new, nbits);
+		n = bitmap_weight(old, oldbit);
+		return find_nth_bit(new, nbits, n % w);
+	}
+
+	return __bitmap_bitremap(oldbit, old, new, nbits);
 }
 
 #endif /* __ASSEMBLY__ */

@@ -1014,18 +1014,7 @@ void __bitmap_remap(unsigned long *dst, const unsigned long *src,
 }
 EXPORT_SYMBOL(__bitmap_remap);
 
-/**
- * bitmap_bitremap - Apply map defined by a pair of bitmaps to a single bit
- *	@oldbit: bit position to be mapped
- *	@old: defines domain of map
- *	@new: defines range of map
- *	@bits: number of bits in each of these bitmaps
- *
- * A special case of bitmap_remap(), when a single bit remapping is needed.
- *
- * Returns: position of remapped bit
- */
-int bitmap_bitremap(int oldbit, const unsigned long *old,
+int __bitmap_bitremap(int oldbit, const unsigned long *old,
 				const unsigned long *new, int bits)
 {
 	int w = bitmap_weight(new, bits);
@@ -1035,7 +1024,7 @@ int bitmap_bitremap(int oldbit, const unsigned long *old,
 	else
 		return find_nth_bit(new, bits, n % w);
 }
-EXPORT_SYMBOL(bitmap_bitremap);
+EXPORT_SYMBOL(__bitmap_bitremap);
 
 #ifdef CONFIG_NUMA
 /**
