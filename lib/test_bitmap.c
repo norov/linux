@@ -378,6 +378,19 @@ static void __init test_weight(void)
 	}
 }
 
+static void __always_inline __init __test_bitremap(unsigned long *dst, unsigned long *src,
+				unsigned long *old, unsigned long *new, unsigned long nbits)
+{
+	unsigned long oldbit, newbit;
+
+	bitmap_zero(dst, nbits);
+
+	for_each_set_bit(oldbit, src, nbits) {
+		newbit = bitmap_bitremap(oldbit, old, new, nbits);
+		__set_bit(newbit, dst);
+	}
+}
+
 static void __init test_remap(void)
 {
 	DECLARE_BITMAP(dst, 8);
@@ -402,11 +415,17 @@ static void __init test_remap(void)
 	bitmap_remap(dst, src, old, new, 8);
 	expect_eq_bitmap(exp0, dst, 8);
 
+	__test_bitremap(dst, src, old, new, 8);
+	expect_eq_bitmap(exp0, dst, 8);
+
 	/*
 	 * When old mapping is the same as new, source bits are copied to dst.
 	 * Real code must use bitmap_copy() if it's known in advance.
 	 */
 	bitmap_remap(dst, src, old, old, 8);
+	expect_eq_bitmap(src, dst, 8);
+
+	__test_bitremap(dst, src, old, old, 8);
 	expect_eq_bitmap(src, dst, 8);
 
 	bitmap_remap(dst, src, new, new, 8);
@@ -419,10 +438,19 @@ static void __init test_remap(void)
 	bitmap_remap(dst, src, empty, new, 8);
 	expect_eq_bitmap(src, dst, 8);
 
+	__test_bitremap(dst, src, empty, new, 8);
+	expect_eq_bitmap(src, dst, 8);
+
 	bitmap_remap(dst, src, old, empty, 8);
 	expect_eq_bitmap(src, dst, 8);
 
+	__test_bitremap(dst, src, old, empty, 8);
+	expect_eq_bitmap(src, dst, 8);
+
 	bitmap_remap(dst, src, empty, empty, 8);
+	expect_eq_bitmap(src, dst, 8);
+
+	__test_bitremap(dst, src, empty, empty, 8);
 	expect_eq_bitmap(src, dst, 8);
 
 	/* Set extra bit in old map to test carry logic */
@@ -430,10 +458,16 @@ static void __init test_remap(void)
 	bitmap_remap(dst, src, old, new, 8);
 	expect_eq_bitmap(exp1, dst, 8);
 
+	__test_bitremap(dst, src, old, new, 8);
+	expect_eq_bitmap(exp1, dst, 8);
+
 	/* Map old bits to #7 */
 	bitmap_zero(new, 8);
 	set_bit(7, new);
 	bitmap_remap(dst, src, old, new, 8);
+	expect_eq_bitmap(exp2, dst, 8);
+
+	__test_bitremap(dst, src, old, new, 8);
 	expect_eq_bitmap(exp2, dst, 8);
 
 	bitmap_fill(perf_src, 1000);
