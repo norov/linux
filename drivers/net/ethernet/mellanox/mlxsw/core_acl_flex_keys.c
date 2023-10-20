@@ -167,16 +167,15 @@ static void mlxsw_afk_picker_subtract_hits(struct mlxsw_afk *mlxsw_afk,
 {
 	DECLARE_BITMAP(hits_element, MLXSW_AFK_ELEMENT_MAX);
 	int i;
-	int j;
 
 	memcpy(&hits_element, &picker[block_index].element,
 	       sizeof(hits_element));
 
 	for (i = 0; i < mlxsw_afk->blocks_count; i++) {
-		for_each_set_bit(j, hits_element, MLXSW_AFK_ELEMENT_MAX) {
-			if (__test_and_clear_bit(j, picker[i].element))
-				picker[i].total--;
-		}
+		picker[i].total -= bitmap_weight_and(picker[i].element, hits_element,
+							MLXSW_AFK_ELEMENT_MAX);
+		bitmap_andnot(picker[i].element, picker[i].element, hits_element,
+				MLXSW_AFK_ELEMENT_MAX);
 	}
 }
 
