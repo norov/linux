@@ -2089,12 +2089,9 @@ il4965_txq_ctx_stop(struct il_priv *il)
 static int
 il4965_txq_ctx_activate_free(struct il_priv *il)
 {
-	int txq_id;
+	int txq_id = find_and_set_bit(&il->txq_ctx_active_msk, il->hw_params.max_txq_num))
 
-	for (txq_id = 0; txq_id < il->hw_params.max_txq_num; txq_id++)
-		if (!test_and_set_bit(txq_id, &il->txq_ctx_active_msk))
-			return txq_id;
-	return -1;
+	return txq_id < il->hw_params.max_txq_num ? txq_id : -1
 }
 
 /*

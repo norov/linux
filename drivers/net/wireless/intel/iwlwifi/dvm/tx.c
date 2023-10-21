@@ -459,17 +459,14 @@ drop_unlock_priv:
 
 static int iwlagn_alloc_agg_txq(struct iwl_priv *priv, int mq)
 {
-	int q;
+	int q = find_and_set_next_bit(priv->agg_q_alloc,
+				      priv->trans->trans_cfg->base_params->num_of_queues,
+				      IWLAGN_FIRST_AMPDU_QUEUE);
+	if (q >= priv->trans->trans_cfg->base_params->num_of_queues) {
+		return -ENOSPC;
 
-	for (q = IWLAGN_FIRST_AMPDU_QUEUE;
-	     q < priv->trans->trans_cfg->base_params->num_of_queues; q++) {
-		if (!test_and_set_bit(q, priv->agg_q_alloc)) {
-			priv->queue_to_mac80211[q] = mq;
-			return q;
-		}
-	}
-
-	return -ENOSPC;
+	priv->queue_to_mac80211[q] = mq;
+	return q;
 }
 
 static void iwlagn_dealloc_agg_txq(struct iwl_priv *priv, int q)
