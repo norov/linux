@@ -1358,12 +1358,12 @@ static void qeth_clear_output_buffer(struct qeth_qdio_out_q *queue,
 
 	qeth_tx_complete_buf(queue, buf, error, budget);
 
-	for (i = 0; i < queue->max_elements; ++i) {
+	for_each_set_bit(i, buf->from_kmem_cache, queue->max_elements) {
 		void *data = phys_to_virt(buf->buffer->element[i].addr);
-
-		if (__test_and_clear_bit(i, buf->from_kmem_cache) && data)
+		if (data)
 			kmem_cache_free(qeth_core_header_cache, data);
 	}
+	bitmap_zero(buf->from_kmem_cache, queue->max_elements);
 
 	qeth_scrub_qdio_buffer(buf->buffer, queue->max_elements);
 	buf->next_element_to_fill = 0;
