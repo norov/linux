@@ -187,15 +187,9 @@ static const struct iommu_flush_ops msm_iommu_flush_ops = {
 
 static int msm_iommu_alloc_ctx(unsigned long *map, int start, int end)
 {
-	int idx;
+	int idx = find_and_set_next_bit(map, end, start);
 
-	do {
-		idx = find_next_zero_bit(map, end, start);
-		if (idx == end)
-			return -ENOSPC;
-	} while (test_and_set_bit(idx, map));
-
-	return idx;
+	return idx < end ? idx : -ENOSPC;
 }
 
 static void msm_iommu_free_ctx(unsigned long *map, int idx)
