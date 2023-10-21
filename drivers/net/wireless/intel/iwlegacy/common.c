@@ -2303,13 +2303,9 @@ EXPORT_SYMBOL(il_restore_stations);
 int
 il_get_free_ucode_key_idx(struct il_priv *il)
 {
-	int i;
+	int i = find_and_set_bit(&il->ucode_key_table, il->sta_key_max_num);
 
-	for (i = 0; i < il->sta_key_max_num; i++)
-		if (!test_and_set_bit(i, &il->ucode_key_table))
-			return i;
-
-	return WEP_INVALID_OFFSET;
+	return i < il->sta_key_max_num ? i : WEP_INVALID_OFFSET;
 }
 EXPORT_SYMBOL(il_get_free_ucode_key_idx);
 
