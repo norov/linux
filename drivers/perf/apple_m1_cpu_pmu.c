@@ -447,12 +447,8 @@ static int m1_pmu_get_event_idx(struct pmu_hw_events *cpuc,
 	 * counting on the PMU at any given time, and by placing the
 	 * most constraining events first.
 	 */
-	for_each_set_bit(idx, &affinity, M1_PMU_NR_COUNTERS) {
-		if (!test_and_set_bit(idx, cpuc->used_mask))
-			return idx;
-	}
-
-	return -EAGAIN;
+	idx = find_and_set_bit(cpuc->used_mask, M1_PMU_NR_COUNTERS);
+	return idx < M1_PMU_NR_COUNTERS ? idx : -EAGAIN;
 }
 
 static void m1_pmu_clear_event_idx(struct pmu_hw_events *cpuc,
