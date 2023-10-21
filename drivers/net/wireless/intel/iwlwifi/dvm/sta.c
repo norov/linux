@@ -719,13 +719,9 @@ void iwl_restore_stations(struct iwl_priv *priv, struct iwl_rxon_context *ctx)
 
 int iwl_get_free_ucode_key_offset(struct iwl_priv *priv)
 {
-	int i;
+	int i = find_and_set_bit(&priv->ucode_key_table, priv->sta_key_max_num);
 
-	for (i = 0; i < priv->sta_key_max_num; i++)
-		if (!test_and_set_bit(i, &priv->ucode_key_table))
-			return i;
-
-	return WEP_INVALID_OFFSET;
+	return i < priv->sta_key_max_num ? i : WEP_INVALID_OFFSET;
 }
 
 void iwl_dealloc_bcast_stations(struct iwl_priv *priv)
