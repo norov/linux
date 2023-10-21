@@ -331,10 +331,8 @@ static int ml_get_combo_effect(struct ml_device *ml,
 
 	memset(combo_effect, 0, sizeof(struct ff_effect));
 
-	for (i = 0; i < FF_MEMLESS_EFFECTS; i++) {
-		if (__test_and_set_bit(i, effect_handled))
-			continue;
-
+	for_each_clear_bit(i, effect_handled, FF_MEMLESS_EFFECTS) {
+		__set_bit(i, effect_handled);
 		state = &ml->states[i];
 		effect = state->effect;
 
