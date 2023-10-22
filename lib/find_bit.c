@@ -116,6 +116,81 @@ unsigned long _find_first_and_bit(const unsigned long *addr1,
 EXPORT_SYMBOL(_find_first_and_bit);
 #endif
 
+/*
+ * Find the first set bit in a memory region.
+ */
+unsigned long _find_and_set_bit(volatile unsigned long *addr, unsigned long size)
+{
+	unsigned long bit;
+	do {
+		bit = FIND_FIRST_BIT(~addr[idx], /* nop */, size);
+		if (bit >= size)
+			return size;
+	} while (test_and_set_bit(bit, addr));
+
+	return bit;
+}
+EXPORT_SYMBOL(_find_and_set_bit);
+
+/*
+ * Find the first set bit in a memory region.
+ */
+unsigned long _find_and_set_next_bit(volatile unsigned long *addr,
+				     unsigned long size, unsigned long start)
+{
+	unsigned long bit;
+	do {
+		bit = FIND_NEXT_BIT(~addr[idx], /* nop */, size, start);
+		if (bit >= size)
+			return size;
+	} while (test_and_set_bit(bit, addr));
+
+	return bit;
+}
+EXPORT_SYMBOL(_find_and_set_next_bit);
+
+unsigned long _find_and_set_bit_lock(volatile unsigned long *addr, unsigned long size)
+{
+	unsigned long bit;
+	do {
+		bit = FIND_FIRST_BIT(~addr[idx], /* nop */, size);
+		if (bit >= size)
+			return size;
+	} while (test_and_set_bit_lock(bit, addr));
+
+	return bit;
+}
+EXPORT_SYMBOL(_find_and_set_bit_lock);
+
+/*
+ * Find the first cleared bit in a memory region.
+ */
+unsigned long _find_and_clear_bit(volatile unsigned long *addr, unsigned long size)
+{
+	unsigned long bit;
+	do {
+		bit = FIND_FIRST_BIT(addr[idx], /* nop */, size);
+		if (bit >= size)
+			return size;
+	} while (!test_and_clear_bit(bit, addr));
+
+	return bit;
+}
+EXPORT_SYMBOL(_find_and_clear_bit);
+
+unsigned long _find_and_clear_next_bit(volatile unsigned long *addr,
+					unsigned long size, unsigned long start)
+{
+	do {
+		start =  FIND_NEXT_BIT(addr[idx], /* nop */, size, start);
+		if (start >= size)
+			return size;
+	} while (!test_and_clear_bit(start, addr));
+
+	return start;
+}
+EXPORT_SYMBOL(_find_and_clear_next_bit);
+
 #ifndef find_first_zero_bit
 /*
  * Find the first cleared bit in a memory region.
