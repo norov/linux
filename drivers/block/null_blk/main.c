@@ -762,15 +762,9 @@ static void put_tag(struct nullb_queue *nq, unsigned int tag)
 
 static unsigned int get_tag(struct nullb_queue *nq)
 {
-	unsigned int tag;
+	unsigned int tag = find_and_set_bit_lock(nq->tag_map, nq->queue_depth);
 
-	do {
-		tag = find_first_zero_bit(nq->tag_map, nq->queue_depth);
-		if (tag >= nq->queue_depth)
-			return -1U;
-	} while (test_and_set_bit_lock(tag, nq->tag_map));
-
-	return tag;
+	return tag < nq->queue_depth ? tag : -1U;
 }
 
 static void free_cmd(struct nullb_cmd *cmd)
