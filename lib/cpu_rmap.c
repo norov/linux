@@ -128,19 +128,31 @@ debug_print_rmap(const struct cpu_rmap *rmap, const char *prefix)
 }
 #endif
 
+static int get_free_index(struct cpu_rmap *rmap)
+{
+	int i;
+
+	for (i = 0; i < rmap->size; i++)
+		if (!rmap->obj[i])
+			return i;
+
+	return -ENOSPC;
+}
+
 /**
  * cpu_rmap_add - add object to a rmap
  * @rmap: CPU rmap allocated with alloc_cpu_rmap()
  * @obj: Object to add to rmap
  *
- * Return index of object.
+ * Return index of object or -ENOSPC if no free entry was found
  */
 int cpu_rmap_add(struct cpu_rmap *rmap, void *obj)
 {
-	u16 index;
+	int index = get_free_index(rmap);
 
-	BUG_ON(rmap->used >= rmap->size);
-	index = rmap->used++;
+	if (index < 0)
+		return index;
+
 	rmap->obj[index] = obj;
 	return index;
 }
@@ -230,7 +242,7 @@ void free_irq_cpu_rmap(struct cpu_rmap *rmap)
 	if (!rmap)
 		return;
 
-	for (index = 0; index < rmap->used; index++) {
+	for (index = 0; index < rmap->size; index++) {
 		glue = rmap->obj[index];
 		irq_set_affinity_notifier(glue->notify.irq, NULL);
 	}

@@ -10523,8 +10523,8 @@ unlock:
 static void dytc_profile_refresh(void)
 {
 	enum platform_profile_option profile;
-	int output, err = 0;
-	int perfmode, funcmode;
+	int output = 0, err = 0;
+	int perfmode, funcmode = 0;
 
 	mutex_lock(&dytc_mutex);
 	if (dytc_capabilities & BIT(DYTC_FC_MMC)) {
@@ -10537,6 +10537,8 @@ static void dytc_profile_refresh(void)
 		err = dytc_command(DYTC_CMD_GET, &output);
 		/* Check if we are PSC mode, or have AMT enabled */
 		funcmode = (output >> DYTC_GET_FUNCTION_BIT) & 0xF;
+	} else { /* Unknown profile mode */
+		err = -ENODEV;
 	}
 	mutex_unlock(&dytc_mutex);
 	if (err)
@@ -11699,6 +11701,7 @@ static int __init thinkpad_acpi_module_init(void)
 {
 	const struct dmi_system_id *dmi_id;
 	int ret, i;
+	acpi_object_type obj_type;
 
 	tpacpi_lifecycle = TPACPI_LIFE_INIT;
 
@@ -11723,6 +11726,21 @@ static int __init thinkpad_acpi_module_init(void)
 
 	TPACPI_ACPIHANDLE_INIT(ecrd);
 	TPACPI_ACPIHANDLE_INIT(ecwr);
+
+	/*
+	 * Quirk: in some models (e.g. X380 Yoga), an object named ECRD
+	 * exists, but it is a register, not a method.
+	 */
+	if (ecrd_handle) {
+		acpi_get_type(ecrd_handle, &obj_type);
+		if (obj_type != ACPI_TYPE_METHOD)
+			ecrd_handle = NULL;
+	}
+	if (ecwr_handle) {
+		acpi_get_type(ecwr_handle, &obj_type);
+		if (obj_type != ACPI_TYPE_METHOD)
+			ecwr_handle = NULL;
+	}
 
 	tpacpi_wq = create_singlethread_workqueue(TPACPI_WORKQUEUE_NAME);
 	if (!tpacpi_wq) {

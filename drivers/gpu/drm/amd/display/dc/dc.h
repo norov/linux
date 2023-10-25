@@ -29,9 +29,7 @@
 #include "dc_types.h"
 #include "grph_object_defs.h"
 #include "logger_types.h"
-#if defined(CONFIG_DRM_AMD_DC_HDCP)
-#include "hdcp_types.h"
-#endif
+#include "hdcp_msg_types.h"
 #include "gpio_types.h"
 #include "link_service_types.h"
 #include "grph_object_ctrl_defs.h"
@@ -47,7 +45,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.223"
+#define DC_VER "3.2.230"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -84,8 +82,6 @@ enum det_size {
 
 struct dc_plane_cap {
 	enum dc_plane_type type;
-	uint32_t blends_with_above : 1;
-	uint32_t blends_with_below : 1;
 	uint32_t per_pixel_alpha : 1;
 	struct {
 		uint32_t argb8888 : 1;
@@ -409,6 +405,7 @@ struct dc_config {
 	bool force_bios_enable_lttpr;
 	uint8_t force_bios_fixed_vs;
 	int sdpif_request_limit_words_per_umc;
+	bool use_old_fixed_vs_sequence;
 	bool disable_subvp_drr;
 };
 
@@ -716,6 +713,7 @@ struct dc_bounding_box_overrides {
 struct dc_state;
 struct resource_pool;
 struct dce_hwseq;
+struct link_service;
 
 /**
  * struct dc_debug_options - DC debug struct
@@ -856,7 +854,6 @@ struct dc_debug_options {
 	bool force_usr_allow;
 	/* uses value at boot and disables switch */
 	bool disable_dtb_ref_clk_switch;
-	uint32_t fixed_vs_aux_delay_config_wa;
 	bool extended_blank_optimization;
 	union aux_wake_wa_options aux_wake_wa;
 	uint32_t mst_start_top_delay;
@@ -874,6 +871,12 @@ struct dc_debug_options {
 	bool disable_unbounded_requesting;
 	bool dig_fifo_off_in_blank;
 	bool temp_mst_deallocation_sequence;
+	bool override_dispclk_programming;
+	bool disable_fpo_optimizations;
+	bool support_eDP1_5;
+	uint32_t fpo_vactive_margin_us;
+	bool disable_fpo_vactive;
+	bool disable_boot_optimizations;
 };
 
 struct gpu_info_soc_bounding_box_v1_0;
@@ -890,6 +893,7 @@ struct dc {
 
 	uint8_t link_count;
 	struct dc_link *links[MAX_PIPES * 2];
+	struct link_service *link_srv;
 
 	struct dc_state *current_state;
 	struct resource_pool *res_pool;
@@ -991,11 +995,7 @@ struct dc_init_data {
 };
 
 struct dc_callback_init {
-#ifdef CONFIG_DRM_AMD_DC_HDCP
 	struct cp_psp cp_psp;
-#else
-	uint8_t reserved;
-#endif
 };
 
 struct dc *dc_create(const struct dc_init_data *init_params);
@@ -1362,10 +1362,6 @@ enum dc_status dc_commit_streams(struct dc *dc,
 				 struct dc_stream_state *streams[],
 				 uint8_t stream_count);
 
-/* TODO: When the transition to the new commit sequence is done, remove this
- * function in favor of dc_commit_streams. */
-bool dc_commit_state(struct dc *dc, struct dc_state *context);
-
 struct dc_state *dc_create_state(struct dc *dc);
 struct dc_state *dc_copy_state(struct dc_state *src_ctx);
 void dc_retain_state(struct dc_state *context);
@@ -1377,6 +1373,11 @@ struct dc_plane_state *dc_get_surface_for_mpcc(struct dc *dc,
 
 
 uint32_t dc_get_opp_for_plane(struct dc *dc, struct dc_plane_state *plane);
+
+/* The function returns minimum bandwidth required to drive a given timing
+ * return - minimum required timing bandwidth in kbps.
+ */
+uint32_t dc_bandwidth_in_kbps_from_timing(const struct dc_crtc_timing *timing);
 
 /* Link Interfaces */
 /* TODO: remove this after resolving external dependencies */
@@ -1450,12 +1451,6 @@ uint32_t dc_link_bandwidth_kbps(
 	const struct dc_link *link,
 	const struct dc_link_settings *link_setting);
 
-/* The function returns minimum bandwidth required to drive a given timing
- * return - minimum required timing bandwidth in kbps.
- */
-uint32_t dc_bandwidth_in_kbps_from_timing(
-	const struct dc_crtc_timing *timing);
-
 /* The function takes a snapshot of current link resource allocation state
  * @dc: pointer to dc of the dm calling this
  * @map: a dc link resource snapshot defined internally to dc.
@@ -1511,7 +1506,7 @@ struct dc_sink_dsc_caps {
 	// 'true' if these are virtual DPCD's DSC caps (immediately upstream of sink in MST topology),
 	// 'false' if they are sink's DSC caps
 	bool is_virtual_dpcd_dsc;
-#if defined(CONFIG_DRM_AMD_DC_DCN)
+#if defined(CONFIG_DRM_AMD_DC_FP)
 	// 'true' if MST topology supports DSC passthrough for sink
 	// 'false' if MST topology does not support DSC passthrough
 	bool is_dsc_passthrough_supported;
@@ -1571,8 +1566,6 @@ struct dc_sink_init_data {
 	bool converter_disable_audio;
 };
 
-bool dc_extended_blank_supported(struct dc *dc);
-
 struct dc_sink *dc_sink_create(const struct dc_sink_init_data *init_params);
 
 /* Newer interfaces  */
@@ -1603,7 +1596,6 @@ void dc_resume(struct dc *dc);
 
 void dc_power_down_on_boot(struct dc *dc);
 
-#if defined(CONFIG_DRM_AMD_DC_HDCP)
 /*
  * HDCP Interfaces
  */
@@ -1611,7 +1603,6 @@ enum hdcp_message_status dc_process_hdcp_msg(
 		enum signal_type signal,
 		struct dc_link *link,
 		struct hdcp_protection_message *message_info);
-#endif
 bool dc_is_dmcu_initialized(struct dc *dc);
 
 enum dc_status dc_set_clock(struct dc *dc, enum dc_clock_type clock_type, uint32_t clk_khz, uint32_t stepping);
@@ -1672,5 +1663,8 @@ void dc_process_dmub_dpia_hpd_int_enable(const struct dc *dc,
 
 /* Disable acc mode Interfaces */
 void dc_disable_accelerated_mode(struct dc *dc);
+
+bool dc_is_timing_changed(struct dc_stream_state *cur_stream,
+		       struct dc_stream_state *new_stream);
 
 #endif /* DC_INTERFACE_H_ */

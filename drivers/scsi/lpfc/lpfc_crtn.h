@@ -134,7 +134,6 @@ void lpfc_check_nlp_post_devloss(struct lpfc_vport *vport,
 				 struct lpfc_nodelist *ndlp);
 void lpfc_ignore_els_cmpl(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 			  struct lpfc_iocbq *rspiocb);
-int  lpfc_nlp_not_used(struct lpfc_nodelist *ndlp);
 struct lpfc_nodelist *lpfc_setup_disc_node(struct lpfc_vport *, uint32_t);
 void lpfc_disc_list_loopmap(struct lpfc_vport *);
 void lpfc_disc_start(struct lpfc_vport *);
@@ -458,6 +457,8 @@ void lpfc_get_cfgparam(struct lpfc_hba *);
 void lpfc_get_vport_cfgparam(struct lpfc_vport *);
 int lpfc_alloc_sysfs_attr(struct lpfc_vport *);
 void lpfc_free_sysfs_attr(struct lpfc_vport *);
+bool lpfc_error_lost_link(struct lpfc_vport *vport, u32 ulp_status,
+			  u32 ulp_word4);
 extern const struct attribute_group *lpfc_hba_groups[];
 extern const struct attribute_group *lpfc_vport_groups[];
 extern struct scsi_host_template lpfc_template;

@@ -799,6 +799,16 @@ static int fl_set_key_port_range(struct nlattr **tb, struct fl_flow_key *key,
 		       TCA_FLOWER_KEY_PORT_SRC_MAX, &mask->tp_range.tp_max.src,
 		       TCA_FLOWER_UNSPEC, sizeof(key->tp_range.tp_max.src));
 
+	if (mask->tp_range.tp_min.dst != mask->tp_range.tp_max.dst) {
+		NL_SET_ERR_MSG(extack,
+			       "Both min and max destination ports must be specified");
+		return -EINVAL;
+	}
+	if (mask->tp_range.tp_min.src != mask->tp_range.tp_max.src) {
+		NL_SET_ERR_MSG(extack,
+			       "Both min and max source ports must be specified");
+		return -EINVAL;
+	}
 	if (mask->tp_range.tp_min.dst && mask->tp_range.tp_max.dst &&
 	    ntohs(key->tp_range.tp_max.dst) <=
 	    ntohs(key->tp_range.tp_min.dst)) {
@@ -1057,7 +1067,7 @@ static void fl_set_key_pppoe(struct nlattr **tb,
 	 * because ETH_P_PPP_SES was stored in basic.n_proto
 	 * which might get overwritten by ppp_proto
 	 * or might be set to 0, the role of key_val::type
-	 * is simmilar to vlan_key::tpid
+	 * is similar to vlan_key::tpid
 	 */
 	key_val->type = htons(ETH_P_PPP_SES);
 	key_mask->type = cpu_to_be16(~0);

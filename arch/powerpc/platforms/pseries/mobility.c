@@ -62,18 +62,10 @@ static struct ctl_table nmi_wd_lpm_factor_ctl_table[] = {
 	},
 	{}
 };
-static struct ctl_table nmi_wd_lpm_factor_sysctl_root[] = {
-	{
-		.procname       = "kernel",
-		.mode           = 0555,
-		.child          = nmi_wd_lpm_factor_ctl_table,
-	},
-	{}
-};
 
 static int __init register_nmi_wd_lpm_factor_sysctl(void)
 {
-	register_sysctl_table(nmi_wd_lpm_factor_sysctl_root);
+	register_sysctl("kernel", nmi_wd_lpm_factor_ctl_table);
 
 	return 0;
 }
@@ -758,7 +750,7 @@ static int pseries_migrate_partition(u64 handle)
 		goto out;
 
 	if (factor)
-		watchdog_nmi_set_timeout_pct(factor);
+		watchdog_hardlockup_set_timeout_pct(factor);
 
 	ret = pseries_suspend(handle);
 	if (ret == 0) {
@@ -774,7 +766,7 @@ static int pseries_migrate_partition(u64 handle)
 		pseries_cancel_migration(handle, ret);
 
 	if (factor)
-		watchdog_nmi_set_timeout_pct(0);
+		watchdog_hardlockup_set_timeout_pct(0);
 
 out:
 	vas_migration_handler(VAS_RESUME);
@@ -787,8 +779,8 @@ int rtas_syscall_dispatch_ibm_suspend_me(u64 handle)
 	return pseries_migrate_partition(handle);
 }
 
-static ssize_t migration_store(struct class *class,
-			       struct class_attribute *attr, const char *buf,
+static ssize_t migration_store(const struct class *class,
+			       const struct class_attribute *attr, const char *buf,
 			       size_t count)
 {
 	u64 streamid;

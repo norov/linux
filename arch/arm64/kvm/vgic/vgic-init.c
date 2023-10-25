@@ -396,7 +396,7 @@ void kvm_vgic_destroy(struct kvm *kvm)
 
 /**
  * vgic_lazy_init: Lazy init is only allowed if the GIC exposed to the guest
- * is a GICv2. A GICv3 must be explicitly initialized by the guest using the
+ * is a GICv2. A GICv3 must be explicitly initialized by userspace using the
  * KVM_DEV_ARM_VGIC_GRP_CTRL KVM_DEVICE group.
  * @kvm: kvm struct pointer
  */
@@ -448,10 +448,13 @@ int kvm_vgic_map_resources(struct kvm *kvm)
 	if (!irqchip_in_kernel(kvm))
 		goto out;
 
-	if (dist->vgic_model == KVM_DEV_TYPE_ARM_VGIC_V2)
+	if (dist->vgic_model == KVM_DEV_TYPE_ARM_VGIC_V2) {
 		ret = vgic_v2_map_resources(kvm);
-	else
+		type = VGIC_V2;
+	} else {
 		ret = vgic_v3_map_resources(kvm);
+		type = VGIC_V3;
+	}
 
 	if (ret)
 		__kvm_vgic_destroy(kvm);

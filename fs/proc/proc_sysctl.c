@@ -841,7 +841,6 @@ static int proc_sys_setattr(struct mnt_idmap *idmap,
 		return error;
 
 	setattr_copy(&nop_mnt_idmap, inode, attr);
-	mark_inode_dirty(inode);
 	return 0;
 }
 
@@ -1283,6 +1282,35 @@ out:
 	return err;
 }
 
+/* Find the directory for the ctl_table. If one is not found create it. */
+static struct ctl_dir *sysctl_mkdir_p(struct ctl_dir *dir, const char *path)
+{
+	const char *name, *nextname;
+
+	for (name = path; name; name = nextname) {
+		int namelen;
+		nextname = strchr(name, '/');
+		if (nextname) {
+			namelen = nextname - name;
+			nextname++;
+		} else {
+			namelen = strlen(name);
+		}
+		if (namelen == 0)
+			continue;
+
+		/*
+		 * namelen ensures if name is "foo/bar/yay" only foo is
+		 * registered first. We traverse as if using mkdir -p and
+		 * return a ctl_dir for the last directory entry.
+		 */
+		dir = get_subdir(dir, name, namelen);
+		if (IS_ERR(dir))
+			break;
+	}
+	return dir;
+}
+
 /**
  * __register_sysctl_table - register a leaf sysctl table
  * @set: Sysctl tree to register on
@@ -1331,7 +1359,6 @@ struct ctl_table_header *__register_sysctl_table(
 {
 	struct ctl_table_root *root = set->dir.header.root;
 	struct ctl_table_header *header;
-	const char *name, *nextname;
 	struct ctl_dir *dir;
 	struct ctl_table *entry;
 	struct ctl_node *node;
@@ -1575,11 +1602,6 @@ struct ctl_table_header *__register_sysctl_paths(
 		return NULL;
 
 	pos[0] = '\0';
-	for (component = path; component->procname; component++) {
-		pos = append_path(new_path, pos, component->procname);
-		if (!pos)
-			goto out;
-	}
 	while (table->procname && table->child && !table[1].procname) {
 		pos = append_path(new_path, pos, table->procname);
 		if (!pos)
@@ -1587,7 +1609,7 @@ struct ctl_table_header *__register_sysctl_paths(
 		table = table->child;
 	}
 	if (nr_subheaders == 1) {
-		header = __register_sysctl_table(set, new_path, table);
+		header = __register_sysctl_table(&sysctl_table_root.default_set, new_path, table);
 		if (header)
 			header->ctl_table_arg = ctl_table_arg;
 	} else {
@@ -1601,7 +1623,7 @@ struct ctl_table_header *__register_sysctl_paths(
 		header->ctl_table_arg = ctl_table_arg;
 
 		if (register_leaf_sysctl_tables(new_path, pos, &subheader,
-						set, table))
+						&sysctl_table_root.default_set, table))
 			goto err_register_leaves;
 	}
 

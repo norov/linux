@@ -165,6 +165,27 @@ static const struct vpu_format vdec_formats[] = {
 		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
 		.flags = V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED
 	},
+	{
+		.pixfmt = V4L2_PIX_FMT_SPK,
+		.mem_planes = 1,
+		.comp_planes = 1,
+		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+		.flags = V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED
+	},
+	{
+		.pixfmt = V4L2_PIX_FMT_RV30,
+		.mem_planes = 1,
+		.comp_planes = 1,
+		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+		.flags = V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED
+	},
+	{
+		.pixfmt = V4L2_PIX_FMT_RV40,
+		.mem_planes = 1,
+		.comp_planes = 1,
+		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+		.flags = V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED
+	},
 	{0, 0, 0, 0},
 };
 
@@ -226,6 +247,7 @@ static void vdec_handle_resolution_change(struct vpu_inst *inst)
 
 	vdec->source_change--;
 	vpu_notify_source_change(inst);
+	vpu_set_last_buffer_dequeued(inst, false);
 }
 
 static int vdec_update_state(struct vpu_inst *inst, enum vpu_codec_state state, u32 force)
@@ -261,7 +283,7 @@ static void vdec_set_last_buffer_dequeued(struct vpu_inst *inst)
 		return;
 
 	if (vdec->eos_received) {
-		if (!vpu_set_last_buffer_dequeued(inst)) {
+		if (!vpu_set_last_buffer_dequeued(inst, true)) {
 			vdec->eos_received--;
 			vdec_update_state(inst, VPU_CODEC_STATE_DRAIN, 0);
 		}
@@ -516,7 +538,7 @@ static int vdec_drain(struct vpu_inst *inst)
 		return 0;
 
 	if (!vdec->params.frame_count) {
-		vpu_set_last_buffer_dequeued(inst);
+		vpu_set_last_buffer_dequeued(inst, true);
 		return 0;
 	}
 
@@ -555,7 +577,7 @@ static int vdec_cmd_stop(struct vpu_inst *inst)
 	vpu_trace(inst->dev, "[%d]\n", inst->id);
 
 	if (inst->state == VPU_CODEC_STATE_DEINIT) {
-		vpu_set_last_buffer_dequeued(inst);
+		vpu_set_last_buffer_dequeued(inst, true);
 	} else {
 		vdec->drain = 1;
 		vdec_drain(inst);

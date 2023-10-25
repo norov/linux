@@ -4333,13 +4333,14 @@ out:
 
 		/* If the node is not registered with the scsi or nvme
 		 * transport, remove the fabric node.  The failed reg_login
-		 * is terminal.
+		 * is terminal and forces the removal of the last node
+		 * reference.
 		 */
 		if (!(ndlp->fc4_xpt_flags & (SCSI_XPT_REGD | NVME_XPT_REGD))) {
 			spin_lock_irq(&ndlp->lock);
 			ndlp->nlp_flag &= ~NLP_NPR_2B_DISC;
 			spin_unlock_irq(&ndlp->lock);
-			lpfc_nlp_not_used(ndlp);
+			lpfc_nlp_put(ndlp);
 		}
 
 		if (phba->fc_topology == LPFC_TOPOLOGY_LOOP) {
@@ -5755,8 +5756,8 @@ lpfc_setup_disc_node(struct lpfc_vport *vport, uint32_t did)
 			     (NLP_FCP_TARGET | NLP_NVME_TARGET)))
 				return NULL;
 
-			ndlp->nlp_prev_state = ndlp->nlp_state;
-			lpfc_nlp_set_state(vport, ndlp, NLP_STE_NPR_NODE);
+			lpfc_disc_state_machine(vport, ndlp, NULL,
+						NLP_EVT_DEVICE_RECOVERY);
 
 			spin_lock_irq(&ndlp->lock);
 			ndlp->nlp_flag |= NLP_NPR_2B_DISC;
@@ -6704,25 +6705,6 @@ lpfc_nlp_put(struct lpfc_nodelist *ndlp)
 	return ndlp ? kref_put(&ndlp->kref, lpfc_nlp_release) : 0;
 }
 
-/* This routine free's the specified nodelist if it is not in use
- * by any other discovery thread. This routine returns 1 if the
- * ndlp has been freed. A return value of 0 indicates the ndlp is
- * not yet been released.
- */
-int
-lpfc_nlp_not_used(struct lpfc_nodelist *ndlp)
-{
-	lpfc_debugfs_disc_trc(ndlp->vport, LPFC_DISC_TRC_NODE,
-		"node not used:   did:x%x flg:x%x refcnt:x%x",
-		ndlp->nlp_DID, ndlp->nlp_flag,
-		kref_read(&ndlp->kref));
-
-	if (kref_read(&ndlp->kref) == 1)
-		if (lpfc_nlp_put(ndlp))
-			return 1;
-	return 0;
-}
-
 /**
  * lpfc_fcf_inuse - Check if FCF can be unregistered.
  * @phba: Pointer to hba context object.
@@ -7268,4 +7250,39 @@ lpfc_parse_fcoe_conf(struct lpfc_hba *phba,
 	if (rec_ptr)
 		lpfc_read_fcf_conn_tbl(phba, rec_ptr);
 
+}
+
+/*
+ * lpfc_error_lost_link - IO failure from link event or FW reset check.
+ *
+ * @vport: Pointer to lpfc_vport data structure.
+ * @ulp_status: IO completion status.
+ * @ulp_word4: Reason code for the ulp_status.
+ *
+ * This function evaluates the ulp_status and ulp_word4 values
+ * for specific error values that indicate an internal link fault
+ * or fw reset event for the completing IO.  Callers require this
+ * common data to decide next steps on the IO.
+ *
+ * Return:
+ * false - No link or reset error occurred.
+ * true - A link or reset error occurred.
+ */
+bool
+lpfc_error_lost_link(struct lpfc_vport *vport, u32 ulp_status, u32 ulp_word4)
+{
+	/* Mask off the extra port data to get just the reason code. */
+	u32 rsn_code = IOERR_PARAM_MASK & ulp_word4;
+
+	if (ulp_status == IOSTAT_LOCAL_REJECT &&
+	    (rsn_code == IOERR_SLI_ABORTED ||
+	     rsn_code == IOERR_LINK_DOWN ||
+	     rsn_code == IOERR_SLI_DOWN)) {
+		lpfc_printf_vlog(vport, KERN_WARNING, LOG_SLI | LOG_ELS,
+				 "0408 Report link error true: <x%x:x%x>\n",
+				 ulp_status, ulp_word4);
+		return true;
+	}
+
+	return false;
 }

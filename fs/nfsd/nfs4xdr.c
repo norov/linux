@@ -3446,8 +3446,7 @@ out_acl:
 		p = xdr_reserve_space(xdr, 4);
 		if (!p)
 			goto out_resource;
-		err = xattr_supported_namespace(d_inode(dentry),
-						XATTR_USER_PREFIX);
+		err = xattr_supports_user_prefix(d_inode(dentry));
 		*p++ = cpu_to_be32(err == 0);
 	}
 
@@ -3957,7 +3956,7 @@ nfsd4_encode_open(struct nfsd4_compoundres *resp, __be32 nfserr,
 		p = xdr_reserve_space(xdr, 32);
 		if (!p)
 			return nfserr_resource;
-		*p++ = cpu_to_be32(0);
+		*p++ = cpu_to_be32(open->op_recall);
 
 		/*
 		 * TODO: space_limit's in delegations

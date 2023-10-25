@@ -361,7 +361,8 @@ void dump_xlated_plain(struct dump_data *dd, void *buf, unsigned int len,
 }
 
 void dump_xlated_for_graph(struct dump_data *dd, void *buf_start, void *buf_end,
-			   unsigned int start_idx)
+			   unsigned int start_idx,
+			   bool opcodes, bool linum)
 {
 	const struct bpf_insn_cbs cbs = {
 		.cb_print	= print_insn_for_graph,

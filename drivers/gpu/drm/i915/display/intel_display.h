@@ -32,6 +32,7 @@
 
 enum drm_scaling_filter;
 struct dpll;
+struct drm_atomic_state;
 struct drm_connector;
 struct drm_device;
 struct drm_display_mode;
@@ -104,7 +105,7 @@ enum i9xx_plane_id {
 };
 
 #define plane_name(p) ((p) + 'A')
-#define sprite_name(p, s) ((p) * RUNTIME_INFO(dev_priv)->num_sprites[(p)] + (s) + 'A')
+#define sprite_name(p, s) ((p) * DISPLAY_RUNTIME_INFO(dev_priv)->num_sprites[(p)] + (s) + 'A')
 
 #define for_each_plane_id_on_crtc(__crtc, __p) \
 	for ((__p) = PLANE_PRIMARY; (__p) < I915_MAX_PLANES; (__p)++) \
@@ -112,7 +113,7 @@ enum i9xx_plane_id {
 
 #define for_each_dbuf_slice(__dev_priv, __slice) \
 	for ((__slice) = DBUF_S1; (__slice) < I915_MAX_DBUF_SLICES; (__slice)++) \
-		for_each_if(INTEL_INFO(__dev_priv)->display.dbuf.slice_mask & BIT(__slice))
+		for_each_if(INTEL_INFO(__dev_priv)->display->dbuf.slice_mask & BIT(__slice))
 
 #define for_each_dbuf_slice_in_mask(__dev_priv, __slice, __mask) \
 	for_each_dbuf_slice((__dev_priv), (__slice)) \
@@ -163,14 +164,9 @@ enum tc_port {
 	I915_MAX_TC_PORTS
 };
 
-enum tc_port_mode {
-	TC_PORT_DISCONNECTED,
-	TC_PORT_TBT_ALT,
-	TC_PORT_DP_ALT,
-	TC_PORT_LEGACY,
-};
-
 enum aux_ch {
+	AUX_CH_NONE = -1,
+
 	AUX_CH_A,
 	AUX_CH_B,
 	AUX_CH_C,
@@ -225,7 +221,7 @@ enum phy_fia {
 
 #define for_each_pipe(__dev_priv, __p) \
 	for ((__p) = 0; (__p) < I915_MAX_PIPES; (__p)++) \
-		for_each_if(RUNTIME_INFO(__dev_priv)->pipe_mask & BIT(__p))
+		for_each_if(DISPLAY_RUNTIME_INFO(__dev_priv)->pipe_mask & BIT(__p))
 
 #define for_each_pipe_masked(__dev_priv, __p, __mask) \
 	for_each_pipe(__dev_priv, __p) \
@@ -233,7 +229,7 @@ enum phy_fia {
 
 #define for_each_cpu_transcoder(__dev_priv, __t) \
 	for ((__t) = 0; (__t) < I915_MAX_TRANSCODERS; (__t)++)	\
-		for_each_if (RUNTIME_INFO(__dev_priv)->cpu_transcoder_mask & BIT(__t))
+		for_each_if (DISPLAY_RUNTIME_INFO(__dev_priv)->cpu_transcoder_mask & BIT(__t))
 
 #define for_each_cpu_transcoder_masked(__dev_priv, __t, __mask) \
 	for_each_cpu_transcoder(__dev_priv, __t) \
@@ -241,7 +237,7 @@ enum phy_fia {
 
 #define for_each_sprite(__dev_priv, __p, __s)				\
 	for ((__s) = 0;							\
-	     (__s) < RUNTIME_INFO(__dev_priv)->num_sprites[(__p)];	\
+	     (__s) < DISPLAY_RUNTIME_INFO(__dev_priv)->num_sprites[(__p)];	\
 	     (__s)++)
 
 #define for_each_port(__port) \
@@ -394,6 +390,7 @@ enum phy_fia {
 			     ((connector) = to_intel_connector((__state)->base.connectors[__i].ptr), \
 			     (new_connector_state) = to_intel_digital_connector_state((__state)->base.connectors[__i].new_state), 1))
 
+int intel_atomic_check(struct drm_device *dev, struct drm_atomic_state *state);
 int intel_atomic_add_affected_planes(struct intel_atomic_state *state,
 				     struct intel_crtc *crtc);
 u8 intel_calc_active_pipes(struct intel_atomic_state *state,
@@ -418,7 +415,6 @@ bool intel_crtc_get_pipe_config(struct intel_crtc_state *crtc_state);
 bool intel_pipe_config_compare(const struct intel_crtc_state *current_config,
 			       const struct intel_crtc_state *pipe_config,
 			       bool fastset);
-void intel_crtc_update_active_timings(const struct intel_crtc_state *crtc_state);
 
 void intel_plane_destroy(struct drm_plane *plane);
 void i9xx_set_pipeconf(const struct intel_crtc_state *crtc_state);
@@ -507,7 +503,7 @@ void intel_crtc_arm_fifo_underrun(struct intel_crtc *crtc,
 				  struct intel_crtc_state *crtc_state);
 void ilk_pfit_disable(const struct intel_crtc_state *old_crtc_state);
 
-int bdw_get_pipemisc_bpp(struct intel_crtc *crtc);
+int bdw_get_pipe_misc_bpp(struct intel_crtc *crtc);
 unsigned int intel_plane_fence_y_offset(const struct intel_plane_state *plane_state);
 
 bool intel_plane_uses_fence(const struct intel_plane_state *plane_state);

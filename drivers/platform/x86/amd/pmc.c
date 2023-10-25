@@ -97,6 +97,7 @@
 #define AMD_CPU_ID_YC			0x14B5
 #define AMD_CPU_ID_CB			0x14D8
 #define AMD_CPU_ID_PS			0x14E8
+#define AMD_CPU_ID_SP			0x14A4
 
 #define PMC_MSG_DELAY_MIN_US		50
 #define RESPONSE_REGISTER_LOOP_MAX	20000
@@ -393,9 +394,8 @@ static void amd_pmc_validate_deepest(struct amd_pmc_dev *pdev)
 
 	if (!table.s0i3_last_entry_status)
 		dev_warn(pdev->dev, "Last suspend didn't reach deepest state\n");
-	else
-		dev_dbg(pdev->dev, "Last suspend in deepest state for %lluus\n",
-			 table.timein_s0i3_lastcapture);
+	pm_report_hw_sleep_time(table.s0i3_last_entry_status ?
+				table.timein_s0i3_lastcapture : 0);
 }
 
 static int amd_pmc_get_smu_version(struct amd_pmc_dev *dev)
@@ -840,7 +840,7 @@ static struct acpi_s2idle_dev_ops amd_pmc_s2idle_dev_ops = {
 	.restore = amd_pmc_s2idle_restore,
 };
 
-static int __maybe_unused amd_pmc_suspend_handler(struct device *dev)
+static int amd_pmc_suspend_handler(struct device *dev)
 {
 	struct amd_pmc_dev *pdev = dev_get_drvdata(dev);
 
@@ -866,6 +866,7 @@ static const struct pci_device_id pmc_pci_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, AMD_CPU_ID_RN) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, AMD_CPU_ID_PCO) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, AMD_CPU_ID_RV) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, AMD_CPU_ID_SP) },
 	{ }
 };
 
@@ -960,6 +961,13 @@ static int amd_pmc_probe(struct platform_device *pdev)
 	}
 
 	dev->cpu_id = rdev->device;
+
+	if (dev->cpu_id == AMD_CPU_ID_SP) {
+		dev_warn_once(dev->dev, "S0i3 is not supported on this hardware\n");
+		err = -ENODEV;
+		goto err_pci_dev_put;
+	}
+
 	dev->rdev = rdev;
 	err = pci_write_config_dword(rdev, AMD_PMC_SMU_INDEX_ADDRESS, AMD_PMC_BASE_ADDR_LO);
 	if (err) {
@@ -1015,6 +1023,7 @@ static int amd_pmc_probe(struct platform_device *pdev)
 	}
 
 	amd_pmc_dbgfs_register(dev);
+	pm_report_max_hw_sleep(U64_MAX);
 	return 0;
 
 err_pci_dev_put:
@@ -1022,7 +1031,7 @@ err_pci_dev_put:
 	return err;
 }
 
-static int amd_pmc_remove(struct platform_device *pdev)
+static void amd_pmc_remove(struct platform_device *pdev)
 {
 	struct amd_pmc_dev *dev = platform_get_drvdata(pdev);
 
@@ -1031,7 +1040,6 @@ static int amd_pmc_remove(struct platform_device *pdev)
 	amd_pmc_dbgfs_unregister(dev);
 	pci_dev_put(dev->rdev);
 	mutex_destroy(&dev->lock);
-	return 0;
 }
 
 static const struct acpi_device_id amd_pmc_acpi_ids[] = {
@@ -1054,7 +1062,7 @@ static struct platform_driver amd_pmc_driver = {
 		.pm = pm_sleep_ptr(&amd_pmc_pm),
 	},
 	.probe = amd_pmc_probe,
-	.remove = amd_pmc_remove,
+	.remove_new = amd_pmc_remove,
 };
 module_platform_driver(amd_pmc_driver);
 

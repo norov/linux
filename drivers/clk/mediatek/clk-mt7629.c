@@ -684,6 +684,7 @@ static const struct of_device_id of_match_clk_mt7629[] = {
 		/* sentinel */
 	}
 };
+MODULE_DEVICE_TABLE(of, of_match_clk_mt7629);
 
 static int clk_mt7629_probe(struct platform_device *pdev)
 {
@@ -717,3 +718,4 @@ static int clk_mt7629_init(void)
 }
 
 arch_initcall(clk_mt7629_init);
+MODULE_LICENSE("GPL");

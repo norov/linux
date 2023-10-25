@@ -114,7 +114,6 @@ struct ov2680_device {
 	struct mutex input_lock;
 	struct i2c_client *client;
 	struct gpio_desc *powerdown;
-	struct gpio_desc *powerdown_alt;
 	bool is_streaming;
 
 	struct ov2680_mode {
@@ -173,6 +172,7 @@ static struct ov2680_reg const ov2680_global_setting[] = {
 	{0x3082, 0x45},
 	{0x3084, 0x09},
 	{0x3085, 0x04},
+	{0x3086, 0x00},
 	{0x3503, 0x03},
 	{0x350b, 0x36},
 	{0x3600, 0xb4},

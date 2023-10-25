@@ -225,6 +225,11 @@ struct ATTRIB *mi_enum_attr(struct mft_inode *mi, struct ATTRIB *attr)
 			return NULL;
 		}
 
+		if (off + asize < off) {
+			/* Overflow check. */
+			return NULL;
+		}
+
 		attr = Add2Ptr(attr, asize);
 		off += asize;
 	}
@@ -419,10 +424,9 @@ struct ATTRIB *mi_insert_attr(struct mft_inode *mi, enum ATTR_TYPE type,
 	struct ntfs_sb_info *sbi = mi->sbi;
 	u32 used = le32_to_cpu(rec->used);
 	const u16 *upcase = sbi->upcase;
-	int diff;
 
 	/* Can we insert mi attribute? */
-	if (used + asize > mi->sbi->record_size)
+	if (used + asize > sbi->record_size)
 		return NULL;
 
 	/*
@@ -431,7 +435,7 @@ struct ATTRIB *mi_insert_attr(struct mft_inode *mi, enum ATTR_TYPE type,
 	 */
 	attr = NULL;
 	while ((attr = mi_enum_attr(mi, attr))) {
-		diff = compare_attr(attr, type, name, name_len, upcase);
+		int diff = compare_attr(attr, type, name, name_len, upcase);
 
 		if (diff < 0)
 			continue;
@@ -442,9 +446,11 @@ struct ATTRIB *mi_insert_attr(struct mft_inode *mi, enum ATTR_TYPE type,
 	}
 
 	if (!attr) {
-		tail = 8; /* Not used, just to suppress warning. */
+		/* Append. */
+		tail = 8;
 		attr = Add2Ptr(rec, used - 8);
 	} else {
+		/* Insert before 'attr'. */
 		tail = used - PtrOffset(rec, attr);
 	}
 

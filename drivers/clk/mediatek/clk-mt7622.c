@@ -106,13 +106,6 @@
 
 static DEFINE_SPINLOCK(mt7622_clk_lock);
 
-static const char * const infra_mux1_parents[] = {
-	"clkxtal",
-	"armpll",
-	"main_core_en",
-	"armpll"
-};
-
 static const char * const axi_parents[] = {
 	"clkxtal",
 	"syspll1_d2",
@@ -290,18 +283,6 @@ static const char * const apll1_ck_parents[] = {
 static const char * const peribus_ck_parents[] = {
 	"syspll1_d8",
 	"syspll1_d4"
-};
-
-static const struct mtk_gate_regs apmixed_cg_regs = {
-	.set_ofs = 0x8,
-	.clr_ofs = 0x8,
-	.sta_ofs = 0x8,
-};
-
-static const struct mtk_gate_regs infra_cg_regs = {
-	.set_ofs = 0x40,
-	.clr_ofs = 0x44,
-	.sta_ofs = 0x48,
 };
 
 static const struct mtk_gate_regs top0_cg_regs = {
@@ -504,11 +485,6 @@ static const struct mtk_gate peri_clks[] = {
 	/* PERI1 */
 	GATE_PERI1(CLK_PERI_FLASH_PD, "peri_flash_pd", "flash_sel", 1),
 	GATE_PERI1(CLK_PERI_IRTX_PD, "peri_irtx_pd", "irtx_sel", 2),
-};
-
-static struct mtk_composite infra_muxes[] = {
-	MUX(CLK_INFRA_MUX1_SEL, "infra_mux1_sel", infra_mux1_parents,
-	    0x000, 2, 2),
 };
 
 static struct mtk_composite top_muxes[] = {

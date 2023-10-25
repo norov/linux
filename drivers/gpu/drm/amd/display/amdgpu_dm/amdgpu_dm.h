@@ -195,6 +195,11 @@ struct hpd_rx_irq_offload_work_queue {
 	 */
 	bool is_handling_link_loss;
 	/**
+	 * @is_handling_mst_msg_rdy_event: Used to prevent inserting mst message
+	 * ready event when we're already handling mst message ready event
+	 */
+	bool is_handling_mst_msg_rdy_event;
+	/**
 	 * @aconnector: The aconnector that this work queue is attached to
 	 */
 	struct amdgpu_dm_connector *aconnector;
@@ -461,9 +466,7 @@ struct amdgpu_display_manager {
 	struct amdgpu_dm_backlight_caps backlight_caps[AMDGPU_DM_MAX_NUM_EDP];
 
 	struct mod_freesync *freesync_module;
-#ifdef CONFIG_DRM_AMD_DC_HDCP
 	struct hdcp_workqueue *hdcp_workqueue;
-#endif
 
 	/**
 	 * @vblank_control_workqueue:
@@ -612,6 +615,7 @@ struct amdgpu_dm_connector {
 
 	struct drm_connector base;
 	uint32_t connector_id;
+	int bl_idx;
 
 	/* we need to mind the EDID between detect
 	   and get modes due to analog/digital/tvencoder */
@@ -639,6 +643,8 @@ struct amdgpu_dm_connector {
 	struct drm_dp_mst_port *mst_output_port;
 	struct amdgpu_dm_connector *mst_root;
 	struct drm_dp_aux *dsc_aux;
+	struct mutex handle_mst_msg_ready;
+
 	/* TODO see if we can merge with ddc_bus or make a dm_connector */
 	struct amdgpu_i2c_adapter *i2c;
 
@@ -747,9 +753,7 @@ struct dm_connector_state {
 	uint8_t underscan_hborder;
 	bool underscan_enable;
 	bool freesync_capable;
-#ifdef CONFIG_DRM_AMD_DC_HDCP
 	bool update_hdcp;
-#endif
 	uint8_t abm_level;
 	int vcpi_slots;
 	uint64_t pbn;

@@ -22,6 +22,7 @@
 #include <linux/dsa/tag_qca.h>
 
 #include "qca8k.h"
+#include "qca8k_leds.h"
 
 static void
 qca8k_split_addr(u32 regaddr, u16 *r1, u16 *r2, u16 *page)
@@ -575,8 +576,11 @@ static struct regmap_config qca8k_regmap_config = {
 	.rd_table = &qca8k_readable_table,
 	.disable_locking = true, /* Locking is handled by qca8k read/write */
 	.cache_type = REGCACHE_NONE, /* Explicitly disable CACHE */
-	.max_raw_read = 32, /* mgmt eth can read/write up to 8 registers at time */
-	.max_raw_write = 32,
+	.max_raw_read = 32, /* mgmt eth can read up to 8 registers at time */
+	/* ATU regs suffer from a bug where some data are not correctly
+	 * written. Disable bulk write to correctly write ATU entry.
+	 */
+	.use_single_write = true,
 };
 
 static int
@@ -586,6 +590,9 @@ qca8k_phy_eth_busy_wait(struct qca8k_mgmt_eth_data *mgmt_eth_data,
 	struct sk_buff *skb = skb_copy(read_skb, GFP_KERNEL);
 	bool ack;
 	int ret;
+
+	if (!skb)
+		return -ENOMEM;
 
 	reinit_completion(&mgmt_eth_data->rw_done);
 
@@ -770,21 +777,6 @@ err_clear_skb:
 	kfree_skb(write_skb);
 
 	return ret;
-}
-
-static u32
-qca8k_port_to_phy(int port)
-{
-	/* From Andrew Lunn:
-	 * Port 0 has no internal phy.
-	 * Port 1 has an internal PHY at MDIO address 0.
-	 * Port 2 has an internal PHY at MDIO address 1.
-	 * ...
-	 * Port 5 has an internal PHY at MDIO address 4.
-	 * Port 6 has no internal PHY.
-	 */
-
-	return port - 1;
 }
 
 static int
@@ -1795,6 +1787,10 @@ qca8k_setup(struct dsa_switch *ds)
 		return ret;
 
 	ret = qca8k_setup_mac_pwr_sel(priv);
+	if (ret)
+		return ret;
+
+	ret = qca8k_setup_led_ctrl(priv);
 	if (ret)
 		return ret;
 

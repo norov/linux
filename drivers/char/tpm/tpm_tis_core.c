@@ -24,8 +24,11 @@
 #include <linux/wait.h>
 #include <linux/acpi.h>
 #include <linux/freezer.h>
+#include <linux/dmi.h>
 #include "tpm.h"
 #include "tpm_tis_core.h"
+
+#define TPM_TIS_MAX_UNHANDLED_IRQS	1000
 
 static void tpm_tis_clkrun_enable(struct tpm_chip *chip, bool value);
 
@@ -42,6 +45,20 @@ static bool wait_for_tpm_stat_cond(struct tpm_chip *chip, u8 mask,
 		return true;
 	}
 	return false;
+}
+
+static u8 tpm_tis_filter_sts_mask(u8 int_mask, u8 sts_mask)
+{
+	if (!(int_mask & TPM_INTF_STS_VALID_INT))
+		sts_mask &= ~TPM_STS_VALID;
+
+	if (!(int_mask & TPM_INTF_DATA_AVAIL_INT))
+		sts_mask &= ~TPM_STS_DATA_AVAIL;
+
+	if (!(int_mask & TPM_INTF_CMD_READY_INT))
+		sts_mask &= ~TPM_STS_COMMAND_READY;
+
+	return sts_mask;
 }
 
 static int wait_for_tpm_stat(struct tpm_chip *chip, u8 mask,
@@ -309,8 +326,13 @@ static int tpm_tis_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 		goto out;
 	}
 
-	size += recv_data(chip, &buf[TPM_HEADER_SIZE],
-			  expected - TPM_HEADER_SIZE);
+	rc = recv_data(chip, &buf[TPM_HEADER_SIZE],
+		       expected - TPM_HEADER_SIZE);
+	if (rc < 0) {
+		size = rc;
+		goto out;
+	}
+	size += rc;
 	if (size < expected) {
 		dev_err(&chip->dev, "Unable to read remainder of result\n");
 		size = -ETIME;
@@ -414,25 +436,29 @@ out_err:
 	return rc;
 }
 
-static void disable_interrupts(struct tpm_chip *chip)
+static void __tpm_tis_disable_interrupts(struct tpm_chip *chip)
 {
 	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
-	u32 intmask;
-	int rc;
+	u32 int_mask = 0;
+
+	tpm_tis_read32(priv, TPM_INT_ENABLE(priv->locality), &int_mask);
+	int_mask &= ~TPM_GLOBAL_INT_ENABLE;
+	tpm_tis_write32(priv, TPM_INT_ENABLE(priv->locality), int_mask);
+
+	chip->flags &= ~TPM_CHIP_FLAG_IRQ;
+}
+
+static void tpm_tis_disable_interrupts(struct tpm_chip *chip)
+{
+	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
 
 	if (priv->irq == 0)
 		return;
 
-	rc = tpm_tis_read32(priv, TPM_INT_ENABLE(priv->locality), &intmask);
-	if (rc < 0)
-		intmask = 0;
-
-	intmask &= ~TPM_GLOBAL_INT_ENABLE;
-	rc = tpm_tis_write32(priv, TPM_INT_ENABLE(priv->locality), intmask);
+	__tpm_tis_disable_interrupts(chip);
 
 	devm_free_irq(chip->dev.parent, priv->irq, chip);
 	priv->irq = 0;
-	chip->flags &= ~TPM_CHIP_FLAG_IRQ;
 }
 
 /*
@@ -861,6 +887,7 @@ void tpm_tis_remove(struct tpm_chip *chip)
 		interrupt = 0;
 
 	tpm_tis_write32(priv, reg, ~TPM_GLOBAL_INT_ENABLE & interrupt);
+	flush_work(&priv->free_irq_work);
 
 	tpm_tis_clkrun_enable(chip, false);
 
@@ -964,6 +991,7 @@ int tpm_tis_core_init(struct device *dev, struct tpm_tis_data *priv, int irq,
 	chip->timeout_b = msecs_to_jiffies(TIS_TIMEOUT_B_MAX);
 	chip->timeout_c = msecs_to_jiffies(TIS_TIMEOUT_C_MAX);
 	chip->timeout_d = msecs_to_jiffies(TIS_TIMEOUT_D_MAX);
+	priv->chip = chip;
 	priv->timeout_min = TPM_TIMEOUT_USECS_MIN;
 	priv->timeout_max = TPM_TIMEOUT_USECS_MAX;
 	priv->phy_ops = phy_ops;

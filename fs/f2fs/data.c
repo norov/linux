@@ -93,17 +93,17 @@ static enum count_type __read_io_type(struct page *page)
 /* postprocessing steps for read bios */
 enum bio_post_read_step {
 #ifdef CONFIG_FS_ENCRYPTION
-	STEP_DECRYPT	= 1 << 0,
+	STEP_DECRYPT	= BIT(0),
 #else
 	STEP_DECRYPT	= 0,	/* compile out the decryption-related code */
 #endif
 #ifdef CONFIG_F2FS_FS_COMPRESSION
-	STEP_DECOMPRESS	= 1 << 1,
+	STEP_DECOMPRESS	= BIT(1),
 #else
 	STEP_DECOMPRESS	= 0,	/* compile out the decompression-related code */
 #endif
 #ifdef CONFIG_FS_VERITY
-	STEP_VERITY	= 1 << 2,
+	STEP_VERITY	= BIT(2),
 #else
 	STEP_VERITY	= 0,	/* compile out the verity-related code */
 #endif
@@ -420,7 +420,7 @@ int f2fs_target_device_index(struct f2fs_sb_info *sbi, block_t blkaddr)
 
 static blk_opf_t f2fs_io_flags(struct f2fs_io_info *fio)
 {
-	unsigned int temp_mask = (1 << NR_TEMP_TYPE) - 1;
+	unsigned int temp_mask = GENMASK(NR_TEMP_TYPE - 1, 0);
 	unsigned int fua_flag, meta_flag, io_flag;
 	blk_opf_t op_flags = 0;
 
@@ -442,9 +442,9 @@ static blk_opf_t f2fs_io_flags(struct f2fs_io_info *fio)
 	 *    5 |    4 |   3 |    2 |    1 |   0 |
 	 * Cold | Warm | Hot | Cold | Warm | Hot |
 	 */
-	if ((1 << fio->temp) & meta_flag)
+	if (BIT(fio->temp) & meta_flag)
 		op_flags |= REQ_META;
-	if ((1 << fio->temp) & fua_flag)
+	if (BIT(fio->temp) & fua_flag)
 		op_flags |= REQ_FUA;
 	return op_flags;
 }
@@ -2769,6 +2769,7 @@ int f2fs_write_single_data_page(struct page *page, int *submitted,
 	loff_t psize = (loff_t)(page->index + 1) << PAGE_SHIFT;
 	unsigned offset = 0;
 	bool need_balance_fs = false;
+	bool quota_inode = IS_NOQUOTA(inode);
 	int err = 0;
 	struct f2fs_io_info fio = {
 		.sbi = sbi,
@@ -2800,6 +2801,10 @@ int f2fs_write_single_data_page(struct page *page, int *submitted,
 		 */
 		if (S_ISDIR(inode->i_mode))
 			goto redirty_out;
+
+		/* keep data pages in remount-ro mode */
+		if (F2FS_OPTION(sbi).errors == MOUNT_ERRORS_READONLY)
+			goto redirty_out;
 		goto out;
 	}
 
@@ -2825,19 +2830,19 @@ write:
 		goto out;
 
 	/* Dentry/quota blocks are controlled by checkpoint */
-	if (S_ISDIR(inode->i_mode) || IS_NOQUOTA(inode)) {
+	if (S_ISDIR(inode->i_mode) || quota_inode) {
 		/*
 		 * We need to wait for node_write to avoid block allocation during
 		 * checkpoint. This can only happen to quota writes which can cause
 		 * the below discard race condition.
 		 */
-		if (IS_NOQUOTA(inode))
+		if (quota_inode)
 			f2fs_down_read(&sbi->node_write);
 
 		fio.need_lock = LOCK_DONE;
 		err = f2fs_do_write_data_page(&fio);
 
-		if (IS_NOQUOTA(inode))
+		if (quota_inode)
 			f2fs_up_read(&sbi->node_write);
 
 		goto done;
@@ -3123,12 +3128,9 @@ continue_unlock:
 			}
 
 			if (folio_test_writeback(folio)) {
-				if (wbc->sync_mode != WB_SYNC_NONE)
-					f2fs_wait_on_page_writeback(
-							&folio->page,
-							DATA, true, true);
-				else
+				if (wbc->sync_mode == WB_SYNC_NONE)
 					goto continue_unlock;
+				f2fs_wait_on_page_writeback(&folio->page, DATA, true, true);
 			}
 
 			if (!folio_clear_dirty_for_io(folio))
@@ -3486,7 +3488,7 @@ unlock_out:
 
 static int prepare_atomic_write_begin(struct f2fs_sb_info *sbi,
 			struct page *page, loff_t pos, unsigned int len,
-			block_t *blk_addr, bool *node_changed)
+			block_t *blk_addr, bool *node_changed, bool *use_cow)
 {
 	struct inode *inode = page->mapping->host;
 	struct inode *cow_inode = F2FS_I(inode)->cow_inode;
@@ -3500,10 +3502,12 @@ static int prepare_atomic_write_begin(struct f2fs_sb_info *sbi,
 
 	/* Look for the block in COW inode first */
 	err = __find_data_block(cow_inode, index, blk_addr);
-	if (err)
+	if (err) {
 		return err;
-	else if (*blk_addr != NULL_ADDR)
+	} else if (*blk_addr != NULL_ADDR) {
+		*use_cow = true;
 		return 0;
+	}
 
 	if (is_inode_flag_set(inode, FI_ATOMIC_REPLACE))
 		goto reserve_block;
@@ -3533,6 +3537,7 @@ static int f2fs_write_begin(struct file *file, struct address_space *mapping,
 	struct page *page = NULL;
 	pgoff_t index = ((unsigned long long) pos) >> PAGE_SHIFT;
 	bool need_balance = false;
+	bool use_cow = false;
 	block_t blkaddr = NULL_ADDR;
 	int err = 0;
 
@@ -3592,7 +3597,7 @@ repeat:
 
 	if (f2fs_is_atomic_file(inode))
 		err = prepare_atomic_write_begin(sbi, page, pos, len,
-					&blkaddr, &need_balance);
+					&blkaddr, &need_balance, &use_cow);
 	else
 		err = prepare_write_begin(sbi, page, pos, len,
 					&blkaddr, &need_balance);
@@ -3632,7 +3637,9 @@ repeat:
 			f2fs_handle_error(sbi, ERROR_INVALID_BLKADDR);
 			goto fail;
 		}
-		err = f2fs_submit_page_read(inode, page, blkaddr, 0, true);
+		err = f2fs_submit_page_read(use_cow ?
+				F2FS_I(inode)->cow_inode : inode, page,
+				blkaddr, 0, true);
 		if (err)
 			goto fail;
 
@@ -3725,37 +3732,16 @@ void f2fs_invalidate_folio(struct folio *folio, size_t offset, size_t length)
 			f2fs_remove_dirty_inode(inode);
 		}
 	}
-
-	clear_page_private_reference(&folio->page);
-	clear_page_private_gcing(&folio->page);
-
-	if (test_opt(sbi, COMPRESS_CACHE) &&
-			inode->i_ino == F2FS_COMPRESS_INO(sbi))
-		clear_page_private_data(&folio->page);
-
-	folio_detach_private(folio);
+	clear_page_private_all(&folio->page);
 }
 
 bool f2fs_release_folio(struct folio *folio, gfp_t wait)
 {
-	struct f2fs_sb_info *sbi;
-
 	/* If this is dirty folio, keep private data */
 	if (folio_test_dirty(folio))
 		return false;
 
-	sbi = F2FS_M_SB(folio->mapping);
-	if (test_opt(sbi, COMPRESS_CACHE)) {
-		struct inode *inode = folio->mapping->host;
-
-		if (inode->i_ino == F2FS_COMPRESS_INO(sbi))
-			clear_page_private_data(&folio->page);
-	}
-
-	clear_page_private_reference(&folio->page);
-	clear_page_private_gcing(&folio->page);
-
-	folio_detach_private(folio);
+	clear_page_private_all(&folio->page);
 	return true;
 }
 

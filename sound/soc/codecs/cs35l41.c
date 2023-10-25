@@ -150,6 +150,7 @@ static const struct cs35l41_fs_mon_config cs35l41_fs_mon[] = {
 	{ 5644800,	16,	24 },
 	{ 6000000,	16,	24 },
 	{ 6144000,	16,	24 },
+	{ 12288000,	0,	0 },
 };
 
 static int cs35l41_get_fs_mon_config_index(int freq)
@@ -356,6 +357,16 @@ static const struct snd_kcontrol_new cs35l41_aud_controls[] = {
 	WM_ADSP_FW_CONTROL("DSP1", 0),
 };
 
+
+static void cs35l41_error_release(struct cs35l41_private *cs35l41, unsigned int irq_err_bit,
+				  unsigned int rel_err_bit)
+{
+	regmap_write(cs35l41->regmap, CS35L41_IRQ1_STATUS1, irq_err_bit);
+	regmap_write(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN, 0);
+	regmap_update_bits(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN, rel_err_bit, rel_err_bit);
+	regmap_update_bits(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN, rel_err_bit, 0);
+}
+
 static irqreturn_t cs35l41_irq(int irq, void *data)
 {
 	struct cs35l41_private *cs35l41 = data;
@@ -520,10 +531,12 @@ static int cs35l41_main_amp_event(struct snd_soc_dapm_widget *w,
 						cs35l41_pup_patch,
 						ARRAY_SIZE(cs35l41_pup_patch));
 
-		cs35l41_global_enable(cs35l41->regmap, cs35l41->hw_cfg.bst_type, 1);
+		cs35l41_global_enable(cs35l41->regmap, cs35l41->hw_cfg.bst_type, 1,
+				      &cs35l41->pll_lock);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
-		cs35l41_global_enable(cs35l41->regmap, cs35l41->hw_cfg.bst_type, 0);
+		cs35l41_global_enable(cs35l41->regmap, cs35l41->hw_cfg.bst_type, 0,
+				      &cs35l41->pll_lock);
 
 		ret = regmap_read_poll_timeout(cs35l41->regmap, CS35L41_IRQ1_STATUS1,
 					       val, val &  CS35L41_PDN_DONE_MASK,
@@ -830,6 +843,10 @@ static const struct snd_pcm_hw_constraint_list cs35l41_constraints = {
 static int cs35l41_pcm_startup(struct snd_pcm_substream *substream,
 			       struct snd_soc_dai *dai)
 {
+	struct cs35l41_private *cs35l41 = snd_soc_component_get_drvdata(dai->component);
+
+	reinit_completion(&cs35l41->pll_lock);
+
 	if (substream->runtime)
 		return snd_pcm_hw_constraint_list(substream->runtime, 0,
 						  SNDRV_PCM_HW_PARAM_RATE,
@@ -1037,9 +1054,21 @@ static int cs35l41_handle_pdata(struct device *dev, struct cs35l41_hw_cfg *hw_cf
 	unsigned int val;
 	int ret;
 
-	ret = device_property_read_u32(dev, "cirrus,boost-type", &val);
-	if (ret >= 0)
-		hw_cfg->bst_type = val;
+	/* Some ACPI systems received the Shared Boost feature before the upstream driver,
+	 * leaving those systems with deprecated _DSD properties.
+	 * To correctly configure those systems add shared-boost-active and shared-boost-passive
+	 * properties mapped to the correct value in boost-type.
+	 * These two are not DT properties and should not be used in new systems designs.
+	 */
+	if (device_property_read_bool(dev, "cirrus,shared-boost-active")) {
+		hw_cfg->bst_type = CS35L41_SHD_BOOST_ACTV;
+	} else if (device_property_read_bool(dev, "cirrus,shared-boost-passive")) {
+		hw_cfg->bst_type = CS35L41_SHD_BOOST_PASS;
+	} else {
+		ret = device_property_read_u32(dev, "cirrus,boost-type", &val);
+		if (ret >= 0)
+			hw_cfg->bst_type = val;
+	}
 
 	ret = device_property_read_u32(dev, "cirrus,boost-peak-milliamp", &val);
 	if (ret >= 0)
@@ -1280,6 +1309,10 @@ int cs35l41_probe(struct cs35l41_private *cs35l41, const struct cs35l41_hw_cfg *
 	/* Set interrupt masks for critical errors */
 	regmap_write(cs35l41->regmap, CS35L41_IRQ1_MASK1,
 		     CS35L41_INT1_MASK_DEFAULT);
+	if (cs35l41->hw_cfg.bst_type == CS35L41_SHD_BOOST_PASS ||
+	    cs35l41->hw_cfg.bst_type == CS35L41_SHD_BOOST_ACTV)
+		regmap_update_bits(cs35l41->regmap, CS35L41_IRQ1_MASK3, CS35L41_INT3_PLL_LOCK_MASK,
+				   0 << CS35L41_INT3_PLL_LOCK_SHIFT);
 
 	ret = devm_request_threaded_irq(cs35l41->dev, cs35l41->irq, NULL, cs35l41_irq,
 					IRQF_ONESHOT | IRQF_SHARED | irq_pol,
@@ -1302,6 +1335,8 @@ int cs35l41_probe(struct cs35l41_private *cs35l41, const struct cs35l41_hw_cfg *
 	ret = cs35l41_dsp_init(cs35l41);
 	if (ret < 0)
 		goto err;
+
+	init_completion(&cs35l41->pll_lock);
 
 	pm_runtime_set_autosuspend_delay(cs35l41->dev, 3000);
 	pm_runtime_use_autosuspend(cs35l41->dev);
@@ -1345,6 +1380,10 @@ void cs35l41_remove(struct cs35l41_private *cs35l41)
 	pm_runtime_disable(cs35l41->dev);
 
 	regmap_write(cs35l41->regmap, CS35L41_IRQ1_MASK1, 0xFFFFFFFF);
+	if (cs35l41->hw_cfg.bst_type == CS35L41_SHD_BOOST_PASS ||
+	    cs35l41->hw_cfg.bst_type == CS35L41_SHD_BOOST_ACTV)
+		regmap_update_bits(cs35l41->regmap, CS35L41_IRQ1_MASK3, CS35L41_INT3_PLL_LOCK_MASK,
+				   1 << CS35L41_INT3_PLL_LOCK_SHIFT);
 	kfree(cs35l41->dsp.system_name);
 	wm_adsp2_remove(&cs35l41->dsp);
 	cs35l41_safe_reset(cs35l41->regmap, cs35l41->hw_cfg.bst_type);

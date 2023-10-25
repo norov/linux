@@ -801,6 +801,9 @@ static int mlx5_esw_vport_caps_get(struct mlx5_eswitch *esw, struct mlx5_vport *
 	hca_caps = MLX5_ADDR_OF(query_hca_cap_out, query_ctx, capability);
 	vport->info.roce_enabled = MLX5_GET(cmd_hca_cap, hca_caps, roce);
 
+	if (!MLX5_CAP_GEN_MAX(esw->dev, hca_cap_2))
+		goto out_free;
+
 	memset(query_ctx, 0, query_out_sz);
 	err = mlx5_vport_get_other_func_cap(esw->dev, vport->vport, query_ctx,
 					    MLX5_CAP_GENERAL_2);
@@ -1510,7 +1513,7 @@ out_free:
 	return err;
 }
 
-static int mlx5_esw_vport_alloc(struct mlx5_eswitch *esw, struct mlx5_core_dev *dev,
+static int mlx5_esw_vport_alloc(struct mlx5_eswitch *esw,
 				int index, u16 vport_num)
 {
 	struct mlx5_vport *vport;
@@ -1564,7 +1567,7 @@ static int mlx5_esw_vports_init(struct mlx5_eswitch *esw)
 
 	xa_init(&esw->vports);
 
-	err = mlx5_esw_vport_alloc(esw, dev, idx, MLX5_VPORT_PF);
+	err = mlx5_esw_vport_alloc(esw, idx, MLX5_VPORT_PF);
 	if (err)
 		goto err;
 	if (esw->first_host_vport == MLX5_VPORT_PF)
@@ -1572,7 +1575,7 @@ static int mlx5_esw_vports_init(struct mlx5_eswitch *esw)
 	idx++;
 
 	for (i = 0; i < mlx5_core_max_vfs(dev); i++) {
-		err = mlx5_esw_vport_alloc(esw, dev, idx, idx);
+		err = mlx5_esw_vport_alloc(esw, idx, idx);
 		if (err)
 			goto err;
 		xa_set_mark(&esw->vports, idx, MLX5_ESW_VPT_VF);
@@ -1581,7 +1584,7 @@ static int mlx5_esw_vports_init(struct mlx5_eswitch *esw)
 	}
 	base_sf_num = mlx5_sf_start_function_id(dev);
 	for (i = 0; i < mlx5_sf_max_functions(dev); i++) {
-		err = mlx5_esw_vport_alloc(esw, dev, idx, base_sf_num + i);
+		err = mlx5_esw_vport_alloc(esw, idx, base_sf_num + i);
 		if (err)
 			goto err;
 		xa_set_mark(&esw->vports, base_sf_num + i, MLX5_ESW_VPT_SF);
@@ -1592,7 +1595,7 @@ static int mlx5_esw_vports_init(struct mlx5_eswitch *esw)
 	if (err)
 		goto err;
 	for (i = 0; i < max_host_pf_sfs; i++) {
-		err = mlx5_esw_vport_alloc(esw, dev, idx, base_sf_num + i);
+		err = mlx5_esw_vport_alloc(esw, idx, base_sf_num + i);
 		if (err)
 			goto err;
 		xa_set_mark(&esw->vports, base_sf_num + i, MLX5_ESW_VPT_SF);
@@ -1600,12 +1603,12 @@ static int mlx5_esw_vports_init(struct mlx5_eswitch *esw)
 	}
 
 	if (mlx5_ecpf_vport_exists(dev)) {
-		err = mlx5_esw_vport_alloc(esw, dev, idx, MLX5_VPORT_ECPF);
+		err = mlx5_esw_vport_alloc(esw, idx, MLX5_VPORT_ECPF);
 		if (err)
 			goto err;
 		idx++;
 	}
-	err = mlx5_esw_vport_alloc(esw, dev, idx, MLX5_VPORT_UPLINK);
+	err = mlx5_esw_vport_alloc(esw, idx, MLX5_VPORT_UPLINK);
 	if (err)
 		goto err;
 	return 0;

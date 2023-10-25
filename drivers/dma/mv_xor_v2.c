@@ -866,10 +866,6 @@ free_hw_desq:
 			  xor_dev->hw_desq_virt, xor_dev->hw_desq);
 free_msi_irqs:
 	platform_msi_domain_free_irqs(&pdev->dev);
-disable_clk:
-	clk_disable_unprepare(xor_dev->clk);
-disable_reg_clk:
-	clk_disable_unprepare(xor_dev->reg_clk);
 	return ret;
 }
 
@@ -888,9 +884,6 @@ static int mv_xor_v2_remove(struct platform_device *pdev)
 	platform_msi_domain_free_irqs(&pdev->dev);
 
 	tasklet_kill(&xor_dev->irq_tasklet);
-
-	clk_disable_unprepare(xor_dev->clk);
-	clk_disable_unprepare(xor_dev->reg_clk);
 
 	return 0;
 }
@@ -917,4 +910,3 @@ static struct platform_driver mv_xor_v2_driver = {
 module_platform_driver(mv_xor_v2_driver);
 
 MODULE_DESCRIPTION("DMA engine driver for Marvell's Version 2 of XOR engine");
-MODULE_LICENSE("GPL");

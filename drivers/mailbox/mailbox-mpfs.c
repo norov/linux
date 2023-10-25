@@ -39,7 +39,7 @@
 #define SCB_CTRL_NOTIFY_MASK BIT(SCB_CTRL_NOTIFY)
 
 #define SCB_CTRL_POS (16)
-#define SCB_CTRL_MASK GENMASK_ULL(SCB_CTRL_POS + SCB_MASK_WIDTH, SCB_CTRL_POS)
+#define SCB_CTRL_MASK GENMASK(SCB_CTRL_POS + SCB_MASK_WIDTH - 1, SCB_CTRL_POS)
 
 /* SCBCTRL service status register */
 
@@ -118,6 +118,7 @@ static int mpfs_mbox_send_data(struct mbox_chan *chan, void *data)
 	}
 
 	opt_sel = ((msg->mbox_offset << 7u) | (msg->cmd_opcode & 0x7fu));
+
 	tx_trigger = (opt_sel << SCB_CTRL_POS) & SCB_CTRL_MASK;
 	tx_trigger |= SCB_CTRL_REQ_MASK | SCB_STATUS_NOTIFY_MASK;
 	writel_relaxed(tx_trigger, mbox->ctrl_base + SERVICES_CR_OFFSET);
@@ -130,7 +131,7 @@ static void mpfs_mbox_rx_data(struct mbox_chan *chan)
 	struct mpfs_mbox *mbox = (struct mpfs_mbox *)chan->con_priv;
 	struct mpfs_mss_response *response = mbox->response;
 	u16 num_words = ALIGN((response->resp_size), (4)) / 4U;
-	u32 i, status;
+	u32 i;
 
 	if (!response->resp_msg) {
 		dev_err(mbox->dev, "failed to assign memory for response %d\n", -ENOMEM);
@@ -138,8 +139,6 @@ static void mpfs_mbox_rx_data(struct mbox_chan *chan)
 	}
 
 	/*
-	 * The status is stored in bits 31:16 of the SERVICES_SR register.
-	 * It is only valid when BUSY == 0.
 	 * We should *never* get an interrupt while the controller is
 	 * still in the busy state. If we do, something has gone badly
 	 * wrong & the content of the mailbox would not be valid.
@@ -150,24 +149,10 @@ static void mpfs_mbox_rx_data(struct mbox_chan *chan)
 		return;
 	}
 
-	status = readl_relaxed(mbox->ctrl_base + SERVICES_SR_OFFSET);
-
-	/*
-	 * If the status of the individual servers is non-zero, the service has
-	 * failed. The contents of the mailbox at this point are not be valid,
-	 * so don't bother reading them. Set the status so that the driver
-	 * implementing the service can handle the result.
-	 */
-	response->resp_status = (status & SCB_STATUS_MASK) >> SCB_STATUS_POS;
-	if (response->resp_status)
-		return;
-
-	if (!mpfs_mbox_busy(mbox)) {
-		for (i = 0; i < num_words; i++) {
-			response->resp_msg[i] =
-				readl_relaxed(mbox->mbox_base
-					      + mbox->resp_offset + i * 0x4);
-		}
+	for (i = 0; i < num_words; i++) {
+		response->resp_msg[i] =
+			readl_relaxed(mbox->mbox_base
+				      + mbox->resp_offset + i * 0x4);
 	}
 
 	mbox_chan_received_data(chan, response);

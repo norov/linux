@@ -1221,11 +1221,13 @@ static u32 vsc9959_tas_tc_max_sdu(struct tc_taprio_qopt_offload *taprio, int tc)
 static void vsc9959_tas_guard_bands_update(struct ocelot *ocelot, int port)
 {
 	struct ocelot_port *ocelot_port = ocelot->ports[port];
+	struct ocelot_mm_state *mm = &ocelot->mm[port];
 	struct tc_taprio_qopt_offload *taprio;
 	u64 min_gate_len[OCELOT_NUM_TC];
+	u32 val, maxlen, add_frag_size;
+	u64 needed_min_frag_time_ps;
 	int speed, picos_per_byte;
 	u64 needed_bit_time_ps;
-	u32 val, maxlen;
 	u8 tas_speed;
 	int tc;
 
@@ -1263,11 +1265,20 @@ static void vsc9959_tas_guard_bands_update(struct ocelot *ocelot, int port)
 	/* Consider the standard Ethernet overhead of 8 octets preamble+SFD,
 	 * 4 octets FCS, 12 octets IFG.
 	 */
-	needed_bit_time_ps = (maxlen + 24) * picos_per_byte;
+	needed_bit_time_ps = (u64)(maxlen + 24) * picos_per_byte;
+
+	/* Preemptible TCs don't need to pass a full MTU, the port will
+	 * automatically emit a HOLD request when a preemptible TC gate closes
+	 */
+	val = ocelot_read_rix(ocelot, QSYS_PREEMPTION_CFG, port);
+	add_frag_size = QSYS_PREEMPTION_CFG_MM_ADD_FRAG_SIZE_X(val);
+	needed_min_frag_time_ps = picos_per_byte *
+		(u64)(24 + 2 * ethtool_mm_frag_size_add_to_min(add_frag_size));
 
 	dev_dbg(ocelot->dev,
-		"port %d: max frame size %d needs %llu ps at speed %d\n",
-		port, maxlen, needed_bit_time_ps, speed);
+		"port %d: max frame size %d needs %llu ps, %llu ps for mPackets at speed %d\n",
+		port, maxlen, needed_bit_time_ps, needed_min_frag_time_ps,
+		speed);
 
 	vsc9959_tas_min_gate_lengths(taprio, min_gate_len);
 
@@ -1281,7 +1292,9 @@ static void vsc9959_tas_guard_bands_update(struct ocelot *ocelot, int port)
 		remaining_gate_len_ps =
 			vsc9959_tas_remaining_gate_len_ps(min_gate_len[tc]);
 
-		if (remaining_gate_len_ps > needed_bit_time_ps) {
+		if ((mm->active_preemptible_tcs & BIT(tc)) ?
+		    remaining_gate_len_ps > needed_min_frag_time_ps :
+		    remaining_gate_len_ps > needed_bit_time_ps) {
 			/* Setting QMAXSDU_CFG to 0 disables oversized frame
 			 * dropping.
 			 */
@@ -1423,7 +1436,8 @@ static int vsc9959_qos_port_tas_set(struct ocelot *ocelot, int port,
 
 	mutex_lock(&ocelot->tas_lock);
 
-	if (!taprio->enable) {
+	if (taprio->cmd == TAPRIO_CMD_DESTROY) {
+		ocelot_port_mqprio(ocelot, port, &taprio->mqprio);
 		ocelot_rmw_rix(ocelot, 0, QSYS_TAG_CONFIG_ENABLE,
 			       QSYS_TAG_CONFIG, port);
 
@@ -1434,17 +1448,24 @@ static int vsc9959_qos_port_tas_set(struct ocelot *ocelot, int port,
 
 		mutex_unlock(&ocelot->tas_lock);
 		return 0;
+	} else if (taprio->cmd != TAPRIO_CMD_REPLACE) {
+		ret = -EOPNOTSUPP;
+		goto err_unlock;
 	}
+
+	ret = ocelot_port_mqprio(ocelot, port, &taprio->mqprio);
+	if (ret)
+		goto err_unlock;
 
 	if (taprio->cycle_time > NSEC_PER_SEC ||
 	    taprio->cycle_time_extension >= NSEC_PER_SEC) {
 		ret = -EINVAL;
-		goto err;
+		goto err_reset_tc;
 	}
 
 	if (taprio->num_entries > VSC9959_TAS_GCL_ENTRY_MAX) {
 		ret = -ERANGE;
-		goto err;
+		goto err_reset_tc;
 	}
 
 	/* Enable guard band. The switch will schedule frames without taking
@@ -1468,7 +1489,7 @@ static int vsc9959_qos_port_tas_set(struct ocelot *ocelot, int port,
 	val = ocelot_read(ocelot, QSYS_PARAM_STATUS_REG_8);
 	if (val & QSYS_PARAM_STATUS_REG_8_CONFIG_PENDING) {
 		ret = -EBUSY;
-		goto err;
+		goto err_reset_tc;
 	}
 
 	ocelot_rmw_rix(ocelot,
@@ -1503,12 +1524,19 @@ static int vsc9959_qos_port_tas_set(struct ocelot *ocelot, int port,
 				 !(val & QSYS_TAS_PARAM_CFG_CTRL_CONFIG_CHANGE),
 				 10, 100000);
 	if (ret)
-		goto err;
+		goto err_reset_tc;
 
 	ocelot_port->taprio = taprio_offload_get(taprio);
 	vsc9959_tas_guard_bands_update(ocelot, port);
 
-err:
+	mutex_unlock(&ocelot->tas_lock);
+
+	return 0;
+
+err_reset_tc:
+	taprio->mqprio.qopt.num_tc = 0;
+	ocelot_port_mqprio(ocelot, port, &taprio->mqprio);
+err_unlock:
 	mutex_unlock(&ocelot->tas_lock);
 
 	return ret;
@@ -1612,6 +1640,13 @@ static int vsc9959_qos_port_cbs_set(struct dsa_switch *ds, int port,
 static int vsc9959_qos_query_caps(struct tc_query_caps_base *base)
 {
 	switch (base->type) {
+	case TC_SETUP_QDISC_MQPRIO: {
+		struct tc_mqprio_caps *caps = base->caps;
+
+		caps->validate_queue_counts = true;
+
+		return 0;
+	}
 	case TC_SETUP_QDISC_TAPRIO: {
 		struct tc_taprio_caps *caps = base->caps;
 
@@ -1635,6 +1670,8 @@ static int vsc9959_port_setup_tc(struct dsa_switch *ds, int port,
 		return vsc9959_qos_query_caps(type_data);
 	case TC_SETUP_QDISC_TAPRIO:
 		return vsc9959_qos_port_tas_set(ocelot, port, type_data);
+	case TC_SETUP_QDISC_MQPRIO:
+		return ocelot_port_mqprio(ocelot, port, type_data);
 	case TC_SETUP_QDISC_CBS:
 		return vsc9959_qos_port_cbs_set(ds, port, type_data);
 	default:
@@ -2498,6 +2535,7 @@ static void vsc9959_cut_through_fwd(struct ocelot *ocelot)
 
 	for (port = 0; port < ocelot->num_phys_ports; port++) {
 		struct ocelot_port *ocelot_port = ocelot->ports[port];
+		struct ocelot_mm_state *mm = &ocelot->mm[port];
 		int min_speed = ocelot_port->speed;
 		unsigned long mask = 0;
 		u32 tmp, val = 0;
@@ -2538,10 +2576,12 @@ static void vsc9959_cut_through_fwd(struct ocelot *ocelot)
 
 		/* Enable cut-through forwarding for all traffic classes that
 		 * don't have oversized dropping enabled, since this check is
-		 * bypassed in cut-through mode.
+		 * bypassed in cut-through mode. Also exclude preemptible
+		 * traffic classes, since these would hang the port for some
+		 * reason, if sent as cut-through.
 		 */
 		if (ocelot_port->speed == min_speed) {
-			val = GENMASK(7, 0);
+			val = GENMASK(7, 0) & ~mm->active_preemptible_tcs;
 
 			for (tc = 0; tc < OCELOT_NUM_TC; tc++)
 				if (vsc9959_port_qmaxsdu_get(ocelot, port, tc))
@@ -2576,6 +2616,7 @@ static const struct ocelot_ops vsc9959_ops = {
 	.cut_through_fwd	= vsc9959_cut_through_fwd,
 	.tas_clock_adjust	= vsc9959_tas_clock_adjust,
 	.update_stats		= vsc9959_update_stats,
+	.tas_guard_bands_update	= vsc9959_tas_guard_bands_update,
 };
 
 static const struct felix_info felix_info_vsc9959 = {
@@ -2601,7 +2642,6 @@ static const struct felix_info felix_info_vsc9959 = {
 	.port_modes		= vsc9959_port_modes,
 	.port_setup_tc		= vsc9959_port_setup_tc,
 	.port_sched_speed_set	= vsc9959_sched_speed_set,
-	.tas_guard_bands_update	= vsc9959_tas_guard_bands_update,
 };
 
 /* The INTB interrupt is shared between for PTP TX timestamp availability
@@ -2610,12 +2650,9 @@ static const struct felix_info felix_info_vsc9959 = {
 static irqreturn_t felix_irq_handler(int irq, void *data)
 {
 	struct ocelot *ocelot = (struct ocelot *)data;
-	int port;
 
 	ocelot_get_txtstamp(ocelot);
-
-	for (port = 0; port < ocelot->num_phys_ports; port++)
-		ocelot_port_mm_irq(ocelot, port);
+	ocelot_mm_irq(ocelot);
 
 	return IRQ_HANDLED;
 }

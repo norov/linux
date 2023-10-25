@@ -1039,7 +1039,6 @@ static const struct x86_cpu_id intel_pmc_core_ids[] = {
 	X86_MATCH_INTEL_FAM6_MODEL(RAPTORLAKE_P,        tgl_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(RAPTORLAKE,		adl_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(RAPTORLAKE_S,	adl_core_init),
-	X86_MATCH_INTEL_FAM6_MODEL(METEORLAKE,          mtl_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(METEORLAKE_L,	mtl_core_init),
 	{}
 };
@@ -1153,6 +1152,8 @@ static int pmc_core_probe(struct platform_device *pdev)
 	pmc_core_do_dmi_quirks(pmcdev);
 
 	pmc_core_dbgfs_register(pmcdev);
+	pm_report_max_hw_sleep(FIELD_MAX(SLP_S0_RES_COUNTER_MASK) *
+			       pmc_core_adjust_slp_s0_step(pmcdev, 1));
 
 	device_initialized = true;
 	dev_info(&pdev->dev, " initialized\n");
@@ -1160,7 +1161,7 @@ static int pmc_core_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int pmc_core_remove(struct platform_device *pdev)
+static void pmc_core_remove(struct platform_device *pdev)
 {
 	struct pmc_dev *pmcdev = platform_get_drvdata(pdev);
 
@@ -1168,7 +1169,6 @@ static int pmc_core_remove(struct platform_device *pdev)
 	platform_set_drvdata(pdev, NULL);
 	mutex_destroy(&pmcdev->lock);
 	iounmap(pmcdev->regbase);
-	return 0;
 }
 
 static bool warn_on_s0ix_failures;
@@ -1178,12 +1178,6 @@ MODULE_PARM_DESC(warn_on_s0ix_failures, "Check and warn for S0ix failures");
 static __maybe_unused int pmc_core_suspend(struct device *dev)
 {
 	struct pmc_dev *pmcdev = dev_get_drvdata(dev);
-
-	pmcdev->check_counters = false;
-
-	/* No warnings on S0ix failures */
-	if (!warn_on_s0ix_failures)
-		return 0;
 
 	/* Check if the syspend will actually use S0ix */
 	if (pm_suspend_via_firmware())
@@ -1197,7 +1191,6 @@ static __maybe_unused int pmc_core_suspend(struct device *dev)
 	if (pmc_core_dev_state_get(pmcdev, &pmcdev->s0ix_counter))
 		return -EIO;
 
-	pmcdev->check_counters = true;
 	return 0;
 }
 
@@ -1221,22 +1214,28 @@ static inline bool pmc_core_is_s0ix_failed(struct pmc_dev *pmcdev)
 	if (pmc_core_dev_state_get(pmcdev, &s0ix_counter))
 		return false;
 
+	pm_report_hw_sleep_time((u32)(s0ix_counter - pmcdev->s0ix_counter));
+
 	if (s0ix_counter == pmcdev->s0ix_counter)
 		return true;
 
 	return false;
 }
 
-static __maybe_unused int pmc_core_resume(struct device *dev)
+int pmc_core_resume_common(struct pmc_dev *pmcdev)
 {
-	struct pmc_dev *pmcdev = dev_get_drvdata(dev);
 	const struct pmc_bit_map **maps = pmcdev->map->lpm_sts;
 	int offset = pmcdev->map->lpm_status_offset;
+	struct device *dev = &pmcdev->pdev->dev;
 
-	if (!pmcdev->check_counters)
+	/* Check if the syspend used S0ix */
+	if (pm_suspend_via_firmware())
 		return 0;
 
 	if (!pmc_core_is_s0ix_failed(pmcdev))
+		return 0;
+
+	if (!warn_on_s0ix_failures)
 		return 0;
 
 	if (pmc_core_is_pc10_failed(pmcdev)) {
@@ -1257,6 +1256,16 @@ static __maybe_unused int pmc_core_resume(struct device *dev)
 	return 0;
 }
 
+static __maybe_unused int pmc_core_resume(struct device *dev)
+{
+	struct pmc_dev *pmcdev = dev_get_drvdata(dev);
+
+	if (pmcdev->resume)
+		return pmcdev->resume(pmcdev);
+
+	return pmc_core_resume_common(pmcdev);
+}
+
 static const struct dev_pm_ops pmc_core_pm_ops = {
 	SET_LATE_SYSTEM_SLEEP_PM_OPS(pmc_core_suspend, pmc_core_resume)
 };
@@ -1275,7 +1284,7 @@ static struct platform_driver pmc_core_driver = {
 		.dev_groups = pmc_dev_groups,
 	},
 	.probe = pmc_core_probe,
-	.remove = pmc_core_remove,
+	.remove_new = pmc_core_remove,
 };
 
 module_platform_driver(pmc_core_driver);

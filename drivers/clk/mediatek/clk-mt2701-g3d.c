@@ -54,6 +54,7 @@ static const struct of_device_id of_match_clk_mt2701_g3d[] = {
 	{ .compatible = "mediatek,mt2701-g3dsys", .data = &g3d_desc },
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, of_match_clk_mt2701_g3d);
 
 static struct platform_driver clk_mt2701_g3d_drv = {
 	.probe = mtk_clk_simple_probe,
@@ -63,5 +64,5 @@ static struct platform_driver clk_mt2701_g3d_drv = {
 		.of_match_table = of_match_clk_mt2701_g3d,
 	},
 };
-
-builtin_platform_driver(clk_mt2701_g3d_drv);
+module_platform_driver(clk_mt2701_g3d_drv);
+MODULE_LICENSE("GPL");

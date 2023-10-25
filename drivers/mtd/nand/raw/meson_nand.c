@@ -76,6 +76,7 @@
 #define GENCMDIADDRH(aih, addr)		((aih) | (((addr) >> 16) & 0xffff))
 
 #define DMA_DIR(dir)		((dir) ? NFC_CMD_N2M : NFC_CMD_M2N)
+#define DMA_ADDR_ALIGN		8
 
 #define ECC_CHECK_RETURN_FF	(-1)
 
@@ -842,6 +843,9 @@ static int meson_nfc_read_oob(struct nand_chip *nand, int page)
 
 static bool meson_nfc_is_buffer_dma_safe(const void *buffer)
 {
+	if ((uintptr_t)buffer % DMA_ADDR_ALIGN)
+		return false;
+
 	if (virt_addr_valid(buffer) && (!object_is_on_stack(buffer)))
 		return true;
 	return false;
@@ -1440,20 +1444,18 @@ err_clk:
 	return ret;
 }
 
-static int meson_nfc_remove(struct platform_device *pdev)
+static void meson_nfc_remove(struct platform_device *pdev)
 {
 	struct meson_nfc *nfc = platform_get_drvdata(pdev);
 
 	meson_nfc_nand_chip_cleanup(nfc);
 
 	meson_nfc_disable_clk(nfc);
-
-	return 0;
 }
 
 static struct platform_driver meson_nfc_driver = {
 	.probe  = meson_nfc_probe,
-	.remove = meson_nfc_remove,
+	.remove_new = meson_nfc_remove,
 	.driver = {
 		.name  = "meson-nand",
 		.of_match_table = meson_nfc_id_table,

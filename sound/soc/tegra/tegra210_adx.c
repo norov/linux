@@ -175,6 +175,16 @@ static int tegra210_adx_get_byte_map(struct snd_kcontrol *kcontrol,
 	mc = (struct soc_mixer_control *)kcontrol->private_value;
 	enabled = adx->byte_mask[mc->reg / 32] & (1 << (mc->reg % 32));
 
+	/*
+	 * TODO: Simplify this logic to just return from bytes_map[]
+	 *
+	 * Presently below is required since bytes_map[] is
+	 * tightly packed and cannot store the control value of 256.
+	 * Byte mask state is used to know if 256 needs to be returned.
+	 * Note that for control value of 256, the put() call stores 0
+	 * in the bytes_map[] and disables the corresponding bit in
+	 * byte_mask[].
+	 */
 	if (enabled)
 		ucontrol->value.integer.value[0] = bytes_map[mc->reg];
 	else
@@ -504,11 +514,9 @@ static int tegra210_adx_platform_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int tegra210_adx_platform_remove(struct platform_device *pdev)
+static void tegra210_adx_platform_remove(struct platform_device *pdev)
 {
 	pm_runtime_disable(&pdev->dev);
-
-	return 0;
 }
 
 static const struct dev_pm_ops tegra210_adx_pm_ops = {
@@ -525,7 +533,7 @@ static struct platform_driver tegra210_adx_driver = {
 		.pm = &tegra210_adx_pm_ops,
 	},
 	.probe = tegra210_adx_platform_probe,
-	.remove = tegra210_adx_platform_remove,
+	.remove_new = tegra210_adx_platform_remove,
 };
 module_platform_driver(tegra210_adx_driver);
 

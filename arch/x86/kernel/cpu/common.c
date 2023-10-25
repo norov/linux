@@ -121,6 +121,7 @@ static const struct x86_cpu_id ppin_cpuids[] = {
 	X86_MATCH_INTEL_FAM6_MODEL(ICELAKE_X, &ppin_info[X86_VENDOR_INTEL]),
 	X86_MATCH_INTEL_FAM6_MODEL(ICELAKE_D, &ppin_info[X86_VENDOR_INTEL]),
 	X86_MATCH_INTEL_FAM6_MODEL(SAPPHIRERAPIDS_X, &ppin_info[X86_VENDOR_INTEL]),
+	X86_MATCH_INTEL_FAM6_MODEL(EMERALDRAPIDS_X, &ppin_info[X86_VENDOR_INTEL]),
 	X86_MATCH_INTEL_FAM6_MODEL(XEON_PHI_KNL, &ppin_info[X86_VENDOR_INTEL]),
 	X86_MATCH_INTEL_FAM6_MODEL(XEON_PHI_KNM, &ppin_info[X86_VENDOR_INTEL]),
 
@@ -2339,6 +2340,8 @@ void microcode_check(struct cpuinfo_x86 *prev_info)
 	struct cpuinfo_x86 curr_info;
 
 	perf_check_microcode();
+
+	amd_check_microcode();
 
 	store_cpu_caps(&curr_info);
 

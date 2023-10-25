@@ -84,20 +84,23 @@ static pte_t *boot_pte_alloc(void)
 	static void *pte_leftover;
 	pte_t *pte;
 
-	BUILD_BUG_ON(_PAGE_TABLE_SIZE * 2 != PAGE_SIZE);
-
+	/*
+	 * handling pte_leftovers this way helps to avoid memory fragmentation
+	 * during POPULATE_KASAN_MAP_SHADOW when EDAT is off
+	 */
 	if (!pte_leftover) {
-		pte_leftover = boot_alloc_pages(0);
+		pte_leftover = (void *)physmem_alloc_top_down(RR_VMEM, PAGE_SIZE, PAGE_SIZE);
 		pte = pte_leftover + _PAGE_TABLE_SIZE;
 	} else {
 		pte = pte_leftover;
 		pte_leftover = NULL;
 	}
+
 	memset64((u64 *)pte, _PAGE_INVALID, PTRS_PER_PTE);
 	return pte;
 }
 
-static unsigned long _pa(unsigned long addr, enum populate_mode mode)
+static unsigned long _pa(unsigned long addr, unsigned long size, enum populate_mode mode)
 {
 	switch (mode) {
 	case POPULATE_NONE:
@@ -106,6 +109,12 @@ static unsigned long _pa(unsigned long addr, enum populate_mode mode)
 		return addr;
 	case POPULATE_ABS_LOWCORE:
 		return __abs_lowcore_pa(addr);
+#ifdef CONFIG_KASAN
+	case POPULATE_KASAN_MAP_SHADOW:
+		addr = physmem_alloc_top_down(RR_VMEM, size, size);
+		memset((void *)addr, 0, size);
+		return addr;
+#endif
 	default:
 		return -1;
 	}
@@ -132,7 +141,9 @@ static void pgtable_pte_populate(pmd_t *pmd, unsigned long addr, unsigned long e
 	pte = pte_offset_kernel(pmd, addr);
 	for (; addr < end; addr += PAGE_SIZE, pte++) {
 		if (pte_none(*pte)) {
-			entry = __pte(_pa(addr, mode));
+			if (kasan_pte_populate_zero_shadow(pte, mode))
+				continue;
+			entry = __pte(_pa(addr, PAGE_SIZE, mode));
 			entry = set_pte_bit(entry, PAGE_KERNEL_EXEC);
 			set_pte(pte, entry);
 		}
@@ -150,8 +161,10 @@ static void pgtable_pmd_populate(pud_t *pud, unsigned long addr, unsigned long e
 	for (; addr < end; addr = next, pmd++) {
 		next = pmd_addr_end(addr, end);
 		if (pmd_none(*pmd)) {
+			if (kasan_pmd_populate_zero_shadow(pmd, addr, next, mode))
+				continue;
 			if (can_large_pmd(pmd, addr, next)) {
-				entry = __pmd(_pa(addr, mode));
+				entry = __pmd(_pa(addr, _SEGMENT_SIZE, mode));
 				entry = set_pmd_bit(entry, SEGMENT_KERNEL_EXEC);
 				set_pmd(pmd, entry);
 				continue;
@@ -176,8 +189,10 @@ static void pgtable_pud_populate(p4d_t *p4d, unsigned long addr, unsigned long e
 	for (; addr < end; addr = next, pud++) {
 		next = pud_addr_end(addr, end);
 		if (pud_none(*pud)) {
+			if (kasan_pud_populate_zero_shadow(pud, addr, next, mode))
+				continue;
 			if (can_large_pud(pud, addr, next)) {
-				entry = __pud(_pa(addr, mode));
+				entry = __pud(_pa(addr, _REGION3_SIZE, mode));
 				entry = set_pud_bit(entry, REGION3_KERNEL_EXEC);
 				set_pud(pud, entry);
 				continue;
@@ -202,6 +217,8 @@ static void pgtable_p4d_populate(pgd_t *pgd, unsigned long addr, unsigned long e
 	for (; addr < end; addr = next, p4d++) {
 		next = p4d_addr_end(addr, end);
 		if (p4d_none(*p4d)) {
+			if (kasan_p4d_populate_zero_shadow(p4d, addr, next, mode))
+				continue;
 			pud = boot_crst_alloc(_REGION3_ENTRY_EMPTY);
 			p4d_populate(&init_mm, p4d, pud);
 		}
@@ -219,9 +236,15 @@ static void pgtable_populate(unsigned long addr, unsigned long end, enum populat
 	for (; addr < end; addr = next, pgd++) {
 		next = pgd_addr_end(addr, end);
 		if (pgd_none(*pgd)) {
+			if (kasan_pgd_populate_zero_shadow(pgd, addr, next, mode))
+				continue;
 			p4d = boot_crst_alloc(_REGION2_ENTRY_EMPTY);
 			pgd_populate(&init_mm, pgd, p4d);
 		}
+#ifdef CONFIG_KASAN
+		if (mode == POPULATE_KASAN_SHALLOW)
+			continue;
+#endif
 		pgtable_p4d_populate(pgd, addr, next, mode);
 	}
 }
@@ -260,6 +283,8 @@ void setup_vmem(unsigned long asce_limit)
 			 POPULATE_NONE);
 	memcpy_real_ptep = __virt_to_kpte(__memcpy_real_area);
 
+	kasan_populate_shadow();
+
 	S390_lowcore.kernel_asce = swapper_pg_dir | asce_bits;
 	S390_lowcore.user_asce = s390_invalid_asce;
 
@@ -268,11 +293,4 @@ void setup_vmem(unsigned long asce_limit)
 	__ctl_load(S390_lowcore.kernel_asce, 13, 13);
 
 	init_mm.context.asce = S390_lowcore.kernel_asce;
-}
-
-unsigned long vmem_estimate_memory_needs(unsigned long online_mem_total)
-{
-	unsigned long pages = DIV_ROUND_UP(online_mem_total, PAGE_SIZE);
-
-	return DIV_ROUND_UP(pages, _PAGE_ENTRIES) * _PAGE_TABLE_SIZE * 2;
 }

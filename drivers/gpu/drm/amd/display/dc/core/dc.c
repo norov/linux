@@ -147,7 +147,7 @@ static void destroy_links(struct dc *dc)
 
 	for (i = 0; i < dc->link_count; i++) {
 		if (NULL != dc->links[i])
-			link_destroy(&dc->links[i]);
+			dc->link_srv->destroy_link(&dc->links[i]);
 	}
 }
 
@@ -216,7 +216,7 @@ static bool create_links(
 		link_init_params.connector_index = i;
 		link_init_params.link_index = dc->link_count;
 		link_init_params.dc = dc;
-		link = link_create(&link_init_params);
+		link = dc->link_srv->create_link(&link_init_params);
 
 		if (link) {
 			dc->links[dc->link_count] = link;
@@ -238,7 +238,7 @@ static bool create_links(
 		link_init_params.dc = dc;
 		link_init_params.is_dpia_link = true;
 
-		link = link_create(&link_init_params);
+		link = dc->link_srv->create_link(&link_init_params);
 		if (link) {
 			dc->links[dc->link_count] = link;
 			link->dc = dc;
@@ -398,6 +398,14 @@ bool dc_stream_adjust_vmin_vmax(struct dc *dc,
 		struct dc_crtc_timing_adjust *adjust)
 {
 	int i;
+
+	/*
+	 * Don't adjust DRR while there's bandwidth optimizations pending to
+	 * avoid conflicting with firmware updates.
+	 */
+	if (dc->ctx->dce_version > DCE_VERSION_MAX)
+		if (dc->optimized_required || dc->wm_optimized_required)
+			return false;
 
 	stream->adjust.v_total_max = adjust->v_total_max;
 	stream->adjust.v_total_mid = adjust->v_total_mid;
@@ -814,6 +822,9 @@ static void dc_destruct(struct dc *dc)
 
 	dc_destroy_resource_pool(dc);
 
+	if (dc->link_srv)
+		link_destroy_link_service(&dc->link_srv);
+
 	if (dc->ctx->gpio_service)
 		dal_gpio_service_destroy(&dc->ctx->gpio_service);
 
@@ -875,6 +886,10 @@ static bool dc_construct_ctx(struct dc *dc,
 	}
 
 	dc->ctx = dc_ctx;
+
+	dc->link_srv = link_create_link_service();
+	if (!dc->link_srv)
+		return false;
 
 	return true;
 }
@@ -984,7 +999,7 @@ static bool dc_construct(struct dc *dc,
 	dc->clk_mgr = dc_clk_mgr_create(dc->ctx, dc->res_pool->pp_smu, dc->res_pool->dccg);
 	if (!dc->clk_mgr)
 		goto fail;
-#ifdef CONFIG_DRM_AMD_DC_DCN
+#ifdef CONFIG_DRM_AMD_DC_FP
 	dc->clk_mgr->force_smu_not_present = init_params->force_smu_not_present;
 
 	if (dc->res_pool->funcs->update_bw_bounding_box) {
@@ -1199,7 +1214,7 @@ static void disable_vbios_mode_if_required(
 						pipe->stream_res.pix_clk_params.requested_pix_clk_100hz;
 
 					if (pix_clk_100hz != requested_pix_clk_100hz) {
-						link_set_dpms_off(pipe);
+						dc->link_srv->set_dpms_off(pipe);
 						pipe->stream->dpms_off = false;
 					}
 				}
@@ -1324,16 +1339,12 @@ void dc_hardware_init(struct dc *dc)
 void dc_init_callbacks(struct dc *dc,
 		const struct dc_callback_init *init_params)
 {
-#ifdef CONFIG_DRM_AMD_DC_HDCP
 	dc->ctx->cp_psp = init_params->cp_psp;
-#endif
 }
 
 void dc_deinit_callbacks(struct dc *dc)
 {
-#ifdef CONFIG_DRM_AMD_DC_HDCP
 	memset(&dc->ctx->cp_psp, 0, sizeof(dc->ctx->cp_psp));
-#endif
 }
 
 void dc_destroy(struct dc **dc)
@@ -1537,6 +1548,9 @@ bool dc_validate_boot_timing(const struct dc *dc,
 		return false;
 	}
 
+	if (dc->debug.force_odm_combine)
+		return false;
+
 	/* Check for enabled DIG to identify enabled display */
 	if (!link->link_enc->funcs->is_dig_enabled(link->link_enc))
 		return false;
@@ -1658,7 +1672,7 @@ bool dc_validate_boot_timing(const struct dc *dc,
 		return false;
 	}
 
-	if (link_is_edp_ilr_optimization_required(link, crtc_timing)) {
+	if (dc->link_srv->edp_is_ilr_optimization_required(link, crtc_timing)) {
 		DC_LOG_EVENT_LINK_TRAINING("Seamless boot disabled to optimize eDP link rate\n");
 		return false;
 	}
@@ -1916,6 +1930,9 @@ static enum dc_status dc_commit_state_no_check(struct dc *dc, struct dc_state *c
 	return result;
 }
 
+static bool commit_minimal_transition_state(struct dc *dc,
+		struct dc_state *transition_base_context);
+
 /**
  * dc_commit_streams - Commit current stream state
  *
@@ -1937,6 +1954,8 @@ enum dc_status dc_commit_streams(struct dc *dc,
 	struct dc_state *context;
 	enum dc_status res = DC_OK;
 	struct dc_validation_set set[MAX_STREAMS] = {0};
+	struct pipe_ctx *pipe;
+	bool handle_exit_odm2to1 = false;
 
 	if (dc->ctx->dce_environment == DCE_ENV_VIRTUAL_HW)
 		return res;
@@ -1960,6 +1979,22 @@ enum dc_status dc_commit_streams(struct dc *dc,
 				set[i].plane_states[j] = status->plane_states[j];
 		}
 	}
+
+	/* Check for case where we are going from odm 2:1 to max
+	 *  pipe scenario.  For these cases, we will call
+	 *  commit_minimal_transition_state() to exit out of odm 2:1
+	 *  first before processing new streams
+	 */
+	if (stream_count == dc->res_pool->pipe_count) {
+		for (i = 0; i < dc->res_pool->pipe_count; i++) {
+			pipe = &dc->current_state->res_ctx.pipe_ctx[i];
+			if (pipe->next_odm_pipe)
+				handle_exit_odm2to1 = true;
+		}
+	}
+
+	if (handle_exit_odm2to1)
+		res = commit_minimal_transition_state(dc, dc->current_state);
 
 	context = dc_create_state(dc);
 	if (!context)
@@ -1999,53 +2034,6 @@ context_alloc_fail:
 	DC_LOG_DC("%s Finished.\n", __func__);
 
 	return res;
-}
-
-/* TODO: When the transition to the new commit sequence is done, remove this
- * function in favor of dc_commit_streams. */
-bool dc_commit_state(struct dc *dc, struct dc_state *context)
-{
-	enum dc_status result = DC_ERROR_UNEXPECTED;
-	int i;
-
-	/* TODO: Since change commit sequence can have a huge impact,
-	 * we decided to only enable it for DCN3x. However, as soon as
-	 * we get more confident about this change we'll need to enable
-	 * the new sequence for all ASICs. */
-	if (dc->ctx->dce_version >= DCN_VERSION_3_2) {
-		result = dc_commit_streams(dc, context->streams, context->stream_count);
-		return result == DC_OK;
-	}
-
-	if (!streams_changed(dc, context->streams, context->stream_count)) {
-		return DC_OK;
-	}
-
-	DC_LOG_DC("%s: %d streams\n",
-				__func__, context->stream_count);
-
-	for (i = 0; i < context->stream_count; i++) {
-		struct dc_stream_state *stream = context->streams[i];
-
-		dc_stream_log(dc, stream);
-	}
-
-	/*
-	 * Previous validation was perfomred with fast_validation = true and
-	 * the full DML state required for hardware programming was skipped.
-	 *
-	 * Re-validate here to calculate these parameters / watermarks.
-	 */
-	result = dc_validate_global_state(dc, context, false);
-	if (result != DC_OK) {
-		DC_LOG_ERROR("DC commit global validation failure: %s (%d)",
-			     dc_status_to_str(result), result);
-		return result;
-	}
-
-	result = dc_commit_state_no_check(dc, context);
-
-	return (result == DC_OK);
 }
 
 bool dc_acquire_release_mpc_3dlut(
@@ -2134,27 +2122,33 @@ void dc_post_update_surfaces_to_stream(struct dc *dc)
 
 	post_surface_trace(dc);
 
-	if (dc->ctx->dce_version >= DCE_VERSION_MAX)
-		TRACE_DCN_CLOCK_STATE(&context->bw_ctx.bw.dcn.clk);
-	else
+	/*
+	 * Only relevant for DCN behavior where we can guarantee the optimization
+	 * is safe to apply - retain the legacy behavior for DCE.
+	 */
+
+	if (dc->ctx->dce_version < DCE_VERSION_MAX)
 		TRACE_DCE_CLOCK_STATE(&context->bw_ctx.bw.dce);
+	else {
+		TRACE_DCN_CLOCK_STATE(&context->bw_ctx.bw.dcn.clk);
 
-	if (is_flip_pending_in_pipes(dc, context))
-		return;
+		if (is_flip_pending_in_pipes(dc, context))
+			return;
 
-	for (i = 0; i < dc->res_pool->pipe_count; i++)
-		if (context->res_ctx.pipe_ctx[i].stream == NULL ||
-		    context->res_ctx.pipe_ctx[i].plane_state == NULL) {
-			context->res_ctx.pipe_ctx[i].pipe_idx = i;
-			dc->hwss.disable_plane(dc, &context->res_ctx.pipe_ctx[i]);
-		}
+		for (i = 0; i < dc->res_pool->pipe_count; i++)
+			if (context->res_ctx.pipe_ctx[i].stream == NULL ||
+					context->res_ctx.pipe_ctx[i].plane_state == NULL) {
+				context->res_ctx.pipe_ctx[i].pipe_idx = i;
+				dc->hwss.disable_plane(dc, &context->res_ctx.pipe_ctx[i]);
+			}
 
-	process_deferred_updates(dc);
+		process_deferred_updates(dc);
 
-	dc->hwss.optimize_bandwidth(dc, context);
+		dc->hwss.optimize_bandwidth(dc, context);
 
-	if (dc->debug.enable_double_buffered_dsc_pg_support)
-		dc->hwss.update_dsc_pg(dc, context, true);
+		if (dc->debug.enable_double_buffered_dsc_pg_support)
+			dc->hwss.update_dsc_pg(dc, context, true);
+	}
 
 	dc->optimized_required = false;
 	dc->wm_optimized_required = false;
@@ -2459,9 +2453,6 @@ static enum surface_update_type det_surface_update(const struct dc *dc,
 	enum surface_update_type overall_type = UPDATE_TYPE_FAST;
 	union surface_update_flags *update_flags = &u->surface->update_flags;
 
-	if (u->flip_addr)
-		update_flags->bits.addr_update = 1;
-
 	if (!is_surface_in_context(context, u->surface) || u->surface->force_full_update) {
 		update_flags->raw = 0xFFFFFFFF;
 		return UPDATE_TYPE_FULL;
@@ -2581,8 +2572,11 @@ static enum surface_update_type check_update_surfaces_for_stream(
 
 		if (stream_update->mst_bw_update)
 			su_flags->bits.mst_bw = 1;
-		if (stream_update->crtc_timing_adjust && dc_extended_blank_supported(dc))
-			su_flags->bits.crtc_timing_adjust = 1;
+
+		if (stream_update->stream && stream_update->stream->freesync_on_desktop &&
+			(stream_update->vrr_infopacket || stream_update->allow_freesync ||
+				stream_update->vrr_active_variable))
+			su_flags->bits.fams_changed = 1;
 
 		if (su_flags->raw != 0)
 			overall_type = UPDATE_TYPE_FULL;
@@ -3173,7 +3167,9 @@ static void commit_planes_do_stream_update(struct dc *dc,
 				dc->hwss.update_info_frame(pipe_ctx);
 
 				if (dc_is_dp_signal(pipe_ctx->stream->signal))
-					link_dp_source_sequence_trace(pipe_ctx->stream->link, DPCD_SOURCE_SEQ_AFTER_UPDATE_INFO_FRAME);
+					dc->link_srv->dp_trace_source_sequence(
+							pipe_ctx->stream->link,
+							DPCD_SOURCE_SEQ_AFTER_UPDATE_INFO_FRAME);
 			}
 
 			if (stream_update->hdr_static_metadata &&
@@ -3209,13 +3205,15 @@ static void commit_planes_do_stream_update(struct dc *dc,
 				continue;
 
 			if (stream_update->dsc_config)
-				link_update_dsc_config(pipe_ctx);
+				dc->link_srv->update_dsc_config(pipe_ctx);
 
 			if (stream_update->mst_bw_update) {
 				if (stream_update->mst_bw_update->is_increase)
-					link_increase_mst_payload(pipe_ctx, stream_update->mst_bw_update->mst_stream_bw);
+					dc->link_srv->increase_mst_payload(pipe_ctx,
+							stream_update->mst_bw_update->mst_stream_bw);
  				else
-					link_reduce_mst_payload(pipe_ctx, stream_update->mst_bw_update->mst_stream_bw);
+					dc->link_srv->reduce_mst_payload(pipe_ctx,
+							stream_update->mst_bw_update->mst_stream_bw);
  			}
 
 			if (stream_update->pending_test_pattern) {
@@ -3229,7 +3227,7 @@ static void commit_planes_do_stream_update(struct dc *dc,
 
 			if (stream_update->dpms_off) {
 				if (*stream_update->dpms_off) {
-					link_set_dpms_off(pipe_ctx);
+					dc->link_srv->set_dpms_off(pipe_ctx);
 					/* for dpms, keep acquired resources*/
 					if (pipe_ctx->stream_res.audio && !dc->debug.az_endpoint_mute_only)
 						pipe_ctx->stream_res.audio->funcs->az_disable(pipe_ctx->stream_res.audio);
@@ -3239,7 +3237,7 @@ static void commit_planes_do_stream_update(struct dc *dc,
 				} else {
 					if (get_seamless_boot_stream_count(context) == 0)
 						dc->hwss.prepare_bandwidth(dc, dc->current_state);
-					link_set_dpms_on(dc->current_state, pipe_ctx);
+					dc->link_srv->set_dpms_on(dc->current_state, pipe_ctx);
 				}
 			}
 
@@ -3466,22 +3464,6 @@ static void commit_planes_for_stream(struct dc *dc,
 
 	dc_dmub_update_dirty_rect(dc, surface_count, stream, srf_updates, context);
 
-	if (update_type != UPDATE_TYPE_FAST) {
-		for (i = 0; i < dc->res_pool->pipe_count; i++) {
-			struct pipe_ctx *new_pipe = &context->res_ctx.pipe_ctx[i];
-
-			if ((new_pipe->stream && new_pipe->stream->mall_stream_config.type == SUBVP_PHANTOM) ||
-					subvp_prev_use) {
-				// If old context or new context has phantom pipes, apply
-				// the phantom timings now. We can't change the phantom
-				// pipe configuration safely without driver acquiring
-				// the DMCUB lock first.
-				dc->hwss.apply_ctx_to_hw(dc, context);
-				break;
-			}
-		}
-	}
-
 	// Stream updates
 	if (stream_update)
 		commit_planes_do_stream_update(dc, stream, stream_update, update_type, context);
@@ -3510,14 +3492,9 @@ static void commit_planes_for_stream(struct dc *dc,
 		/* Since phantom pipe programming is moved to post_unlock_program_front_end,
 		 * move the SubVP lock to after the phantom pipes have been setup
 		 */
-		if (should_lock_all_pipes && dc->hwss.interdependent_update_lock) {
-			if (dc->hwss.subvp_pipe_control_lock)
-				dc->hwss.subvp_pipe_control_lock(dc, context, false, should_lock_all_pipes, NULL, subvp_prev_use);
-		} else {
-			if (dc->hwss.subvp_pipe_control_lock)
-				dc->hwss.subvp_pipe_control_lock(dc, context, false, should_lock_all_pipes, NULL, subvp_prev_use);
-		}
-
+		if (dc->hwss.subvp_pipe_control_lock)
+			dc->hwss.subvp_pipe_control_lock(dc, context, false, should_lock_all_pipes,
+							 NULL, subvp_prev_use);
 		return;
 	}
 
@@ -3702,6 +3679,9 @@ static void commit_planes_for_stream(struct dc *dc,
 		}
 	}
 
+	if (update_type != UPDATE_TYPE_FAST)
+		dc->hwss.post_unlock_program_front_end(dc, context);
+
 	if (subvp_prev_use && !subvp_curr_use) {
 		/* If disabling subvp, disable phantom streams after front end
 		 * programming has completed (we turn on phantom OTG in order
@@ -3711,15 +3691,8 @@ static void commit_planes_for_stream(struct dc *dc,
 	}
 
 	if (update_type != UPDATE_TYPE_FAST)
-		dc->hwss.post_unlock_program_front_end(dc, context);
-	if (update_type != UPDATE_TYPE_FAST)
 		if (dc->hwss.commit_subvp_config)
 			dc->hwss.commit_subvp_config(dc, context);
-
-	if (update_type != UPDATE_TYPE_FAST)
-		if (dc->hwss.commit_subvp_config)
-			dc->hwss.commit_subvp_config(dc, context);
-
 	/* Since phantom pipe programming is moved to post_unlock_program_front_end,
 	 * move the SubVP lock to after the phantom pipes have been setup
 	 */
@@ -3869,6 +3842,7 @@ static bool commit_minimal_transition_state(struct dc *dc,
 	unsigned int i, j;
 	unsigned int pipe_in_use = 0;
 	bool subvp_in_use = false;
+	bool odm_in_use = false;
 
 	if (!transition_context)
 		return false;
@@ -3897,6 +3871,18 @@ static bool commit_minimal_transition_state(struct dc *dc,
 		}
 	}
 
+	/* If ODM is enabled and we are adding or removing planes from any ODM
+	 * pipe, we must use the minimal transition.
+	 */
+	for (i = 0; i < dc->res_pool->pipe_count; i++) {
+		struct pipe_ctx *pipe = &dc->current_state->res_ctx.pipe_ctx[i];
+
+		if (pipe->stream && pipe->next_odm_pipe) {
+			odm_in_use = true;
+			break;
+		}
+	}
+
 	/* When the OS add a new surface if we have been used all of pipes with odm combine
 	 * and mpc split feature, it need use commit_minimal_transition_state to transition safely.
 	 * After OS exit MPO, it will back to use odm and mpc split with all of pipes, we need
@@ -3905,7 +3891,7 @@ static bool commit_minimal_transition_state(struct dc *dc,
 	 * Reduce the scenarios to use dc_commit_state_no_check in the stage of flip. Especially
 	 * enter/exit MPO when DCN still have enough resources.
 	 */
-	if (pipe_in_use != dc->res_pool->pipe_count && !subvp_in_use) {
+	if (pipe_in_use != dc->res_pool->pipe_count && !subvp_in_use && !odm_in_use) {
 		dc_release_state(transition_context);
 		return true;
 	}
@@ -4083,23 +4069,29 @@ void dc_commit_updates_for_stream(struct dc *dc,
 	struct dc_context *dc_ctx = dc->ctx;
 	int i, j;
 
+	stream_status = dc_stream_get_status(stream);
+	context = dc->current_state;
+
+	update_type = dc_check_update_surfaces_for_stream(
+				dc, srf_updates, surface_count, stream_update, stream_status);
+
 	/* TODO: Since change commit sequence can have a huge impact,
 	 * we decided to only enable it for DCN3x. However, as soon as
 	 * we get more confident about this change we'll need to enable
 	 * the new sequence for all ASICs.
 	 */
 	if (dc->ctx->dce_version >= DCN_VERSION_3_2) {
+		/*
+		 * Previous frame finished and HW is ready for optimization.
+		 */
+		if (update_type == UPDATE_TYPE_FAST)
+			dc_post_update_surfaces_to_stream(dc);
+
 		dc_update_planes_and_stream(dc, srf_updates,
 					    surface_count, stream,
 					    stream_update);
 		return;
 	}
-
-	stream_status = dc_stream_get_status(stream);
-	context = dc->current_state;
-
-	update_type = dc_check_update_surfaces_for_stream(
-				dc, srf_updates, surface_count, stream_update, stream_status);
 
 	if (update_type >= update_surface_trace_level)
 		update_surface_trace(dc, srf_updates, surface_count);
@@ -4123,12 +4115,9 @@ void dc_commit_updates_for_stream(struct dc *dc,
 			if (new_pipe->plane_state && new_pipe->plane_state != old_pipe->plane_state)
 				new_pipe->plane_state->force_full_update = true;
 		}
-	} else if (update_type == UPDATE_TYPE_FAST && dc_ctx->dce_version >= DCE_VERSION_MAX) {
+	} else if (update_type == UPDATE_TYPE_FAST) {
 		/*
 		 * Previous frame finished and HW is ready for optimization.
-		 *
-		 * Only relevant for DCN behavior where we can guarantee the optimization
-		 * is safe to apply - retain the legacy behavior for DCE.
 		 */
 		dc_post_update_surfaces_to_stream(dc);
 	}
@@ -4305,7 +4294,7 @@ void dc_resume(struct dc *dc)
 	uint32_t i;
 
 	for (i = 0; i < dc->link_count; i++)
-		link_resume(dc->links[i]);
+		dc->link_srv->resume(dc->links[i]);
 }
 
 bool dc_is_dmcu_initialized(struct dc *dc)
@@ -5004,22 +4993,4 @@ void dc_notify_vsync_int_state(struct dc *dc, struct dc_stream_state *stream, bo
 
 	if (pipe->stream_res.abm && pipe->stream_res.abm->funcs->set_abm_pause)
 		pipe->stream_res.abm->funcs->set_abm_pause(pipe->stream_res.abm, !enable, i, pipe->stream_res.tg->inst);
-}
-
-/**
- * dc_extended_blank_supported - Decide whether extended blank is supported
- *
- * @dc: [in] Current DC state
- *
- * Extended blank is a freesync optimization feature to be enabled in the
- * future.  During the extra vblank period gained from freesync, we have the
- * ability to enter z9/z10.
- *
- * Return:
- * Indicate whether extended blank is supported (%true or %false)
- */
-bool dc_extended_blank_supported(struct dc *dc)
-{
-	return dc->debug.extended_blank_optimization && !dc->debug.disable_z10
-		&& dc->caps.zstate_support && dc->caps.is_apu;
 }

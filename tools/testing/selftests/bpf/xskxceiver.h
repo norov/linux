@@ -57,6 +57,7 @@
 #define RX_FULL_RXQSIZE 32
 #define UMEM_HEADROOM_TEST_SIZE 128
 #define XSK_UMEM__INVALID_FRAME_SIZE (XSK_UMEM__DEFAULT_FRAME_SIZE + 1)
+#define HUGEPAGE_SIZE (2 * 1024 * 1024)
 
 #define print_verbose(x...) do { if (opt_verbose) ksft_print_msg(x); } while (0)
 
@@ -79,6 +80,7 @@ enum test_type {
 	TEST_TYPE_ALIGNED_INV_DESC,
 	TEST_TYPE_ALIGNED_INV_DESC_2K_FRAME,
 	TEST_TYPE_UNALIGNED_INV_DESC,
+	TEST_TYPE_UNALIGNED_INV_DESC_4K1_FRAME,
 	TEST_TYPE_HEADROOM,
 	TEST_TYPE_TEARDOWN,
 	TEST_TYPE_BIDI,
@@ -88,6 +90,7 @@ enum test_type {
 	TEST_TYPE_STATS_FILL_EMPTY,
 	TEST_TYPE_BPF_RES,
 	TEST_TYPE_XDP_DROP_HALF,
+	TEST_TYPE_XDP_METADATA_COUNT,
 	TEST_TYPE_MAX
 };
 
@@ -158,6 +161,7 @@ struct ifobject {
 	bool use_fill_ring;
 	bool release_rx;
 	bool shared_umem;
+	bool use_metadata;
 	u8 dst_mac[ETH_ALEN];
 	u8 src_mac[ETH_ALEN];
 };

@@ -34,11 +34,11 @@
 #define DEFAULT_BUFFER_SECTORS		128
 #define DEFAULT_JOURNAL_WATERMARK	50
 #define DEFAULT_SYNC_MSEC		10000
-#define DEFAULT_MAX_JOURNAL_SECTORS	131072
+#define DEFAULT_MAX_JOURNAL_SECTORS	(IS_ENABLED(CONFIG_64BIT) ? 131072 : 8192)
 #define MIN_LOG2_INTERLEAVE_SECTORS	3
 #define MAX_LOG2_INTERLEAVE_SECTORS	31
 #define METADATA_WORKQUEUE_MAX_ACTIVE	16
-#define RECALC_SECTORS			32768
+#define RECALC_SECTORS			(IS_ENABLED(CONFIG_64BIT) ? 32768 : 2048)
 #define RECALC_WRITE_SUPER		16
 #define BITMAP_BLOCK_SIZE		4096	/* don't change it */
 #define BITMAP_FLUSH_INTERVAL		(10 * HZ)
@@ -3118,7 +3118,7 @@ static int dm_integrity_reboot(struct notifier_block *n, unsigned long code, voi
 
 static void dm_integrity_postsuspend(struct dm_target *ti)
 {
-	struct dm_integrity_c *ic = (struct dm_integrity_c *)ti->private;
+	struct dm_integrity_c *ic = ti->private;
 	int r;
 
 	WARN_ON(unregister_reboot_notifier(&ic->reboot_notifier));
@@ -3167,7 +3167,7 @@ static void dm_integrity_postsuspend(struct dm_target *ti)
 
 static void dm_integrity_resume(struct dm_target *ti)
 {
-	struct dm_integrity_c *ic = (struct dm_integrity_c *)ti->private;
+	struct dm_integrity_c *ic = ti->private;
 	__u64 old_provided_data_sectors = le64_to_cpu(ic->sb->provided_data_sectors);
 	int r;
 
@@ -3290,7 +3290,7 @@ static void dm_integrity_resume(struct dm_target *ti)
 static void dm_integrity_status(struct dm_target *ti, status_type_t type,
 				unsigned int status_flags, char *result, unsigned int maxlen)
 {
-	struct dm_integrity_c *ic = (struct dm_integrity_c *)ti->private;
+	struct dm_integrity_c *ic = ti->private;
 	unsigned int arg_count;
 	size_t sz = 0;
 

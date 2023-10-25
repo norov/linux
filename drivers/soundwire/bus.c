@@ -384,45 +384,73 @@ int sdw_fill_msg(struct sdw_msg *msg, struct sdw_slave *slave,
 
 /*
  * Read/Write IO functions.
- * no_pm versions can only be called by the bus, e.g. while enumerating or
- * handling suspend-resume sequences.
- * all clients need to use the pm versions
  */
 
-int sdw_nread_no_pm(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
+static int sdw_ntransfer_no_pm(struct sdw_slave *slave, u32 addr, u8 flags,
+			       size_t count, u8 *val)
 {
 	struct sdw_msg msg;
+	size_t size;
 	int ret;
 
-	ret = sdw_fill_msg(&msg, slave, addr, count,
-			   slave->dev_num, SDW_MSG_FLAG_READ, val);
-	if (ret < 0)
-		return ret;
+	while (count) {
+		// Only handle bytes up to next page boundary
+		size = min_t(size_t, count, (SDW_REGADDR + 1) - (addr & SDW_REGADDR));
 
-	ret = sdw_transfer(slave->bus, &msg);
-	if (slave->is_mockup_device)
-		ret = 0;
-	return ret;
+		ret = sdw_fill_msg(&msg, slave, addr, size, slave->dev_num, flags, val);
+		if (ret < 0)
+			return ret;
+
+		ret = sdw_transfer(slave->bus, &msg);
+		if (ret < 0 && !slave->is_mockup_device)
+			return ret;
+
+		addr += size;
+		val += size;
+		count -= size;
+	}
+
+	return 0;
+}
+
+/**
+ * sdw_nread_no_pm() - Read "n" contiguous SDW Slave registers with no PM
+ * @slave: SDW Slave
+ * @addr: Register address
+ * @count: length
+ * @val: Buffer for values to be read
+ *
+ * Note that if the message crosses a page boundary each page will be
+ * transferred under a separate invocation of the msg_lock.
+ */
+int sdw_nread_no_pm(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
+{
+	return sdw_ntransfer_no_pm(slave, addr, SDW_MSG_FLAG_READ, count, val);
 }
 EXPORT_SYMBOL(sdw_nread_no_pm);
 
+/**
+ * sdw_nwrite_no_pm() - Write "n" contiguous SDW Slave registers with no PM
+ * @slave: SDW Slave
+ * @addr: Register address
+ * @count: length
+ * @val: Buffer for values to be written
+ *
+ * Note that if the message crosses a page boundary each page will be
+ * transferred under a separate invocation of the msg_lock.
+ */
 int sdw_nwrite_no_pm(struct sdw_slave *slave, u32 addr, size_t count, const u8 *val)
 {
-	struct sdw_msg msg;
-	int ret;
-
-	ret = sdw_fill_msg(&msg, slave, addr, count,
-			   slave->dev_num, SDW_MSG_FLAG_WRITE, (u8 *)val);
-	if (ret < 0)
-		return ret;
-
-	ret = sdw_transfer(slave->bus, &msg);
-	if (slave->is_mockup_device)
-		ret = 0;
-	return ret;
+	return sdw_ntransfer_no_pm(slave, addr, SDW_MSG_FLAG_WRITE, count, (u8 *)val);
 }
 EXPORT_SYMBOL(sdw_nwrite_no_pm);
 
+/**
+ * sdw_write_no_pm() - Write a SDW Slave register with no PM
+ * @slave: SDW Slave
+ * @addr: Register address
+ * @value: Register value
+ */
 int sdw_write_no_pm(struct sdw_slave *slave, u32 addr, u8 value)
 {
 	return sdw_nwrite_no_pm(slave, addr, 1, &value);
@@ -495,6 +523,11 @@ int sdw_bwrite_no_pm_unlocked(struct sdw_bus *bus, u16 dev_num, u32 addr, u8 val
 }
 EXPORT_SYMBOL(sdw_bwrite_no_pm_unlocked);
 
+/**
+ * sdw_read_no_pm() - Read a SDW Slave register with no PM
+ * @slave: SDW Slave
+ * @addr: Register address
+ */
 int sdw_read_no_pm(struct sdw_slave *slave, u32 addr)
 {
 	u8 buf;
@@ -541,6 +574,11 @@ EXPORT_SYMBOL(sdw_update);
  * @addr: Register address
  * @count: length
  * @val: Buffer for values to be read
+ *
+ * This version of the function will take a PM reference to the slave
+ * device.
+ * Note that if the message crosses a page boundary each page will be
+ * transferred under a separate invocation of the msg_lock.
  */
 int sdw_nread(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
 {
@@ -565,6 +603,11 @@ EXPORT_SYMBOL(sdw_nread);
  * @addr: Register address
  * @count: length
  * @val: Buffer for values to be written
+ *
+ * This version of the function will take a PM reference to the slave
+ * device.
+ * Note that if the message crosses a page boundary each page will be
+ * transferred under a separate invocation of the msg_lock.
  */
 int sdw_nwrite(struct sdw_slave *slave, u32 addr, size_t count, const u8 *val)
 {
@@ -587,6 +630,9 @@ EXPORT_SYMBOL(sdw_nwrite);
  * sdw_read() - Read a SDW Slave register
  * @slave: SDW Slave
  * @addr: Register address
+ *
+ * This version of the function will take a PM reference to the slave
+ * device.
  */
 int sdw_read(struct sdw_slave *slave, u32 addr)
 {
@@ -606,6 +652,9 @@ EXPORT_SYMBOL(sdw_read);
  * @slave: SDW Slave
  * @addr: Register address
  * @value: Register value
+ *
+ * This version of the function will take a PM reference to the slave
+ * device.
  */
 int sdw_write(struct sdw_slave *slave, u32 addr, u8 value)
 {
@@ -855,8 +904,8 @@ static void sdw_modify_slave_status(struct sdw_slave *slave,
 			"initializing enumeration and init completion for Slave %d\n",
 			slave->dev_num);
 
-		init_completion(&slave->enumeration_complete);
-		init_completion(&slave->initialization_complete);
+		reinit_completion(&slave->enumeration_complete);
+		reinit_completion(&slave->initialization_complete);
 
 	} else if ((status == SDW_SLAVE_ATTACHED) &&
 		   (slave->status == SDW_SLAVE_UNATTACHED)) {
@@ -864,7 +913,7 @@ static void sdw_modify_slave_status(struct sdw_slave *slave,
 			"signaling enumeration completion for Slave %d\n",
 			slave->dev_num);
 
-		complete(&slave->enumeration_complete);
+		complete_all(&slave->enumeration_complete);
 	}
 	slave->status = status;
 	mutex_unlock(&bus->bus_lock);
@@ -1887,7 +1936,7 @@ int sdw_handle_slave_status(struct sdw_bus *bus,
 				"signaling initialization completion for Slave %d\n",
 				slave->dev_num);
 
-			complete(&slave->initialization_complete);
+			complete_all(&slave->initialization_complete);
 
 			/*
 			 * If the manager became pm_runtime active, the peripherals will be

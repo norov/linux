@@ -26,6 +26,7 @@
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
 
+#include <target/target_core_backend.h>
 #include <target/iscsi/iscsi_target_core.h>
 #include "iscsi_target_parameters.h"
 #include "iscsi_target_seq_pdu_list.h"
@@ -362,8 +363,6 @@ struct iscsi_np *iscsit_add_np(
 	spin_lock_init(&np->np_thread_lock);
 	init_completion(&np->np_restart_comp);
 	INIT_LIST_HEAD(&np->np_list);
-
-	timer_setup(&np->np_login_timer, iscsi_handle_login_thread_timeout, 0);
 
 	ret = iscsi_target_setup_login_socket(np, sockaddr);
 	if (ret != 0) {

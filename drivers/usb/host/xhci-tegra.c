@@ -1145,15 +1145,15 @@ static int tegra_xusb_powerdomain_init(struct device *dev,
 	int err;
 
 	tegra->genpd_dev_host = dev_pm_domain_attach_by_name(dev, "xusb_host");
-	if (IS_ERR_OR_NULL(tegra->genpd_dev_host)) {
-		err = PTR_ERR(tegra->genpd_dev_host) ? : -ENODATA;
+	if (IS_ERR(tegra->genpd_dev_host)) {
+		err = PTR_ERR(tegra->genpd_dev_host);
 		dev_err(dev, "failed to get host pm-domain: %d\n", err);
 		return err;
 	}
 
 	tegra->genpd_dev_ss = dev_pm_domain_attach_by_name(dev, "xusb_ss");
-	if (IS_ERR_OR_NULL(tegra->genpd_dev_ss)) {
-		err = PTR_ERR(tegra->genpd_dev_ss) ? : -ENODATA;
+	if (IS_ERR(tegra->genpd_dev_ss)) {
+		err = PTR_ERR(tegra->genpd_dev_ss);
 		dev_err(dev, "failed to get superspeed pm-domain: %d\n", err);
 		return err;
 	}
@@ -1535,7 +1535,6 @@ static void tegra_xusb_deinit_usb_phy(struct tegra_xusb *tegra)
 
 static int tegra_xusb_probe(struct platform_device *pdev)
 {
-	struct of_phandle_args args;
 	struct tegra_xusb *tegra;
 	struct device_node *np;
 	struct resource *regs;
@@ -1594,15 +1593,13 @@ static int tegra_xusb_probe(struct platform_device *pdev)
 		goto put_padctl;
 	}
 
-	/* Older device-trees don't have padctrl interrupt */
-	err = of_irq_parse_one(np, 0, &args);
-	if (!err) {
-		tegra->padctl_irq = of_irq_get(np, 0);
-		if (tegra->padctl_irq <= 0) {
-			err = (tegra->padctl_irq == 0) ? -ENODEV : tegra->padctl_irq;
-			goto put_padctl;
-		}
-	} else {
+	tegra->padctl_irq = of_irq_get(np, 0);
+	if (tegra->padctl_irq == -EPROBE_DEFER) {
+		err = tegra->padctl_irq;
+		goto put_padctl;
+	} else if (tegra->padctl_irq <= 0) {
+		/* Older device-trees don't have padctrl interrupt */
+		tegra->padctl_irq = 0;
 		dev_dbg(&pdev->dev,
 			"%pOF is missing an interrupt, disabling PM support\n", np);
 	}
@@ -2275,7 +2272,7 @@ static int tegra_xusb_exit_elpg(struct tegra_xusb *tegra, bool runtime)
 	if (wakeup)
 		tegra_xhci_disable_phy_sleepwalk(tegra);
 
-	err = xhci_resume(xhci, 0);
+	err = xhci_resume(xhci, runtime ? PMSG_AUTO_RESUME : PMSG_RESUME);
 	if (err < 0) {
 		dev_err(tegra->dev, "failed to resume XHCI: %d\n", err);
 		goto disable_phy;

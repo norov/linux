@@ -1396,6 +1396,7 @@ static const struct qmp_combo_offsets qmp_combo_offsets_v3 = {
 	.usb3_serdes	= 0x1000,
 	.usb3_pcs_misc	= 0x1a00,
 	.usb3_pcs	= 0x1c00,
+	.usb3_pcs_usb	= 0x1f00,
 	.dp_serdes	= 0x2000,
 	.dp_txa		= 0x2200,
 	.dp_txb		= 0x2600,
@@ -1414,22 +1415,6 @@ static const struct qmp_combo_offsets qmp_combo_offsets_v5 = {
 	.usb3_pcs_usb	= 0x1700,
 	.dp_serdes	= 0x2000,
 	.dp_dp_phy	= 0x2200,
-};
-
-static const struct qmp_combo_offsets qmp_combo_offsets_v6 = {
-	.com		= 0x0000,
-	.txa		= 0x1200,
-	.rxa		= 0x1400,
-	.txb		= 0x1600,
-	.rxb		= 0x1800,
-	.usb3_serdes	= 0x1000,
-	.usb3_pcs_misc	= 0x1a00,
-	.usb3_pcs	= 0x1c00,
-	.usb3_pcs_usb	= 0x1f00,
-	.dp_serdes	= 0x2000,
-	.dp_txa		= 0x2200,
-	.dp_txb		= 0x2600,
-	.dp_dp_phy	= 0x2a00,
 };
 
 static const struct qmp_phy_cfg sc7180_usb3dpphy_cfg = {
@@ -1758,7 +1743,7 @@ static const struct qmp_phy_cfg sm8350_usb3dpphy_cfg = {
 };
 
 static const struct qmp_phy_cfg sm8550_usb3dpphy_cfg = {
-	.offsets		= &qmp_combo_offsets_v6,
+	.offsets		= &qmp_combo_offsets_v3,
 
 	.serdes_tbl		= sm8550_usb3_serdes_tbl,
 	.serdes_tbl_num		= ARRAY_SIZE(sm8550_usb3_serdes_tbl),
@@ -2157,6 +2142,7 @@ static void qmp_v4_configure_dp_tx(struct qmp_combo *qmp)
 static int qmp_v456_configure_dp_phy(struct qmp_combo *qmp,
 				     unsigned int com_resetm_ctrl_reg,
 				     unsigned int com_c_ready_status_reg,
+				     unsigned int com_cmn_status_reg,
 				     unsigned int dp_phy_status_reg)
 {
 	const struct phy_configure_opts_dp *dp_opts = &qmp->dp_opts;
@@ -2213,14 +2199,14 @@ static int qmp_v456_configure_dp_phy(struct qmp_combo *qmp,
 			10000))
 		return -ETIMEDOUT;
 
-	if (readl_poll_timeout(qmp->dp_serdes + QSERDES_V4_COM_CMN_STATUS,
+	if (readl_poll_timeout(qmp->dp_serdes + com_cmn_status_reg,
 			status,
 			((status & BIT(0)) > 0),
 			500,
 			10000))
 		return -ETIMEDOUT;
 
-	if (readl_poll_timeout(qmp->dp_serdes + QSERDES_V4_COM_CMN_STATUS,
+	if (readl_poll_timeout(qmp->dp_serdes + com_cmn_status_reg,
 			status,
 			((status & BIT(1)) > 0),
 			500,
@@ -2256,6 +2242,7 @@ static int qmp_v4_configure_dp_phy(struct qmp_combo *qmp)
 
 	ret = qmp_v456_configure_dp_phy(qmp, QSERDES_V4_COM_RESETSM_CNTRL,
 					QSERDES_V4_COM_C_READY_STATUS,
+					QSERDES_V4_COM_CMN_STATUS,
 					QSERDES_V4_DP_PHY_STATUS);
 	if (ret < 0)
 		return ret;
@@ -2320,6 +2307,7 @@ static int qmp_v5_configure_dp_phy(struct qmp_combo *qmp)
 
 	ret = qmp_v456_configure_dp_phy(qmp, QSERDES_V4_COM_RESETSM_CNTRL,
 					QSERDES_V4_COM_C_READY_STATUS,
+					QSERDES_V4_COM_CMN_STATUS,
 					QSERDES_V4_DP_PHY_STATUS);
 	if (ret < 0)
 		return ret;
@@ -2379,6 +2367,7 @@ static int qmp_v6_configure_dp_phy(struct qmp_combo *qmp)
 
 	ret = qmp_v456_configure_dp_phy(qmp, QSERDES_V6_COM_RESETSM_CNTRL,
 					QSERDES_V6_COM_C_READY_STATUS,
+					QSERDES_V6_COM_CMN_STATUS,
 					QSERDES_V6_DP_PHY_STATUS);
 	if (ret < 0)
 		return ret;

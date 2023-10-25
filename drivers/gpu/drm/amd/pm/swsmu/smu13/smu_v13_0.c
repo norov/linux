@@ -85,6 +85,9 @@ MODULE_FIRMWARE("amdgpu/smu_13_0_10.bin");
 static const int link_width[] = {0, 1, 2, 4, 8, 12, 16};
 static const int link_speed[] = {25, 50, 80, 160};
 
+const int pmfw_decoded_link_speed[5] = {1, 2, 3, 4, 5};
+const int pmfw_decoded_link_width[7] = {0, 1, 2, 4, 8, 12, 16};
+
 int smu_v13_0_init_microcode(struct smu_context *smu)
 {
 	struct amdgpu_device *adev = smu->adev;
@@ -293,6 +296,10 @@ int smu_v13_0_check_fw_version(struct smu_context *smu)
 		break;
 	case IP_VERSION(13, 0, 5):
 		smu->smc_driver_if_version = SMU13_DRIVER_IF_VERSION_SMU_V13_0_5;
+		break;
+	case IP_VERSION(13, 0, 6):
+		smu->smc_driver_if_version = SMU13_DRIVER_IF_VERSION_SMU_V13_0_6;
+		adev->pm.fw_version = smu_version;
 		break;
 	default:
 		dev_err(adev->dev, "smu unsupported IP version: 0x%x.\n",
@@ -566,11 +573,11 @@ int smu_v13_0_init_power(struct smu_context *smu)
 	if (smu_power->power_context || smu_power->power_context_size != 0)
 		return -EINVAL;
 
-	smu_power->power_context = kzalloc(sizeof(struct smu_13_0_dpm_context),
+	smu_power->power_context = kzalloc(sizeof(struct smu_13_0_power_context),
 					   GFP_KERNEL);
 	if (!smu_power->power_context)
 		return -ENOMEM;
-	smu_power->power_context_size = sizeof(struct smu_13_0_dpm_context);
+	smu_power->power_context_size = sizeof(struct smu_13_0_power_context);
 
 	return 0;
 }
@@ -1914,10 +1921,9 @@ int smu_v13_0_set_power_source(struct smu_context *smu,
 					       NULL);
 }
 
-static int smu_v13_0_get_dpm_freq_by_index(struct smu_context *smu,
-					   enum smu_clk_type clk_type,
-					   uint16_t level,
-					   uint32_t *value)
+int smu_v13_0_get_dpm_freq_by_index(struct smu_context *smu,
+				    enum smu_clk_type clk_type, uint16_t level,
+				    uint32_t *value)
 {
 	int ret = 0, clk_id = 0;
 	uint32_t param;
@@ -2446,4 +2452,52 @@ int smu_v13_0_mode1_reset(struct smu_context *smu)
 		msleep(SMU13_MODE1_RESET_WAIT_TIME_IN_MS);
 
 	return ret;
+}
+
+int smu_v13_0_update_pcie_parameters(struct smu_context *smu,
+				     uint32_t pcie_gen_cap,
+				     uint32_t pcie_width_cap)
+{
+	struct smu_13_0_dpm_context *dpm_context = smu->smu_dpm.dpm_context;
+	struct smu_13_0_pcie_table *pcie_table =
+				&dpm_context->dpm_tables.pcie_table;
+	int num_of_levels = pcie_table->num_of_link_levels;
+	uint32_t smu_pcie_arg;
+	int ret, i;
+
+	if (!amdgpu_device_pcie_dynamic_switching_supported()) {
+		if (pcie_table->pcie_gen[num_of_levels - 1] < pcie_gen_cap)
+			pcie_gen_cap = pcie_table->pcie_gen[num_of_levels - 1];
+
+		if (pcie_table->pcie_lane[num_of_levels - 1] < pcie_width_cap)
+			pcie_width_cap = pcie_table->pcie_lane[num_of_levels - 1];
+
+		/* Force all levels to use the same settings */
+		for (i = 0; i < num_of_levels; i++) {
+			pcie_table->pcie_gen[i] = pcie_gen_cap;
+			pcie_table->pcie_lane[i] = pcie_width_cap;
+		}
+	} else {
+		for (i = 0; i < num_of_levels; i++) {
+			if (pcie_table->pcie_gen[i] > pcie_gen_cap)
+				pcie_table->pcie_gen[i] = pcie_gen_cap;
+			if (pcie_table->pcie_lane[i] > pcie_width_cap)
+				pcie_table->pcie_lane[i] = pcie_width_cap;
+		}
+	}
+
+	for (i = 0; i < num_of_levels; i++) {
+		smu_pcie_arg = i << 16;
+		smu_pcie_arg |= pcie_table->pcie_gen[i] << 8;
+		smu_pcie_arg |= pcie_table->pcie_lane[i];
+
+		ret = smu_cmn_send_smc_msg_with_param(smu,
+						      SMU_MSG_OverridePcieParameters,
+						      smu_pcie_arg,
+						      NULL);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }

@@ -125,10 +125,38 @@ static struct cxl_region_ref *cxl_rr_load(struct cxl_port *port,
 	return xa_load(&port->regions, (unsigned long)cxlr);
 }
 
+static int cxl_region_invalidate_memregion(struct cxl_region *cxlr)
+{
+	if (!cpu_cache_has_invalidate_memregion()) {
+		if (IS_ENABLED(CONFIG_CXL_REGION_INVALIDATION_TEST)) {
+			dev_warn_once(
+				&cxlr->dev,
+				"Bypassing cpu_cache_invalidate_memregion() for testing!\n");
+			return 0;
+		} else {
+			dev_err(&cxlr->dev,
+				"Failed to synchronize CPU cache state\n");
+			return -ENXIO;
+		}
+	}
+
+	cpu_cache_invalidate_memregion(IORES_DESC_CXL);
+	return 0;
+}
+
 static int cxl_region_decode_reset(struct cxl_region *cxlr, int count)
 {
 	struct cxl_region_params *p = &cxlr->params;
-	int i;
+	int i, rc = 0;
+
+	/*
+	 * Before region teardown attempt to flush, and if the flush
+	 * fails cancel the region teardown for data consistency
+	 * concerns
+	 */
+	rc = cxl_region_invalidate_memregion(cxlr);
+	if (rc)
+		return rc;
 
 	for (i = count - 1; i >= 0; i--) {
 		struct cxl_endpoint_decoder *cxled = p->targets[i];
@@ -136,7 +164,6 @@ static int cxl_region_decode_reset(struct cxl_region *cxlr, int count)
 		struct cxl_port *iter = cxled_to_port(cxled);
 		struct cxl_dev_state *cxlds = cxlmd->cxlds;
 		struct cxl_ep *ep;
-		int rc = 0;
 
 		if (cxlds->rcd)
 			goto endpoint_reset;
@@ -155,13 +182,18 @@ static int cxl_region_decode_reset(struct cxl_region *cxlr, int count)
 				rc = cxld->reset(cxld);
 			if (rc)
 				return rc;
+			set_bit(CXL_REGION_F_NEEDS_RESET, &cxlr->flags);
 		}
 
 endpoint_reset:
 		rc = cxled->cxld.reset(&cxled->cxld);
 		if (rc)
 			return rc;
+		set_bit(CXL_REGION_F_NEEDS_RESET, &cxlr->flags);
 	}
+
+	/* all decoders associated with this region have been torn down */
+	clear_bit(CXL_REGION_F_NEEDS_RESET, &cxlr->flags);
 
 	return 0;
 }
@@ -256,9 +288,19 @@ static ssize_t commit_store(struct device *dev, struct device_attribute *attr,
 		goto out;
 	}
 
-	if (commit)
+	/*
+	 * Invalidate caches before region setup to drop any speculative
+	 * consumption of this address space
+	 */
+	rc = cxl_region_invalidate_memregion(cxlr);
+	if (rc)
+		return rc;
+
+	if (commit) {
 		rc = cxl_region_decode_commit(cxlr);
-	else {
+		if (rc == 0)
+			p->state = CXL_CONFIG_COMMIT;
+	} else {
 		p->state = CXL_CONFIG_RESET_PENDING;
 		up_write(&cxl_region_rwsem);
 		device_release_driver(&cxlr->dev);
@@ -268,17 +310,19 @@ static ssize_t commit_store(struct device *dev, struct device_attribute *attr,
 		 * The lock was dropped, so need to revalidate that the reset is
 		 * still pending.
 		 */
-		if (p->state == CXL_CONFIG_RESET_PENDING)
+		if (p->state == CXL_CONFIG_RESET_PENDING) {
 			rc = cxl_region_decode_reset(cxlr, p->interleave_ways);
+			/*
+			 * Revert to committed since there may still be active
+			 * decoders associated with this region, or move forward
+			 * to active to mark the reset successful
+			 */
+			if (rc)
+				p->state = CXL_CONFIG_COMMIT;
+			else
+				p->state = CXL_CONFIG_ACTIVE;
+		}
 	}
-
-	if (rc)
-		goto out;
-
-	if (commit)
-		p->state = CXL_CONFIG_COMMIT;
-	else if (p->state == CXL_CONFIG_RESET_PENDING)
-		p->state = CXL_CONFIG_ACTIVE;
 
 out:
 	up_write(&cxl_region_rwsem);
@@ -1674,7 +1718,6 @@ static int cxl_region_attach(struct cxl_region *cxlr,
 		if (rc)
 			goto err_decrement;
 		p->state = CXL_CONFIG_ACTIVE;
-		set_bit(CXL_REGION_F_INCOHERENT, &cxlr->flags);
 	}
 
 	cxled->cxld.interleave_ways = p->interleave_ways;
@@ -2238,6 +2281,130 @@ struct cxl_pmem_region *to_cxl_pmem_region(struct device *dev)
 }
 EXPORT_SYMBOL_NS_GPL(to_cxl_pmem_region, CXL);
 
+struct cxl_poison_context {
+	struct cxl_port *port;
+	enum cxl_decoder_mode mode;
+	u64 offset;
+};
+
+static int cxl_get_poison_unmapped(struct cxl_memdev *cxlmd,
+				   struct cxl_poison_context *ctx)
+{
+	struct cxl_dev_state *cxlds = cxlmd->cxlds;
+	u64 offset, length;
+	int rc = 0;
+
+	/*
+	 * Collect poison for the remaining unmapped resources
+	 * after poison is collected by committed endpoints.
+	 *
+	 * Knowing that PMEM must always follow RAM, get poison
+	 * for unmapped resources based on the last decoder's mode:
+	 *	ram: scan remains of ram range, then any pmem range
+	 *	pmem: scan remains of pmem range
+	 */
+
+	if (ctx->mode == CXL_DECODER_RAM) {
+		offset = ctx->offset;
+		length = resource_size(&cxlds->ram_res) - offset;
+		rc = cxl_mem_get_poison(cxlmd, offset, length, NULL);
+		if (rc == -EFAULT)
+			rc = 0;
+		if (rc)
+			return rc;
+	}
+	if (ctx->mode == CXL_DECODER_PMEM) {
+		offset = ctx->offset;
+		length = resource_size(&cxlds->dpa_res) - offset;
+		if (!length)
+			return 0;
+	} else if (resource_size(&cxlds->pmem_res)) {
+		offset = cxlds->pmem_res.start;
+		length = resource_size(&cxlds->pmem_res);
+	} else {
+		return 0;
+	}
+
+	return cxl_mem_get_poison(cxlmd, offset, length, NULL);
+}
+
+static int poison_by_decoder(struct device *dev, void *arg)
+{
+	struct cxl_poison_context *ctx = arg;
+	struct cxl_endpoint_decoder *cxled;
+	struct cxl_memdev *cxlmd;
+	u64 offset, length;
+	int rc = 0;
+
+	if (!is_endpoint_decoder(dev))
+		return rc;
+
+	cxled = to_cxl_endpoint_decoder(dev);
+	if (!cxled->dpa_res || !resource_size(cxled->dpa_res))
+		return rc;
+
+	/*
+	 * Regions are only created with single mode decoders: pmem or ram.
+	 * Linux does not support mixed mode decoders. This means that
+	 * reading poison per endpoint decoder adheres to the requirement
+	 * that poison reads of pmem and ram must be separated.
+	 * CXL 3.0 Spec 8.2.9.8.4.1
+	 */
+	if (cxled->mode == CXL_DECODER_MIXED) {
+		dev_dbg(dev, "poison list read unsupported in mixed mode\n");
+		return rc;
+	}
+
+	cxlmd = cxled_to_memdev(cxled);
+	if (cxled->skip) {
+		offset = cxled->dpa_res->start - cxled->skip;
+		length = cxled->skip;
+		rc = cxl_mem_get_poison(cxlmd, offset, length, NULL);
+		if (rc == -EFAULT && cxled->mode == CXL_DECODER_RAM)
+			rc = 0;
+		if (rc)
+			return rc;
+	}
+
+	offset = cxled->dpa_res->start;
+	length = cxled->dpa_res->end - offset + 1;
+	rc = cxl_mem_get_poison(cxlmd, offset, length, cxled->cxld.region);
+	if (rc == -EFAULT && cxled->mode == CXL_DECODER_RAM)
+		rc = 0;
+	if (rc)
+		return rc;
+
+	/* Iterate until commit_end is reached */
+	if (cxled->cxld.id == ctx->port->commit_end) {
+		ctx->offset = cxled->dpa_res->end + 1;
+		ctx->mode = cxled->mode;
+		return 1;
+	}
+
+	return 0;
+}
+
+int cxl_get_poison_by_endpoint(struct cxl_port *port)
+{
+	struct cxl_poison_context ctx;
+	int rc = 0;
+
+	rc = down_read_interruptible(&cxl_region_rwsem);
+	if (rc)
+		return rc;
+
+	ctx = (struct cxl_poison_context) {
+		.port = port
+	};
+
+	rc = device_for_each_child(&port->dev, &ctx, poison_by_decoder);
+	if (rc == 1)
+		rc = cxl_get_poison_unmapped(to_cxl_memdev(port->uport), &ctx);
+
+	up_read(&cxl_region_rwsem);
+	return rc;
+}
+
 static struct lock_class_key cxl_pmem_region_key;
 
 static struct cxl_pmem_region *cxl_pmem_region_alloc(struct cxl_region *cxlr)
@@ -2679,30 +2846,6 @@ out:
 }
 EXPORT_SYMBOL_NS_GPL(cxl_add_to_region, CXL);
 
-static int cxl_region_invalidate_memregion(struct cxl_region *cxlr)
-{
-	if (!test_bit(CXL_REGION_F_INCOHERENT, &cxlr->flags))
-		return 0;
-
-	if (!cpu_cache_has_invalidate_memregion()) {
-		if (IS_ENABLED(CONFIG_CXL_REGION_INVALIDATION_TEST)) {
-			dev_warn_once(
-				&cxlr->dev,
-				"Bypassing cpu_cache_invalidate_memregion() for testing!\n");
-			clear_bit(CXL_REGION_F_INCOHERENT, &cxlr->flags);
-			return 0;
-		} else {
-			dev_err(&cxlr->dev,
-				"Failed to synchronize CPU cache state\n");
-			return -ENXIO;
-		}
-	}
-
-	cpu_cache_invalidate_memregion(IORES_DESC_CXL);
-	clear_bit(CXL_REGION_F_INCOHERENT, &cxlr->flags);
-	return 0;
-}
-
 static int is_system_ram(struct resource *res, void *arg)
 {
 	struct cxl_region *cxlr = arg;
@@ -2730,7 +2873,12 @@ static int cxl_region_probe(struct device *dev)
 		goto out;
 	}
 
-	rc = cxl_region_invalidate_memregion(cxlr);
+	if (test_bit(CXL_REGION_F_NEEDS_RESET, &cxlr->flags)) {
+		dev_err(&cxlr->dev,
+			"failed to activate, re-commit region and retry\n");
+		rc = -ENXIO;
+		goto out;
+	}
 
 	/*
 	 * From this point on any path that changes the region's state away from
