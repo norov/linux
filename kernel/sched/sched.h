@@ -3345,28 +3345,6 @@ static inline void mm_cid_put(struct mm_struct *mm)
 	__mm_cid_put(mm, mm_cid_clear_lazy_put(cid));
 }
 
-static inline int __mm_cid_try_get(struct mm_struct *mm)
-{
-	struct cpumask *cpumask;
-	int cid;
-
-	cpumask = mm_cidmask(mm);
-	/*
-	 * Retry finding first zero bit if the mask is temporarily
-	 * filled. This only happens during concurrent remote-clear
-	 * which owns a cid without holding a rq lock.
-	 */
-	for (;;) {
-		cid = cpumask_first_zero(cpumask);
-		if (cid < nr_cpu_ids)
-			break;
-		cpu_relax();
-	}
-	if (cpumask_test_and_set_cpu(cid, cpumask))
-		return -1;
-	return cid;
-}
-
 /*
  * Save a snapshot of the current runqueue time of this cpu
  * with the per-cpu cid value, allowing to estimate how recently it was used.
@@ -3381,24 +3359,24 @@ static inline void mm_cid_snapshot_time(struct rq *rq, struct mm_struct *mm)
 
 static inline int __mm_cid_get(struct rq *rq, struct mm_struct *mm)
 {
+	struct cpumask *cpumask = mm_cidmask(mm);
 	int cid;
 
-	/*
-	 * All allocations (even those using the cid_lock) are lock-free. If
-	 * use_cid_lock is set, hold the cid_lock to perform cid allocation to
-	 * guarantee forward progress.
-	 */
+	/* All allocations (even those using the cid_lock) are lock-free. */
 	if (!READ_ONCE(use_cid_lock)) {
-		cid = __mm_cid_try_get(mm);
-		if (cid >= 0)
+		cid = cpumask_find_and_set(cpumask);
+		if (cid < nr_cpu_ids)
 			goto end;
-		raw_spin_lock(&cid_lock);
-	} else {
-		raw_spin_lock(&cid_lock);
-		cid = __mm_cid_try_get(mm);
-		if (cid >= 0)
-			goto unlock;
 	}
+
+	/*
+	 * If use_cid_lock is set, hold the cid_lock to perform cid
+	 * allocation to guarantee forward progress.
+	 */
+	raw_spin_lock(&cid_lock);
+	cid = cpumask_find_and_set(cpumask);
+	if (cid < nr_cpu_ids)
+		goto unlock;
 
 	/*
 	 * cid concurrently allocated. Retry while forcing following
@@ -3415,9 +3393,9 @@ static inline int __mm_cid_get(struct rq *rq, struct mm_struct *mm)
 	 * all newcoming allocations observe the use_cid_lock flag set.
 	 */
 	do {
-		cid = __mm_cid_try_get(mm);
+		cid = cpumask_find_and_set(cpumask);
 		cpu_relax();
-	} while (cid < 0);
+	} while (cid >= nr_cpu_ids);
 	/*
 	 * Allocate before clearing use_cid_lock. Only care about
 	 * program order because this is for forward progress.
