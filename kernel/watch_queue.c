@@ -9,6 +9,7 @@
 
 #define pr_fmt(fmt) "watchq: " fmt
 #include <linux/module.h>
+#include <linux/find-atomic.h>
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -112,7 +113,7 @@ static bool post_one_notification(struct watch_queue *wqueue,
 	if (pipe_full(head, tail, pipe->ring_size))
 		goto lost;
 
-	note = find_first_bit(wqueue->notes_bitmap, wqueue->nr_notes);
+	note = find_and_clear_bit(wqueue->notes_bitmap, wqueue->nr_notes);
 	if (note >= wqueue->nr_notes)
 		goto lost;
 
@@ -133,10 +134,6 @@ static bool post_one_notification(struct watch_queue *wqueue,
 	buf->flags = PIPE_BUF_FLAG_WHOLE;
 	smp_store_release(&pipe->head, head + 1); /* vs pipe_read() */
 
-	if (!test_and_clear_bit(note, wqueue->notes_bitmap)) {
-		spin_unlock_irq(&pipe->rd_wait.lock);
-		BUG();
-	}
 	wake_up_interruptible_sync_poll_locked(&pipe->rd_wait, EPOLLIN | EPOLLRDNORM);
 	done = true;
 
