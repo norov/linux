@@ -5,6 +5,7 @@
  */
 #include <linux/module.h>
 
+#include <linux/find-atomic.h>
 #include <linux/moduleparam.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
@@ -766,6 +767,71 @@ static void null_free_dev(struct nullb_device *dev)
 	null_free_zoned_dev(dev);
 	badblocks_exit(&dev->badblocks);
 	kfree(dev);
+}
+
+static void free_cmd(struct nullb_cmd *cmd)
+{
+	put_tag(cmd->nq, cmd->tag);
+}
+
+static enum hrtimer_restart null_cmd_timer_expired(struct hrtimer *timer);
+
+static struct nullb_cmd *__alloc_cmd(struct nullb_queue *nq)
+{
+	unsigned int tag = find_and_set_bit_lock(nq->tag_map, nq->queue_depth);
+	struct nullb_cmd *cmd;
+
+	if (tag >= nq->queue_depth)
+		return NULL;
+
+	cmd = &nq->cmds[tag];
+	cmd->tag = tag;
+	cmd->error = BLK_STS_OK;
+	cmd->nq = nq;
+	if (nq->dev->irqmode == NULL_IRQ_TIMER) {
+		hrtimer_init(&cmd->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		cmd->timer.function = null_cmd_timer_expired;
+	}
+
+	return cmd;
+}
+
+static struct nullb_cmd *alloc_cmd(struct nullb_queue *nq, struct bio *bio)
+{
+	struct nullb_cmd *cmd;
+	DEFINE_WAIT(wait);
+
+	do {
+		/*
+		 * This avoids multiple return statements, multiple calls to
+		 * __alloc_cmd() and a fast path call to prepare_to_wait().
+		 */
+		cmd = __alloc_cmd(nq);
+		if (cmd) {
+			cmd->bio = bio;
+			return cmd;
+		}
+		prepare_to_wait(&nq->wait, &wait, TASK_UNINTERRUPTIBLE);
+		io_schedule();
+		finish_wait(&nq->wait, &wait);
+	} while (1);
+}
+
+static void end_cmd(struct nullb_cmd *cmd)
+{
+	int queue_mode = cmd->nq->dev->queue_mode;
+
+	switch (queue_mode)  {
+	case NULL_Q_MQ:
+		blk_mq_end_request(cmd->rq, cmd->error);
+		return;
+	case NULL_Q_BIO:
+		cmd->bio->bi_status = cmd->error;
+		bio_endio(cmd->bio);
+		break;
+	}
+
+	free_cmd(cmd);
 }
 
 static enum hrtimer_restart null_cmd_timer_expired(struct hrtimer *timer)
