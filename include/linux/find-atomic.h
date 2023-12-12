@@ -3,6 +3,7 @@
 #define __LINUX_FIND_ATOMIC_H_
 
 #include <linux/bitops.h>
+#include <linux/cpumask.h>
 
 unsigned long _find_and_set_bit(volatile unsigned long *addr, unsigned long nbits);
 unsigned long _find_and_set_next_bit(volatile unsigned long *addr, unsigned long nbits,
@@ -273,6 +274,18 @@ unsigned long find_and_clear_next_bit(volatile unsigned long *addr,
 	}
 
 	return _find_and_clear_next_bit(addr, nbits, offset);
+}
+
+/*
+ * cpumask_find_and_set - find the first unset cpu in a cpumask and
+ *			  set it atomically
+ * @srcp: the cpumask pointer
+ *
+ * Return: >= nr_cpu_ids if nothing is found.
+ */
+static inline unsigned int cpumask_find_and_set(volatile struct cpumask *srcp)
+{
+	return find_and_set_bit(cpumask_bits(srcp), small_cpumask_bits);
 }
 
 /**
