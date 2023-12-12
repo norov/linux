@@ -7,6 +7,7 @@
 
 #include <linux/init.h>
 #include <linux/delay.h>
+#include <linux/find-atomic.h>
 #include <linux/slab.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
@@ -3276,10 +3277,9 @@ static int get_empty_pcm_device(struct hda_bus *bus, unsigned int type)
 
 #ifdef CONFIG_SND_DYNAMIC_MINORS
 	/* non-fixed slots starting from 10 */
-	for (i = 10; i < 32; i++) {
-		if (!test_and_set_bit(i, bus->pcm_dev_bits))
-			return i;
-	}
+	i = find_and_set_next_bit(bus->pcm_dev_bits, 32, 10);
+	if (i < 32)
+		return i;
 #endif
 
 	dev_warn(bus->card->dev, "Too many %s devices\n",
