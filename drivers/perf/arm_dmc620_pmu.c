@@ -16,6 +16,7 @@
 #include <linux/cpumask.h>
 #include <linux/device.h>
 #include <linux/errno.h>
+#include <linux/find-atomic.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/kernel.h>
@@ -303,13 +304,8 @@ static int dmc620_get_event_idx(struct perf_event *event)
 		end_idx = DMC620_PMU_MAX_COUNTERS;
 	}
 
-	for (idx = start_idx; idx < end_idx; ++idx) {
-		if (!test_and_set_bit(idx, dmc620_pmu->used_mask))
-			return idx;
-	}
-
-	/* The counters are all in use. */
-	return -EAGAIN;
+	idx = find_and_set_next_bit(dmc620_pmu->used_mask, end_idx, start_idx);
+	return idx < end_idx ? idx : -EAGAIN;
 }
 
 static inline
