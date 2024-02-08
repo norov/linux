@@ -28,6 +28,9 @@
 	(GENMASK_INPUT_CHECK(h, l) + \
 	 (((t)~0ULL - ((t)(1) << (l)) + 1) & \
 	 ((t)~0ULL >> (BITS_PER_TYPE(t) - 1 - (h)))))
+#define BIT_INPUT_CHECK(type, b) \
+	((BUILD_BUG_ON_ZERO(__builtin_choose_expr( \
+		__is_constexpr(b), (b) >= BITS_PER_TYPE(type), 0))))
 #else
 /*
  * BUILD_BUG_ON_ZERO is not available in h files included from asm files.
@@ -38,6 +41,7 @@
 #define GENMASK_INPUT_CHECK(h, l) 0
 #define __GENMASK(t, h, l) \
 	((~0 - (1 << (l)) + 1) & (~0 >> (BITS_PER_LONG - 1 - (h))))
+#define BIT_INPUT_CHECK(type, b) 0
 #endif
 
 /*
@@ -56,5 +60,18 @@
 #define GENMASK_U16(h, l)	__GENMASK(u16, h, l)
 #define GENMASK_U32(h, l)	__GENMASK(u32, h, l)
 #define GENMASK_U64(h, l)	__GENMASK(u64, h, l)
+
+/*
+ * Fixed-type variants of BIT(), with additional checks like __GENMASK().  The
+ * following examples generate compiler warnings due to shift-count-overflow:
+ *
+ * - BIT_U8(8)
+ * - BIT_U32(-1)
+ * - BIT_U32(40)
+ */
+#define BIT_U8(b)		((u8)(BIT_INPUT_CHECK(u8, b) + BIT(b)))
+#define BIT_U16(b)		((u16)(BIT_INPUT_CHECK(u16, b) + BIT(b)))
+#define BIT_U32(b)		((u32)(BIT_INPUT_CHECK(u32, b) + BIT(b)))
+#define BIT_U64(b)		((u64)(BIT_INPUT_CHECK(u64, b) + BIT(b)))
 
 #endif	/* __LINUX_BITS_H */
