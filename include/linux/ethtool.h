@@ -13,7 +13,7 @@
 #ifndef _LINUX_ETHTOOL_H
 #define _LINUX_ETHTOOL_H
 
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/compat.h>
 #include <linux/if_ether.h>
 #include <linux/netlink.h>

@@ -4,7 +4,7 @@
 
 #ifdef __KERNEL__
 
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/if.h>
 #include <linux/ip.h>
 #include <linux/netdevice.h>

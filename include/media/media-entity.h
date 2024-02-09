@@ -11,7 +11,7 @@
 #ifndef _MEDIA_ENTITY_H
 #define _MEDIA_ENTITY_H
 
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/bug.h>
 #include <linux/container_of.h>
 #include <linux/fwnode.h>

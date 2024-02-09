@@ -23,7 +23,7 @@
 #include <linux/skbuff.h>
 #include <linux/rcupdate.h>
 #include <linux/seq_file.h>
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 
 #include <linux/err.h>
 #include <linux/sysctl.h>

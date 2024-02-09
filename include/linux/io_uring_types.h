@@ -3,7 +3,7 @@
 
 #include <linux/blkdev.h>
 #include <linux/task_work.h>
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/llist.h>
 #include <uapi/linux/io_uring.h>
 

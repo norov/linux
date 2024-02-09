@@ -4,6 +4,7 @@
  */
 
 #include <linux/circ_buf.h>
+#include <linux/bitmap.h>
 
 #include "gem/i915_gem_context.h"
 #include "gem/i915_gem_lmem.h"

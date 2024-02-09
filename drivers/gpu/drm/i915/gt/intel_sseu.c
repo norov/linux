@@ -4,6 +4,7 @@
  */
 
 #include <linux/string_helpers.h>
+#include <linux/bitmap.h>
 
 #include "i915_drv.h"
 #include "i915_perf_types.h"

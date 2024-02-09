@@ -14,7 +14,7 @@
 
 #include <linux/types.h>
 #include <linux/videodev2.h>
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/fb.h>
 #include <linux/of.h>
 #include <drm/drm_color_mgmt.h>

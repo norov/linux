@@ -1,7 +1,7 @@
 #ifndef __LINKMODE_H
 #define __LINKMODE_H
 
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/ethtool.h>
 #include <uapi/linux/ethtool.h>
 

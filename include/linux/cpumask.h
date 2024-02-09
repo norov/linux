@@ -7,9 +7,11 @@
  * set of CPUs in a system, one bit position per CPU number.  In general,
  * only nr_cpu_ids (<= NR_CPUS) bits are valid.
  */
+#include <linux/find.h>
 #include <linux/kernel.h>
 #include <linux/threads.h>
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
+#include <linux/bitmap-str.h>
 #include <linux/atomic.h>
 #include <linux/bug.h>
 #include <linux/gfp_types.h>

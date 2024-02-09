@@ -3,7 +3,7 @@
 #define LINUX_IOMAP_H 1
 
 #include <linux/atomic.h>
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/blk_types.h>
 #include <linux/mm.h>
 #include <linux/types.h>

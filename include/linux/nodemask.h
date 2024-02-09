@@ -90,8 +90,10 @@
  * for such situations. See below and CPUMASK_ALLOC also.
  */
 
+#include <linux/find.h>
 #include <linux/threads.h>
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
+#include <linux/bitmap-str.h>
 #include <linux/minmax.h>
 #include <linux/nodemask_types.h>
 #include <linux/numa.h>

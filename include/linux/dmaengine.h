@@ -10,7 +10,7 @@
 #include <linux/uio.h>
 #include <linux/bug.h>
 #include <linux/scatterlist.h>
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/types.h>
 #include <asm/page.h>
 

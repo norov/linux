@@ -22,7 +22,7 @@
 #include <linux/sched/topology.h>
 
 #include <linux/atomic.h>
-#include <linux/bitmap.h>
+#include <linux/bitmap-core.h>
 #include <linux/bug.h>
 #include <linux/capability.h>
 #include <linux/cgroup_api.h>
