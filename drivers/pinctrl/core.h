@@ -8,6 +8,7 @@
  * Author: Linus Walleij <linus.walleij@linaro.org>
  */
 
+#include <linux/bitmap.h>
 #include <linux/kref.h>
 #include <linux/list.h>
 #include <linux/mutex.h>

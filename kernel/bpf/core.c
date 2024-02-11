@@ -18,6 +18,7 @@
  */
 
 #include <uapi/linux/btf.h>
+#include <linux/bitmap.h>
 #include <linux/filter.h>
 #include <linux/skbuff.h>
 #include <linux/vmalloc.h>

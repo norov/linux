@@ -38,6 +38,7 @@
  * in the corresponding device tree properties.
  */
 
+#include <linux/bitmap.h>
 #include <linux/err.h>
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/driver.h>

@@ -2,6 +2,7 @@
 /* Copyright (C) 2018-2019, Intel Corporation. */
 
 #include <asm/unaligned.h>
+#include <linux/bitmap.h>
 #include <linux/crc32.h>
 #include <linux/device.h>
 #include <linux/firmware.h>

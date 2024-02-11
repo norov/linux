@@ -9,6 +9,7 @@
 #ifndef GPIOLIB_H
 #define GPIOLIB_H
 
+#include <linux/bitmap.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/err.h>
