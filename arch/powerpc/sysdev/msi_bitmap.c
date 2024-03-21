@@ -57,7 +57,7 @@ void msi_bitmap_reserve_hwirq(struct msi_bitmap *bmp, unsigned int hwirq)
 	pr_debug("msi_bitmap: reserving hwirq 0x%x\n", hwirq);
 
 	spin_lock_irqsave(&bmp->lock, flags);
-	bitmap_allocate_region(bmp->bitmap, hwirq, 0);
+	WARN_ON(test_and_set_bit(hwirq, bmp->bitmap));
 	spin_unlock_irqrestore(&bmp->lock, flags);
 }
 
@@ -74,7 +74,7 @@ void msi_bitmap_reserve_hwirq(struct msi_bitmap *bmp, unsigned int hwirq)
  **/
 int msi_bitmap_reserve_dt_hwirqs(struct msi_bitmap *bmp)
 {
-	int i, j, len;
+	int i = 0, len;
 	const u32 *p;
 
 	if (!bmp->of_node)
@@ -99,10 +99,8 @@ int msi_bitmap_reserve_dt_hwirqs(struct msi_bitmap *bmp)
 
 	/* Format is: (<u32 start> <u32 count>)+ */
 	len /= 2 * sizeof(u32);
-	for (i = 0; i < len; i++, p += 2) {
-		for (j = 0; j < *(p + 1); j++)
-			bitmap_release_region(bmp->bitmap, *p + j, 0);
-	}
+	while (i++ < len)
+		bitmap_clear(bmp->bitmap, p[2*i], p[2*i + 1]);
 
 	spin_unlock(&bmp->lock);
 
@@ -184,7 +182,7 @@ static void __init test_basics(void)
 	WARN_ON(msi_bitmap_alloc_hwirqs(&bmp, 1) >= 0);
 
 	/* Should all be allocated */
-	WARN_ON(bitmap_find_free_region(bmp.bitmap, size, 0) >= 0);
+	WARN_ON(!bitmap_full(bmp.bitmap, size));
 
 	/* And if we free one we can then allocate another */
 	msi_bitmap_free_hwirqs(&bmp, size / 2, 1);
