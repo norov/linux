@@ -897,8 +897,8 @@ static int bcm4377_enqueue(struct bcm4377_data *bcm4377,
 		goto out;
 	}
 
-	msgid = bitmap_find_free_region(ring->msgids, ring->n_entries, 0);
-	if (msgid < 0) {
+	msgid = __find_and_set_bit(ring->msgids, ring->n_entries);
+	if (msgid >= ring->n_entries) {
 		dev_warn(&bcm4377->pdev->dev,
 			 "can't find message id for ring %d\n", ring->ring_id);
 		ret = -EINVAL;
