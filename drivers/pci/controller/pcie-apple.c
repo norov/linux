@@ -18,6 +18,7 @@
  * Author: Marc Zyngier <maz@kernel.org>
  */
 
+#include <linux/find-atomic.h>
 #include <linux/gpio/consumer.h>
 #include <linux/kernel.h>
 #include <linux/iopoll.h>
@@ -683,19 +684,21 @@ static int apple_pcie_add_device(struct apple_pcie_port *port,
 
 	mutex_lock(&port->pcie->lock);
 
-	idx = bitmap_find_free_region(port->sid_map, port->sid_map_sz, 0);
-	if (idx >= 0) {
-		apple_pcie_rid2sid_write(port, idx,
-					 PORT_RID2SID_VALID |
-					 (sid << PORT_RID2SID_SID_SHIFT) | rid);
-
-		dev_dbg(&pdev->dev, "mapping RID%x to SID%x (index %d)\n",
-			rid, sid, idx);
+	idx = __find_and_set_bit(port->sid_map, port->sid_map_sz);
+	if (idx >= port->sid_map_sz) {
+		mutex_unlock(&port->pcie->lock);
+		return -ENOSPC;
 	}
+
+	apple_pcie_rid2sid_write(port, idx,
+				 PORT_RID2SID_VALID |
+				 (sid << PORT_RID2SID_SID_SHIFT) | rid);
+
+	dev_dbg(&pdev->dev, "mapping RID%x to SID%x (index %d)\n", rid, sid, idx);
 
 	mutex_unlock(&port->pcie->lock);
 
-	return idx >= 0 ? 0 : -ENOSPC;
+	return 0;
 }
 
 static void apple_pcie_release_device(struct apple_pcie_port *port,
@@ -712,7 +715,7 @@ static void apple_pcie_release_device(struct apple_pcie_port *port,
 		val = readl_relaxed(port->base + PORT_RID2SID(idx));
 		if ((val & 0xffff) == rid) {
 			apple_pcie_rid2sid_write(port, idx, 0);
-			bitmap_release_region(port->sid_map, idx, 0);
+			__clear_bit(idx, port->sid_map);
 			dev_dbg(&pdev->dev, "Released %x (%d)\n", val, idx);
 			break;
 		}
