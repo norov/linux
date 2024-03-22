@@ -659,9 +659,9 @@ static int carl9170_op_add_interface(struct ieee80211_hw *hw,
 		}
 	}
 
-	vif_id = bitmap_find_free_region(&ar->vif_bitmap, ar->fw.vif_num, 0);
+	vif_id = __find_and_set_bit(&ar->vif_bitmap, ar->fw.vif_num);
 
-	if (vif_id < 0) {
+	if (vif_id >= ar->fw.vif_num) {
 		rcu_read_unlock();
 
 		err = -ENOSPC;
@@ -728,9 +728,9 @@ init:
 	}
 
 unlock:
-	if (err && (vif_id >= 0)) {
+	if (err && vif_id < ar->fw.vif_num) {
 		vif_priv->active = false;
-		bitmap_release_region(&ar->vif_bitmap, vif_id, 0);
+		__clear_bit(vif_id, &ar->vif_bitmap);
 		ar->vifs--;
 		RCU_INIT_POINTER(ar->vif_priv[vif_id].vif, NULL);
 		list_del_rcu(&vif_priv->list);
@@ -795,7 +795,7 @@ static void carl9170_op_remove_interface(struct ieee80211_hw *hw,
 	vif_priv->beacon = NULL;
 	spin_unlock_bh(&ar->beacon_lock);
 
-	bitmap_release_region(&ar->vif_bitmap, id, 0);
+	__clear_bit(id, &ar->vif_bitmap);
 
 	carl9170_set_beacon_timers(ar);
 
