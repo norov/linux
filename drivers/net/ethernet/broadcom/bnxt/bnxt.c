@@ -51,6 +51,7 @@
 #include <linux/bitmap.h>
 #include <linux/cpu_rmap.h>
 #include <linux/cpumask.h>
+#include <linux/find-atomic.h>
 #include <net/pkt_cls.h>
 #include <net/page_pool/helpers.h>
 #include <linux/align.h>
@@ -5563,17 +5564,16 @@ static int bnxt_init_l2_filter(struct bnxt *bp, struct bnxt_l2_filter *fltr,
 			       struct bnxt_l2_key *key, u32 idx)
 {
 	struct hlist_head *head;
+	int bit_id;
 
 	ether_addr_copy(fltr->l2_key.dst_mac_addr, key->dst_mac_addr);
 	fltr->l2_key.vlan = key->vlan;
 	fltr->base.type = BNXT_FLTR_TYPE_L2;
 	if (fltr->base.flags) {
-		int bit_id;
-
-		bit_id = bitmap_find_free_region(bp->ntp_fltr_bmap,
-						 bp->max_fltr, 0);
-		if (bit_id < 0)
+		bit_id = find_and_set_bit(bp->ntp_fltr_bmap, bp->max_fltr);
+		if (bit_id >= bp->max_fltr)
 			return -ENOMEM;
+
 		fltr->base.sw_id = (u16)bit_id;
 		bp->ntp_fltr_count++;
 	}
@@ -14159,13 +14159,11 @@ int bnxt_insert_ntp_filter(struct bnxt *bp, struct bnxt_ntuple_filter *fltr,
 	struct hlist_head *head;
 	int bit_id;
 
-	spin_lock_bh(&bp->ntp_fltr_lock);
-	bit_id = bitmap_find_free_region(bp->ntp_fltr_bmap, bp->max_fltr, 0);
-	if (bit_id < 0) {
-		spin_unlock_bh(&bp->ntp_fltr_lock);
+	bit_id = find_and_set_bit(bp->ntp_fltr_bmap, bp->max_fltr);
+	if (bit_id >= bp->max_fltr)
 		return -ENOMEM;
-	}
 
+	spin_lock_bh(&bp->ntp_fltr_lock);
 	fltr->base.sw_id = (u16)bit_id;
 	fltr->base.type = BNXT_FLTR_TYPE_NTUPLE;
 	fltr->base.flags |= BNXT_ACT_RING_DST;
