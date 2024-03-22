@@ -23,6 +23,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
 #include <linux/err.h>
+#include <linux/find-atomic.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/mailbox_controller.h>
@@ -989,21 +990,17 @@ static int flexrm_new_request(struct flexrm_ring *ring,
 	msg->error = 0;
 
 	/* If no requests possible then save data pointer and goto done. */
-	spin_lock_irqsave(&ring->lock, flags);
-	reqid = bitmap_find_free_region(ring->requests_bmap,
-					RING_MAX_REQ_COUNT, 0);
-	spin_unlock_irqrestore(&ring->lock, flags);
-	if (reqid < 0)
+	reqid = find_and_set_bit(ring->requests_bmap, RING_MAX_REQ_COUNT);
+	if (reqid >= RING_MAX_REQ_COUNT)
 		return -ENOSPC;
+
 	ring->requests[reqid] = msg;
 
 	/* Do DMA mappings for the message */
 	ret = flexrm_dma_map(ring->mbox->dev, msg);
 	if (ret < 0) {
 		ring->requests[reqid] = NULL;
-		spin_lock_irqsave(&ring->lock, flags);
-		bitmap_release_region(ring->requests_bmap, reqid, 0);
-		spin_unlock_irqrestore(&ring->lock, flags);
+		clear_bit(reqid, ring->requests_bmap);
 		return ret;
 	}
 
@@ -1063,9 +1060,7 @@ exit:
 	if (exit_cleanup) {
 		flexrm_dma_unmap(ring->mbox->dev, msg);
 		ring->requests[reqid] = NULL;
-		spin_lock_irqsave(&ring->lock, flags);
-		bitmap_release_region(ring->requests_bmap, reqid, 0);
-		spin_unlock_irqrestore(&ring->lock, flags);
+		clear_bit(reqid, ring->requests_bmap);
 	}
 
 	return ret;
@@ -1130,9 +1125,7 @@ static int flexrm_process_completions(struct flexrm_ring *ring)
 
 		/* Release reqid for recycling */
 		ring->requests[reqid] = NULL;
-		spin_lock_irqsave(&ring->lock, flags);
-		bitmap_release_region(ring->requests_bmap, reqid, 0);
-		spin_unlock_irqrestore(&ring->lock, flags);
+		clear_bit(reqid, ring->requests_bmap);
 
 		/* Unmap DMA mappings */
 		flexrm_dma_unmap(ring->mbox->dev, msg);
