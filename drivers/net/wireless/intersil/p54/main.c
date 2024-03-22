@@ -551,10 +551,9 @@ static int p54_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 			ret = -EOPNOTSUPP;
 			goto out_unlock;
 		}
-		slot = bitmap_find_free_region(priv->used_rxkeys,
-					       priv->rx_keycache_size, 0);
+		slot = __find_and_set_bit(priv->used_rxkeys, priv->rx_keycache_size);
 
-		if (slot < 0) {
+		if (slot >= priv->rx_keycache_size) {
 			/*
 			 * The device supports the chosen algorithm, but the
 			 * firmware does not provide enough key slots to store
@@ -579,7 +578,7 @@ static int p54_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 			goto out_unlock;
 		}
 
-		bitmap_release_region(priv->used_rxkeys, slot, 0);
+		__clear_bit(slon, priv->used_rxkeys);
 		algo = 0;
 	}
 
@@ -589,7 +588,7 @@ static int p54_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 	ret = p54_upload_key(priv, algo, slot, key->keyidx,
 			     key->keylen, addr, key->key);
 	if (ret) {
-		bitmap_release_region(priv->used_rxkeys, slot, 0);
+		__clear_bit(slon, priv->used_rxkeys);
 		ret = -EOPNOTSUPP;
 		goto out_unlock;
 	}
