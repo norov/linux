@@ -37,6 +37,7 @@
  *    OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/find-atomic.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/etherdevice.h>
@@ -201,11 +202,8 @@ static int carl9170_alloc_dev_space(struct ar9170 *ar, struct sk_buff *skb)
 		return -ENOSPC;
 	}
 
-	spin_lock_bh(&ar->mem_lock);
-	cookie = bitmap_find_free_region(ar->mem_bitmap, ar->fw.mem_blocks, 0);
-	spin_unlock_bh(&ar->mem_lock);
-
-	if (unlikely(cookie < 0)) {
+	cookie = find_and_set_bit(ar->mem_bitmap, ar->fw.mem_blocks);
+	if (unlikely(cookie >= ar->fw.mem_free_blocks)) {
 		atomic_add(chunks, &ar->mem_free_blocks);
 		return -ENOSPC;
 	}
@@ -253,9 +251,7 @@ static void carl9170_release_dev_space(struct ar9170 *ar, struct sk_buff *skb)
 	atomic_add(DIV_ROUND_UP(skb->len, ar->fw.mem_block_size),
 		   &ar->mem_free_blocks);
 
-	spin_lock_bh(&ar->mem_lock);
-	bitmap_release_region(ar->mem_bitmap, cookie - 1, 0);
-	spin_unlock_bh(&ar->mem_lock);
+	clear_bit(cookie - 1, ar->mem_bitmap);
 }
 
 /* Called from any context */
