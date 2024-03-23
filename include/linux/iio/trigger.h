@@ -51,7 +51,6 @@ struct iio_trigger_ops {
  * @subirq_base:	[INTERN] base number for irqs provided by trigger.
  * @subirqs:		[INTERN] information about the 'child' irqs.
  * @pool:		[INTERN] bitmap of irqs currently in use.
- * @pool_lock:		[INTERN] protection of the irq pool.
  * @attached_own_device:[INTERN] if we are using our own device as trigger,
  *			i.e. if we registered a poll function to the same
  *			device as the one providing the trigger.
@@ -73,7 +72,6 @@ struct iio_trigger {
 
 	struct iio_subirq subirqs[CONFIG_IIO_CONSUMERS_PER_TRIGGER];
 	unsigned long pool[BITS_TO_LONGS(CONFIG_IIO_CONSUMERS_PER_TRIGGER)];
-	struct mutex			pool_lock;
 	bool				attached_own_device;
 	struct work_struct		reenable_work;
 };
