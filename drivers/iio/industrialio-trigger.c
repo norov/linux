@@ -4,6 +4,7 @@
  * Copyright (c) 2008 Jonathan Cameron
  */
 
+#include <linux/find-atomic.h>
 #include <linux/kernel.h>
 #include <linux/idr.h>
 #include <linux/err.h>
@@ -257,24 +258,14 @@ EXPORT_SYMBOL(iio_trigger_notify_done);
 /* Trigger Consumer related functions */
 static int iio_trigger_get_irq(struct iio_trigger *trig)
 {
-	int ret;
+	int ret = find_and_set_bit(trig->pool, CONFIG_IIO_CONSUMERS_PER_TRIGGER);
 
-	mutex_lock(&trig->pool_lock);
-	ret = bitmap_find_free_region(trig->pool,
-				      CONFIG_IIO_CONSUMERS_PER_TRIGGER,
-				      ilog2(1));
-	mutex_unlock(&trig->pool_lock);
-	if (ret >= 0)
-		ret += trig->subirq_base;
+	return ret < CONFIG_IIO_CONSUMERS_PER_TRIGGER ? ret + trig->subirq_base : -ENOMEM;
 
-	return ret;
 }
-
 static void iio_trigger_put_irq(struct iio_trigger *trig, int irq)
 {
-	mutex_lock(&trig->pool_lock);
 	clear_bit(irq - trig->subirq_base, trig->pool);
-	mutex_unlock(&trig->pool_lock);
 }
 
 /* Complexity in here.  With certain triggers (datardy) an acknowledgement
@@ -290,18 +281,18 @@ int iio_trigger_attach_poll_func(struct iio_trigger *trig,
 	struct iio_dev_opaque *iio_dev_opaque = to_iio_dev_opaque(pf->indio_dev);
 	bool notinuse =
 		bitmap_empty(trig->pool, CONFIG_IIO_CONSUMERS_PER_TRIGGER);
-	int ret = 0;
-
-	/* Prevent the module from being removed whilst attached to a trigger */
-	__module_get(iio_dev_opaque->driver_module);
+	int ret;
 
 	/* Get irq number */
 	pf->irq = iio_trigger_get_irq(trig);
 	if (pf->irq < 0) {
 		pr_err("Could not find an available irq for trigger %s, CONFIG_IIO_CONSUMERS_PER_TRIGGER=%d limit might be exceeded\n",
 			trig->name, CONFIG_IIO_CONSUMERS_PER_TRIGGER);
-		goto out_put_module;
+		return 0;
 	}
+
+	/* Prevent the module from being removed whilst attached to a trigger */
+	__module_get(iio_dev_opaque->driver_module);
 
 	/* Request irq */
 	ret = request_threaded_irq(pf->irq, pf->h, pf->thread,
@@ -331,7 +322,6 @@ out_free_irq:
 	free_irq(pf->irq, pf);
 out_put_irq:
 	iio_trigger_put_irq(trig, pf->irq);
-out_put_module:
 	module_put(iio_dev_opaque->driver_module);
 	return ret;
 }
@@ -577,7 +567,6 @@ struct iio_trigger *viio_trigger_alloc(struct device *parent,
 	device_initialize(&trig->dev);
 	INIT_WORK(&trig->reenable_work, iio_reenable_work_fn);
 
-	mutex_init(&trig->pool_lock);
 	trig->subirq_base = irq_alloc_descs(-1, 0,
 					    CONFIG_IIO_CONSUMERS_PER_TRIGGER,
 					    0);
