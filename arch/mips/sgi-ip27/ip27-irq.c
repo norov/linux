@@ -13,6 +13,7 @@
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/bitops.h>
+#include <linux/find-atomic.h>
 #include <linux/sched.h>
 
 #include <asm/io.h>
@@ -36,17 +37,9 @@ static DEFINE_PER_CPU(unsigned long [2], irq_enable_mask);
 
 static inline int alloc_level(void)
 {
-	int level;
+	int level = find_and_set_bit(hub_irq_map, IP27_HUB_IRQ_COUNT);
 
-again:
-	level = find_first_zero_bit(hub_irq_map, IP27_HUB_IRQ_COUNT);
-	if (level >= IP27_HUB_IRQ_COUNT)
-		return -ENOSPC;
-
-	if (test_and_set_bit(level, hub_irq_map))
-		goto again;
-
-	return level;
+	return level < IP27_HUB_IRQ_COUNT ? level : -ENOSPC;
 }
 
 static void enable_hub_irq(struct irq_data *d)
