@@ -33,6 +33,7 @@
  *	check resource allocation in sr_init and some cleanups
  */
 
+#include <linux/find-atomic.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -104,8 +105,7 @@ static struct scsi_driver sr_template = {
 	.done			= sr_done,
 };
 
-static unsigned long sr_index_bits[SR_DISKS / BITS_PER_LONG];
-static DEFINE_SPINLOCK(sr_index_lock);
+static DECLARE_BITMAP(sr_index_bits, SR_DISKS);
 
 static struct lock_class_key sr_bio_compl_lkclass;
 
@@ -567,10 +567,7 @@ static void sr_free_disk(struct gendisk *disk)
 {
 	struct scsi_cd *cd = disk->private_data;
 
-	spin_lock(&sr_index_lock);
 	clear_bit(MINOR(disk_devt(disk)), sr_index_bits);
-	spin_unlock(&sr_index_lock);
-
 	unregister_cdrom(&cd->cdi);
 	mutex_destroy(&cd->lock);
 	kfree(cd);
@@ -629,15 +626,11 @@ static int sr_probe(struct device *dev)
 		goto fail_free;
 	mutex_init(&cd->lock);
 
-	spin_lock(&sr_index_lock);
-	minor = find_first_zero_bit(sr_index_bits, SR_DISKS);
+	minor = find_and_set_bit(sr_index_bits, SR_DISKS);
 	if (minor == SR_DISKS) {
-		spin_unlock(&sr_index_lock);
 		error = -EBUSY;
 		goto fail_put;
 	}
-	__set_bit(minor, sr_index_bits);
-	spin_unlock(&sr_index_lock);
 
 	disk->major = SCSI_CDROM_MAJOR;
 	disk->first_minor = minor;
@@ -701,9 +694,7 @@ static int sr_probe(struct device *dev)
 unregister_cdrom:
 	unregister_cdrom(&cd->cdi);
 fail_minor:
-	spin_lock(&sr_index_lock);
 	clear_bit(minor, sr_index_bits);
-	spin_unlock(&sr_index_lock);
 fail_put:
 	put_disk(disk);
 	mutex_destroy(&cd->lock);
