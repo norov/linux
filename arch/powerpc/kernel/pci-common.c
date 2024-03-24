@@ -12,6 +12,7 @@
  * Common pmac/prep/chrp pci routines. -- Cort
  */
 
+#include <linux/find-atomic.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/string.h>
@@ -70,7 +71,7 @@ void __init set_pci_dma_ops(const struct dma_map_ops *dma_ops)
 
 static int get_phb_number(struct device_node *dn)
 {
-	int ret, phb_id = -1;
+	int ret, phb_id = 0;
 	u64 prop;
 
 	/*
@@ -101,23 +102,17 @@ static int get_phb_number(struct device_node *dn)
 		prop = prop_32;
 	}
 
-	if (!ret)
+	if (!ret) {
 		phb_id = (int)(prop & (MAX_PHBS - 1));
+	}
 
-	spin_lock(&hose_spinlock);
+	/*
+	 * We need to be sure to not use the same PHB number twice.
+	 * If that happens then fallback to dynamic PHB numbering.
+	 */
+	phb_id = find_and_set_bit_wrap(phb_bitmap, MAX_PHBS, phb_id);
 
-	/* We need to be sure to not use the same PHB number twice. */
-	if ((phb_id >= 0) && !test_and_set_bit(phb_id, phb_bitmap))
-		goto out_unlock;
-
-	/* If everything fails then fallback to dynamic PHB numbering. */
-	phb_id = find_first_zero_bit(phb_bitmap, MAX_PHBS);
 	BUG_ON(phb_id >= MAX_PHBS);
-	set_bit(phb_id, phb_bitmap);
-
-out_unlock:
-	spin_unlock(&hose_spinlock);
-
 	return phb_id;
 }
 
