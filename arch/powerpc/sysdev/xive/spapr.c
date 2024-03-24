@@ -17,6 +17,7 @@
 #include <linux/spinlock.h>
 #include <linux/bitmap.h>
 #include <linux/cpumask.h>
+#include <linux/find-atomic.h>
 #include <linux/mm.h>
 #include <linux/delay.h>
 #include <linux/libfdt.h>
@@ -41,7 +42,6 @@ struct xive_irq_bitmap {
 	unsigned long		*bitmap;
 	unsigned int		base;
 	unsigned int		count;
-	spinlock_t		lock;
 	struct list_head	list;
 };
 
@@ -55,7 +55,6 @@ static int __init xive_irq_bitmap_add(int base, int count)
 	if (!xibm)
 		return -ENOMEM;
 
-	spin_lock_init(&xibm->lock);
 	xibm->base = base;
 	xibm->count = count;
 	xibm->bitmap = bitmap_zalloc(xibm->count, GFP_KERNEL);
@@ -81,47 +80,26 @@ static void xive_irq_bitmap_remove_all(void)
 	}
 }
 
-static int __xive_irq_bitmap_alloc(struct xive_irq_bitmap *xibm)
-{
-	int irq;
-
-	irq = find_first_zero_bit(xibm->bitmap, xibm->count);
-	if (irq != xibm->count) {
-		set_bit(irq, xibm->bitmap);
-		irq += xibm->base;
-	} else {
-		irq = -ENOMEM;
-	}
-
-	return irq;
-}
-
 static int xive_irq_bitmap_alloc(void)
 {
 	struct xive_irq_bitmap *xibm;
-	unsigned long flags;
-	int irq = -ENOENT;
 
 	list_for_each_entry(xibm, &xive_irq_bitmaps, list) {
-		spin_lock_irqsave(&xibm->lock, flags);
-		irq = __xive_irq_bitmap_alloc(xibm);
-		spin_unlock_irqrestore(&xibm->lock, flags);
-		if (irq >= 0)
-			break;
+		int irq = find_and_set_bit(xibm->bitmap, xibm->count);
+
+		if (irq < xibm->count)
+			return irq + xibm->base;
 	}
-	return irq;
+	return -ENOENT;
 }
 
 static void xive_irq_bitmap_free(int irq)
 {
-	unsigned long flags;
 	struct xive_irq_bitmap *xibm;
 
 	list_for_each_entry(xibm, &xive_irq_bitmaps, list) {
 		if ((irq >= xibm->base) && (irq < xibm->base + xibm->count)) {
-			spin_lock_irqsave(&xibm->lock, flags);
 			clear_bit(irq - xibm->base, xibm->bitmap);
-			spin_unlock_irqrestore(&xibm->lock, flags);
 			break;
 		}
 	}
