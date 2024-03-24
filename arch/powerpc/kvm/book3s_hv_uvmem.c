@@ -86,6 +86,7 @@
  * page-sizes, we need to break this assumption.
  */
 
+#include <linux/find-atomic.h>
 #include <linux/pagemap.h>
 #include <linux/migrate.h>
 #include <linux/kvm_host.h>
@@ -99,7 +100,6 @@
 
 static struct dev_pagemap kvmppc_uvmem_pgmap;
 static unsigned long *kvmppc_uvmem_bitmap;
-static DEFINE_SPINLOCK(kvmppc_uvmem_bitmap_lock);
 
 /*
  * States of a GFN
@@ -703,17 +703,15 @@ static struct page *kvmppc_uvmem_get_page(unsigned long gpa, struct kvm *kvm)
 	pfn_last = pfn_first +
 		   (range_len(&kvmppc_uvmem_pgmap.range) >> PAGE_SHIFT);
 
-	spin_lock(&kvmppc_uvmem_bitmap_lock);
-	bit = find_first_zero_bit(kvmppc_uvmem_bitmap,
-				  pfn_last - pfn_first);
+	bit = find_and_set_bit(kvmppc_uvmem_bitmap, pfn_last - pfn_first);
 	if (bit >= (pfn_last - pfn_first))
-		goto out;
-	bitmap_set(kvmppc_uvmem_bitmap, bit, 1);
-	spin_unlock(&kvmppc_uvmem_bitmap_lock);
+		return NULL;
 
 	pvt = kzalloc(sizeof(*pvt), GFP_KERNEL);
-	if (!pvt)
-		goto out_clear;
+	if (!pvt) {
+		clear_bit(bit, kvmppc_uvmem_bitmap);
+		return NULL;
+	}
 
 	uvmem_pfn = bit + pfn_first;
 	kvmppc_gfn_secure_uvmem_pfn(gpa >> PAGE_SHIFT, uvmem_pfn, kvm);
@@ -725,12 +723,6 @@ static struct page *kvmppc_uvmem_get_page(unsigned long gpa, struct kvm *kvm)
 	dpage->zone_device_data = pvt;
 	zone_device_page_init(dpage);
 	return dpage;
-out_clear:
-	spin_lock(&kvmppc_uvmem_bitmap_lock);
-	bitmap_clear(kvmppc_uvmem_bitmap, bit, 1);
-out:
-	spin_unlock(&kvmppc_uvmem_bitmap_lock);
-	return NULL;
 }
 
 /*
@@ -1021,9 +1013,7 @@ static void kvmppc_uvmem_page_free(struct page *page)
 			(kvmppc_uvmem_pgmap.range.start >> PAGE_SHIFT);
 	struct kvmppc_uvmem_page_pvt *pvt;
 
-	spin_lock(&kvmppc_uvmem_bitmap_lock);
-	bitmap_clear(kvmppc_uvmem_bitmap, pfn, 1);
-	spin_unlock(&kvmppc_uvmem_bitmap_lock);
+	clear_bit(pfn, kvmppc_uvmem_bitmap);
 
 	pvt = page->zone_device_data;
 	page->zone_device_data = NULL;
