@@ -299,7 +299,7 @@ static inline unsigned int cpumask_find_and_set(volatile struct cpumask *srcp)
  * Returns: found and set bit, or @nbits if no bits found
  */
 static inline
-unsigned long __find_and_set_bit(volatile unsigned long *addr, unsigned long nbits)
+unsigned long __find_and_set_bit(unsigned long *addr, unsigned long nbits)
 {
 	unsigned long bit;
 
