@@ -13,6 +13,7 @@
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/bitops.h>
+#include <linux/find-atomic.h>
 #include <linux/sched.h>
 
 #include <asm/io.h>
@@ -36,17 +37,9 @@ static DEFINE_PER_CPU(unsigned long [2], irq_enable_mask);
 
 static inline int alloc_level(void)
 {
-	int level;
+	int level = find_and_set_bit(hub_irq_map, IP27_HUB_IRQ_COUNT);
 
-again:
-	level = find_first_zero_bit(hub_irq_map, IP27_HUB_IRQ_COUNT);
-	if (level >= IP27_HUB_IRQ_COUNT)
-		return -ENOSPC;
-
-	if (test_and_set_bit(level, hub_irq_map))
-		goto again;
-
-	return level;
+	return level < IP27_HUB_IRQ_COUNT ? level : -ENOSPC;
 }
 
 static void enable_hub_irq(struct irq_data *d)
@@ -286,11 +279,8 @@ void __init arch_init_irq(void)
 	 * Mark these as reserved right away so they won't be used accidentally
 	 * later.
 	 */
-	for (i = 0; i <= CPU_CALL_B_IRQ; i++)
-		set_bit(i, hub_irq_map);
-
-	for (i = NI_BRDCAST_ERR_A; i <= MSC_PANIC_INTR; i++)
-		set_bit(i, hub_irq_map);
+	bitmap_set(hub_irq_map, 0, CPU_CALL_B_IRQ + 1);
+	bitmap_set(hub_irq_map, NI_BRDCAST_ERR_A, MSC_PANIC_INTR + 1);
 
 	fn = irq_domain_alloc_named_fwnode("HUB");
 	WARN_ON(fn == NULL);
