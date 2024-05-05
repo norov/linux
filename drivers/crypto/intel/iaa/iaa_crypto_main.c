@@ -898,7 +898,7 @@ out:
 static void rebalance_wq_table(void)
 {
 	const struct cpumask *node_cpus;
-	int node, cpu, iaa = -1;
+	int node, cpu, cpu_cnt, iaa = -1;
 
 	if (nr_iaa == 0)
 		return;
@@ -921,22 +921,19 @@ static void rebalance_wq_table(void)
 
 	for_each_node_with_cpus(node) {
 		node_cpus = cpumask_of_node(node);
+		cpu_cnt = 0;
 
-		for (cpu = 0; cpu < nr_cpus_per_node; cpu++) {
-			int node_cpu = cpumask_nth(cpu, node_cpus);
-
-			if (WARN_ON(node_cpu >= nr_cpu_ids)) {
-				pr_debug("node_cpu %d doesn't exist!\n", node_cpu);
-				return;
-			}
-
-			if ((cpu % cpus_per_iaa) == 0)
+		for_each_cpu(cpu, node_cpus) {
+			if ((cpu_cnt % cpus_per_iaa) == 0)
 				iaa++;
 
 			if (WARN_ON(wq_table_add_wqs(iaa, node_cpu))) {
-				pr_debug("could not add any wqs for iaa %d to cpu %d!\n", iaa, cpu);
+				pr_debug("could not add any wqs for iaa %d to cpu %d!\n",
+						iaa, cpu_cnt);
 				return;
 			}
+
+			cpu_cnt++;
 		}
 	}
 }
