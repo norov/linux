@@ -87,10 +87,7 @@ cpumask_any_housekeeping(const struct cpumask *mask, int exclude_cpu)
 		return cpu;
 
 	/* Try to find a CPU that isn't nohz_full to use in preference */
-	hk_cpu = cpumask_nth_andnot(0, mask, tick_nohz_full_mask);
-	if (hk_cpu == exclude_cpu)
-		hk_cpu = cpumask_nth_andnot(1, mask, tick_nohz_full_mask);
-
+	hk_cpu = cpumask_andnot_any_but(mask, tick_nohz_full_mask, exclude_cpu);
 	if (hk_cpu < nr_cpu_ids)
 		cpu = hk_cpu;
 

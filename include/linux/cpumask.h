@@ -399,6 +399,27 @@ unsigned int cpumask_any_but(const struct cpumask *mask, unsigned int cpu)
 }
 
 /**
+ * cpumask_andnot_any_but - return a "random" in an intersection of cpumasks, but not this one.
+ * @mask1: the cpumask to search
+ * @mask2: the cpumask to search
+ * @cpu: the cpu to ignore.
+ *
+ * Often used to find any cpu but smp_processor_id() in a mask.
+ * Return: >= nr_cpu_ids if no cpus set.
+ */
+static inline
+unsigned int cpumask_andnot_any_but(const struct cpumask *mask1, const struct cpumask *mask2,
+				unsigned int cpu)
+{
+	unsigned int i;
+
+	for_each_cpu_andnot(i, mask)
+		if (i != cpu)
+			break;
+	return i;
+}
+
+/**
  * cpumask_nth - get the Nth cpu in a cpumask
  * @srcp: the cpumask pointer
  * @cpu: the Nth cpu to find, starting from 0
