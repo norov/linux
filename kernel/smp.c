@@ -798,7 +798,10 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 
 	if (run_remote) {
 		cfd = this_cpu_ptr(&cfd_data);
-		cpumask_and(cfd->cpumask, mask, cpu_online_mask);
+		if (mask == cpu_online_mask)
+			cpumask_copy(cfd->cpumask, mask);
+		else
+			cpumask_and(cfd->cpumask, mask, cpu_online_mask);
 		__cpumask_clear_cpu(this_cpu, cfd->cpumask);
 
 		cpumask_clear(cfd->cpumask_ipi);
