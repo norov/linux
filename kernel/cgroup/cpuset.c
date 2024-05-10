@@ -5010,6 +5010,9 @@ EXPORT_SYMBOL_GPL(cpuset_mem_spread_node);
 int cpuset_mems_allowed_intersects(const struct task_struct *tsk1,
 				   const struct task_struct *tsk2)
 {
+	if (tsk1 == tsk2)
+		return 1;
+
 	return nodes_intersects(tsk1->mems_allowed, tsk2->mems_allowed);
 }
 
