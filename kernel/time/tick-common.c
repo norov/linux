@@ -253,7 +253,8 @@ static void tick_setup_device(struct tick_device *td,
 	 * When the device is not per cpu, pin the interrupt to the
 	 * current cpu:
 	 */
-	if (!cpumask_equal(newdev->cpumask, cpumask))
+	if (newdev->cpumask != cpumask &&
+			!cpumask_equal(newdev->cpumask, cpumask))
 		irq_set_affinity(newdev->irq, cpumask);
 
 	/*
@@ -288,14 +289,19 @@ static bool tick_check_percpu(struct clock_event_device *curdev,
 {
 	if (!cpumask_test_cpu(cpu, newdev->cpumask))
 		return false;
-	if (cpumask_equal(newdev->cpumask, cpumask_of(cpu)))
+	if (newdev->cpumask == cpumask_of(cpu) ||
+			cpumask_equal(newdev->cpumask, cpumask_of(cpu)))
 		return true;
 	/* Check if irq affinity can be set */
 	if (newdev->irq >= 0 && !irq_can_set_affinity(newdev->irq))
 		return false;
 	/* Prefer an existing cpu local device */
-	if (curdev && cpumask_equal(curdev->cpumask, cpumask_of(cpu)))
+	if (!curdev)
+		return true;
+	if (curdev->cpumask == cpumask_of(cpu) ||
+			cpumask_equal(curdev->cpumask, cpumask_of(cpu)))
 		return false;
+
 	return true;
 }
 
@@ -316,7 +322,8 @@ static bool tick_check_preferred(struct clock_event_device *curdev,
 	 */
 	return !curdev ||
 		newdev->rating > curdev->rating ||
-	       !cpumask_equal(curdev->cpumask, newdev->cpumask);
+		!(curdev->cpumask == newdev->cpumask &&
+			cpumask_equal(curdev->cpumask, newdev->cpumask));
 }
 
 /*
