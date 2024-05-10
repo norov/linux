@@ -2360,7 +2360,7 @@ static bool topology_span_sane(struct sched_domain_topology_level *tl,
 	 * breaks the linking done for an earlier span.
 	 */
 	for_each_cpu(i, cpu_map) {
-		if (i == cpu)
+		if (i == cpu || tl->mask(cpu) ==  tl->mask(i))
 			continue;
 		/*
 		 * We should 'and' all those masks with 'cpu_map' to exactly
