@@ -5,6 +5,7 @@
  * Copyright 2011 Linaro Ltd.
  */
 
+#include <linux/cpumask_str.h>
 #include <linux/clk.h>
 #include <linux/hrtimer.h>
 #include <linux/init.h>

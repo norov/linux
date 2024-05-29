@@ -10,6 +10,7 @@
  */
 #include <linux/mm.h>
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/module.h>
 #include <linux/hardirq.h>
 #include <linux/topology.h>

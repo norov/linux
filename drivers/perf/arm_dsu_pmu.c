@@ -16,6 +16,7 @@
 #include <linux/bitops.h>
 #include <linux/bug.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>

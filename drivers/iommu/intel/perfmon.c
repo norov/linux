@@ -6,6 +6,7 @@
 #define pr_fmt(fmt)	"DMAR: " fmt
 #define dev_fmt(fmt)	pr_fmt(fmt)
 
+#include <linux/cpumask_str.h>
 #include <linux/dmar.h>
 #include "iommu.h"
 #include "perfmon.h"

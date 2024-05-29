@@ -5,6 +5,7 @@
 #include <linux/acpi.h>
 #include <linux/bitfield.h>
 #include <linux/bitops.h>
+#include <linux/cpumask_str.h>
 #include <linux/debugfs.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>

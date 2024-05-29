@@ -20,6 +20,7 @@
 #include <linux/tracefs.h>
 #include <linux/uaccess.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/delay.h>
 #include <linux/sched/clock.h>
 #include <uapi/linux/sched/types.h>

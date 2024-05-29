@@ -14,6 +14,7 @@
 
 #include <linux/bitmap.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/cpu_pm.h>
 #include <linux/export.h>
 #include <linux/kernel.h>

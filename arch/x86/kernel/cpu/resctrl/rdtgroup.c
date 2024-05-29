@@ -14,6 +14,7 @@
 
 #include <linux/cacheinfo.h>
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/fs_parser.h>

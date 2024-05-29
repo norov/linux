@@ -12,6 +12,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/cdev.h>
+#include <linux/cpumask_str.h>
 #include <linux/device.h>
 #include <linux/eventfd.h>
 #include <linux/slab.h>

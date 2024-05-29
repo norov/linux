@@ -6,6 +6,7 @@
  */
 #include "dm-path-selector.h"
 
+#include <linux/cpumask_str.h>
 #include <linux/device-mapper.h>
 #include <linux/module.h>
 

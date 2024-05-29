@@ -23,6 +23,7 @@
 #include <linux/acpi.h>
 #include <linux/cacheinfo.h>
 #include <linux/ctype.h>
+#include <linux/cpumask_str.h>
 #include <linux/interrupt.h>
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/module.h>

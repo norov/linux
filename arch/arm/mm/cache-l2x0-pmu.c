@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2016 ARM Limited
  */
+#include <linux/cpumask_str.h>
 #include <linux/errno.h>
 #include <linux/hrtimer.h>
 #include <linux/io.h>

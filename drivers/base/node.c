@@ -13,6 +13,7 @@
 #include <linux/hugetlb.h>
 #include <linux/compaction.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/topology.h>
 #include <linux/nodemask.h>
 #include <linux/cpu.h>

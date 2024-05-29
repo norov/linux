@@ -4,6 +4,7 @@
  */
 
 #include <linux/bitfield.h>
+#include <linux/cpumask_str.h>
 #include <linux/init.h>
 #include <linux/irqreturn.h>
 #include <linux/kernel.h>

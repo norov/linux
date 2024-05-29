@@ -7,6 +7,7 @@
 
 #include <linux/acpi.h>
 #include <linux/cpuhotplug.h>
+#include <linux/cpumask_str.h>
 #include <linux/perf_event.h>
 #include <linux/platform_device.h>
 

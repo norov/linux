@@ -12,6 +12,7 @@
 #include <linux/init.h>
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/cpufeature.h>
 #include <linux/smp.h>
 

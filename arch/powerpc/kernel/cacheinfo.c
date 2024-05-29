@@ -11,6 +11,7 @@
 
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/kernel.h>
 #include <linux/kobject.h>
 #include <linux/list.h>

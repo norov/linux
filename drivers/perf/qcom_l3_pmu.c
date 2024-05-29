@@ -15,6 +15,7 @@
 
 #include <linux/acpi.h>
 #include <linux/bitops.h>
+#include <linux/cpumask_str.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/list.h>

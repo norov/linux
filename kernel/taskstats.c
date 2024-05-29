@@ -12,6 +12,7 @@
 #include <linux/acct.h>
 #include <linux/delayacct.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/percpu.h>
 #include <linux/slab.h>
 #include <linux/cgroupstats.h>

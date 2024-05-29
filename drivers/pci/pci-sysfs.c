@@ -13,6 +13,7 @@
  */
 
 #include <linux/bitfield.h>
+#include <linux/cpumask_str.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/pci.h>

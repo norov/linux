@@ -24,6 +24,7 @@
 
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/cpuset.h>
 #include <linux/delay.h>
 #include <linux/init.h>

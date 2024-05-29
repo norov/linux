@@ -14,6 +14,7 @@
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/perf_event.h>
 #include <linux/bitops.h>
+#include <linux/cpumask_str.h>
 #include <linux/device.h>
 #include <linux/bits.h>
 #include <linux/list.h>

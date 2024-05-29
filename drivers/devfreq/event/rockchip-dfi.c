@@ -5,6 +5,7 @@
  */
 
 #include <linux/clk.h>
+#include <linux/cpumask_str.h>
 #include <linux/devfreq-event.h>
 #include <linux/kernel.h>
 #include <linux/err.h>

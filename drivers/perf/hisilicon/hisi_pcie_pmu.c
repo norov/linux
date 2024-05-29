@@ -9,6 +9,7 @@
 #include <linux/bitfield.h>
 #include <linux/bitmap.h>
 #include <linux/bug.h>
+#include <linux/cpumask_str.h>
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>

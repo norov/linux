@@ -16,6 +16,7 @@
  *   Mitchel, Henry <henry.mitchel@intel.com>
  */
 
+#include <linux/cpumask_str.h>
 #include <linux/perf_event.h>
 #include "dfl.h"
 #include "dfl-fme.h"

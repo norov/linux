@@ -13,6 +13,7 @@
 #include <linux/perf_event.h>
 #include <linux/init.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/slab.h>
 #include <linux/amd-iommu.h>
 

@@ -2,6 +2,7 @@
 // Copyright 2023 NXP
 
 #include <linux/bitfield.h>
+#include <linux/cpumask_str.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>

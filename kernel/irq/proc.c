@@ -12,6 +12,7 @@
 #include <linux/interrupt.h>
 #include <linux/kernel_stat.h>
 #include <linux/mutex.h>
+#include <linux/cpumask_str.h>
 
 #include "internals.h"
 

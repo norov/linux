@@ -40,6 +40,7 @@
 #include <linux/bitops.h>
 #include <linux/cpuhotplug.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>

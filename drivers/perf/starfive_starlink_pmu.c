@@ -13,6 +13,7 @@
 
 #include <linux/bitmap.h>
 #include <linux/cpu_pm.h>
+#include <linux/cpumask_str.h>
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/kernel.h>

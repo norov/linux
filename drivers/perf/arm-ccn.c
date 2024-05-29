@@ -5,6 +5,7 @@
  */
 
 #include <linux/ctype.h>
+#include <linux/cpumask_str.h>
 #include <linux/hrtimer.h>
 #include <linux/idr.h>
 #include <linux/interrupt.h>

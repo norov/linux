@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
+
+#include <linux/cpumask_str.h>
+
 /*
  *  Housekeeping management. Manage the targets for routine code that can run on
  *  any CPU: unbound workqueues, timers, kthreads and any offloadable work.

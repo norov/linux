@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/cpumask_str.h>
 #include <linux/atomic.h>
 #include <linux/completion.h>
 #include <linux/cpu.h>

@@ -10,6 +10,7 @@
  ****************************************************************************/
 
 #include <linux/configfs.h>
+#include <linux/cpumask_str.h>
 #include <linux/ctype.h>
 #include <linux/export.h>
 #include <linux/inet.h>

@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) "tad_pmu: " fmt
 
+#include <linux/cpumask_str.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>

@@ -4,6 +4,7 @@
 // Author: Punit Agrawal <punit.agrawal@arm.com>, Suzuki Poulose <suzuki.poulose@arm.com>
 
 #include <linux/arm-cci.h>
+#include <linux/cpumask_str.h>
 #include <linux/io.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>

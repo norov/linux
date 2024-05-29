@@ -12,6 +12,7 @@
  *  Copyright (C) 2004-2006 Ingo Molnar
  *  Copyright (C) 2004 Nadia Yvette Chambers
  */
+#include <linux/cpumask_str.h>
 #include <linux/ring_buffer.h>
 #include <linux/utsname.h>
 #include <linux/stacktrace.h>

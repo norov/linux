@@ -11,6 +11,7 @@
 #include <linux/clk.h>
 #include <linux/cpuhotplug.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/mfd/syscon.h>

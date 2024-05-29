@@ -3,6 +3,7 @@
  * Copyright(c) 2015 - 2018 Intel Corporation.
  */
 
+#include <linux/cpumask_str.h>
 #include <linux/spinlock.h>
 #include <linux/seqlock.h>
 #include <linux/netdevice.h>

@@ -11,6 +11,7 @@
 
 #define pr_fmt(fmt) fmt
 
+#include <linux/cpumask_str.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/kthread.h>

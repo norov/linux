@@ -11,6 +11,7 @@
 #include <linux/anon_inodes.h>
 #include <linux/capability.h>
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/device.h>
 #include <linux/file.h>
 #include <linux/hugetlb.h>

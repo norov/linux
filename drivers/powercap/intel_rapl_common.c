@@ -8,6 +8,7 @@
 #include <linux/bitmap.h>
 #include <linux/cleanup.h>
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/intel_rapl.h>

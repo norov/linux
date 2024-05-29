@@ -32,6 +32,7 @@
 #include <linux/interrupt.h>
 #include <linux/signal.h>
 #include <linux/completion.h>
+#include <linux/cpumask_str.h>
 #include <linux/workqueue.h>
 #include <linux/slab.h>
 #include <linux/cpu.h>
