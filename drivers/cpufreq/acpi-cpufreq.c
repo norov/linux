@@ -16,6 +16,7 @@
 #include <linux/smp.h>
 #include <linux/sched.h>
 #include <linux/cpufreq.h>
+#include <linux/cpumask_str.h>
 #include <linux/compiler.h>
 #include <linux/dmi.h>
 #include <linux/slab.h>

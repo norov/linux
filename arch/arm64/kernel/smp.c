@@ -8,6 +8,7 @@
 
 #include <linux/acpi.h>
 #include <linux/arm_sdei.h>
+#include <linux/cpumask_str.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/spinlock.h>

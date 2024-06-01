@@ -14,6 +14,7 @@
 #include <linux/init.h>
 #include <linux/percpu.h>
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/nmi.h>
 #include <linux/module.h>
 #include <linux/export.h>

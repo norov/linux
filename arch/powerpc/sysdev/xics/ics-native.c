@@ -7,6 +7,7 @@
 
 //#define DEBUG
 
+#include <linux/cpumask_str.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/irq.h>

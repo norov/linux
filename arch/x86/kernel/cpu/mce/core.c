@@ -10,6 +10,7 @@
  */
 
 #include <linux/thread_info.h>
+#include <linux/cpumask_str.h>
 #include <linux/capability.h>
 #include <linux/miscdevice.h>
 #include <linux/ratelimit.h>

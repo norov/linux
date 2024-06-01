@@ -9,6 +9,7 @@
  */
 
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>

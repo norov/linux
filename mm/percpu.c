@@ -70,6 +70,7 @@
 
 #include <linux/bitmap.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/memblock.h>
 #include <linux/err.h>
 #include <linux/list.h>

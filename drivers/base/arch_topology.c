@@ -16,6 +16,7 @@
 #include <linux/sched/topology.h>
 #include <linux/cpuset.h>
 #include <linux/cpumask.h>
+#include <linux/cpumask_str.h>
 #include <linux/init.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>

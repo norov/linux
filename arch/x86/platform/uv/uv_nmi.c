@@ -8,6 +8,7 @@
  */
 
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/delay.h>
 #include <linux/kdb.h>
 #include <linux/kexec.h>

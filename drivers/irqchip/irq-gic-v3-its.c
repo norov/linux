@@ -9,6 +9,7 @@
 #include <linux/bitfield.h>
 #include <linux/bitmap.h>
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/crash_dump.h>
 #include <linux/delay.h>
 #include <linux/efi.h>

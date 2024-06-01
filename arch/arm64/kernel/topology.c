@@ -15,6 +15,7 @@
 #include <linux/arch_topology.h>
 #include <linux/cacheinfo.h>
 #include <linux/cpufreq.h>
+#include <linux/cpumask_str.h>
 #include <linux/init.h>
 #include <linux/percpu.h>
 

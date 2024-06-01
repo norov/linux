@@ -6,6 +6,7 @@
 #include <linux/interrupt.h>
 #include <linux/init.h>
 #include <linux/cpu.h>
+#include <linux/cpumask_str.h>
 #include <linux/of.h>
 #include <linux/spinlock.h>
 #include <linux/msi.h>
