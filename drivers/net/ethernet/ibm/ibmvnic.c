@@ -218,7 +218,7 @@ static int ibmvnic_set_queue_affinity(struct ibmvnic_sub_crq_queue *queue,
 				      int stride)
 {
 	cpumask_var_t mask;
-	int i;
+	int i, start = *cpu - 1, cur;
 	int rc = 0;
 
 	if (!(queue && queue->irq))
@@ -234,11 +234,13 @@ static int ibmvnic_set_queue_affinity(struct ibmvnic_sub_crq_queue *queue,
 		(*stragglers)--;
 	}
 	/* atomic write is safer than writing bit by bit directly */
-	for (i = 0; i < stride; i++) {
-		cpumask_set_cpu(*cpu, mask);
-		*cpu = cpumask_next_wrap(*cpu, cpu_online_mask,
-					 nr_cpu_ids, false);
+	for_each_online_cpu_wrap(cur, start) {
+		if (!stride--)
+			break;
+		cpumask_set_cpu(cur, mask);
+		*cpu = cur;
 	}
+
 	/* set queue affinity mask */
 	cpumask_copy(queue->affinity_mask, mask);
 	rc = irq_set_affinity_and_hint(queue->irq, queue->affinity_mask);
