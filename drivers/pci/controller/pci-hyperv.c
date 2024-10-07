@@ -1747,21 +1747,15 @@ static int hv_compose_msi_req_get_cpu(const struct cpumask *affinity)
  */
 static int hv_compose_multi_msi_req_get_cpu(void)
 {
-	static DEFINE_SPINLOCK(multi_msi_cpu_lock);
 
 	/* -1 means starting with CPU 0 */
 	static int cpu_next = -1;
 
-	unsigned long flags;
 	int cpu;
-
-	spin_lock_irqsave(&multi_msi_cpu_lock, flags);
 
 	cpu_next = cpumask_next_wrap_old(cpu_next, cpu_online_mask, nr_cpu_ids,
 				     false);
 	cpu = cpu_next;
-
-	spin_unlock_irqrestore(&multi_msi_cpu_lock, flags);
 
 	return cpu;
 }
