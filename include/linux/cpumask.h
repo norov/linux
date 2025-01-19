@@ -426,11 +426,10 @@ unsigned int cpumask_any_and_but(const struct cpumask *mask1,
 	unsigned int i;
 
 	cpumask_check(cpu);
-	i = cpumask_first_and(mask1, mask2);
-	if (i != cpu)
-		return i;
-
-	return cpumask_next_and(cpu, mask1, mask2);
+	for_each_cpu_and(i, mask1, mask2)
+		if (i != cpu)
+			break;
+	return i;
 }
 
 /**
