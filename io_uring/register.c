@@ -216,6 +216,17 @@ static __cold int __io_register_iowq_aff(struct io_ring_ctx *ctx,
 	return ret;
 }
 
+static inline int copy_iowq_aff_cpus(cpumask_var_t new_mask, void __user *arg, unsigned len)
+{
+	int ret = copy_from_user(new_mask, arg, len);
+	unsigned ncpus = len * BITS_PER_BYTE;
+
+	if (ret == 0 && ncpus < large_cpumask_bits)
+		cpumask_clear_from(new_mask, len);
+
+	return ret;
+}
+
 static __cold int io_register_iowq_aff(struct io_ring_ctx *ctx,
 				       void __user *arg, unsigned len)
 {
@@ -225,18 +236,12 @@ static __cold int io_register_iowq_aff(struct io_ring_ctx *ctx,
 	if (!alloc_cpumask_var(&new_mask, GFP_KERNEL))
 		return -ENOMEM;
 
-	cpumask_clear(new_mask);
-	if (len > cpumask_size())
-		len = cpumask_size();
-
 #ifdef CONFIG_COMPAT
 	if (in_compat_syscall())
-		ret = compat_get_bitmap(cpumask_bits(new_mask),
-					(const compat_ulong_t __user *)arg,
-					len * 8 /* CHAR_BIT */);
+		ret = compat_get_cpumask(new_mask, (const compat_ulong_t __user *)arg, len);
 	else
 #endif
-		ret = copy_from_user(new_mask, arg, len);
+		ret = copy_iowq_aff_cpus(new_mask, arg, len);
 
 	if (ret) {
 		free_cpumask_var(new_mask);
