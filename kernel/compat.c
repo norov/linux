@@ -219,6 +219,19 @@ Efault:
 	return -EFAULT;
 }
 
+long compat_get_cpumask(struct cpumask_t *cpumask, const compat_ulong_t __user *umask,
+			unsigned int len)
+{
+	unsigned long ncpus = min(large_cpumask_bits, len * BITS_PER_BYTE);
+	long ret;
+
+	ret = compat_get_bitmap(cpumask_bits(cpumask), umask, ncpus);
+	if (ret == 0 && ncpus < large_cpumask_bits)
+		cpumask_clear_from(cpumask, ncpus);
+
+	return ret;
+}
+
 long compat_put_bitmap(compat_ulong_t __user *umask, unsigned long *mask,
 		       unsigned long bitmap_size)
 {

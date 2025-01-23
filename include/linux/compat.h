@@ -952,6 +952,9 @@ static inline bool in_compat_syscall(void) { return false; }
 
 #define BITS_TO_COMPAT_LONGS(bits) DIV_ROUND_UP(bits, BITS_PER_COMPAT_LONG)
 
+long compat_get_cpumask(struct cpumask_t *cpumask, const compat_ulong_t __user *umask,
+		unsigned int len);
+
 long compat_get_bitmap(unsigned long *mask, const compat_ulong_t __user *umask,
 		       unsigned long bitmap_size);
 long compat_put_bitmap(compat_ulong_t __user *umask, unsigned long *mask,

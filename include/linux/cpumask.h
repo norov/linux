@@ -623,6 +623,17 @@ static __always_inline void cpumask_clear(struct cpumask *dstp)
 }
 
 /**
+ * cpumask_clear_from - clear all cpus (< nr_cpu_ids) in a cpumask,
+ *			starting from a given one
+ * @dstp: the cpumask pointer
+ * @cpu: CPU to begin with
+ */
+static __always_inline void cpumask_clear_from(struct cpumask *dstp, unsigned long cpu)
+{
+	bitmap_clear(cpumask_bits(dstp), cpu, large_cpumask_bits);
+}
+
+/**
  * cpumask_and - *dstp = *src1p & *src2p
  * @dstp: the cpumask result
  * @src1p: the first input
