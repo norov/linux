@@ -107,20 +107,6 @@ int put_compat_rusage(const struct rusage *r, struct compat_rusage __user *ru)
 	return 0;
 }
 
-static int compat_get_user_cpu_mask(compat_ulong_t __user *user_mask_ptr,
-				    unsigned len, struct cpumask *new_mask)
-{
-	unsigned long *k;
-
-	if (len < cpumask_size())
-		memset(new_mask, 0, cpumask_size());
-	else if (len > cpumask_size())
-		len = cpumask_size();
-
-	k = cpumask_bits(new_mask);
-	return compat_get_bitmap(k, user_mask_ptr, len * 8);
-}
-
 COMPAT_SYSCALL_DEFINE3(sched_setaffinity, compat_pid_t, pid,
 		       unsigned int, len,
 		       compat_ulong_t __user *, user_mask_ptr)
@@ -131,7 +117,7 @@ COMPAT_SYSCALL_DEFINE3(sched_setaffinity, compat_pid_t, pid,
 	if (!alloc_cpumask_var(&new_mask, GFP_KERNEL))
 		return -ENOMEM;
 
-	retval = compat_get_user_cpu_mask(user_mask_ptr, len, new_mask);
+	retval = compat_get_cpumask(new_mask, user_mask_ptr, len);
 	if (retval)
 		goto out;
 
