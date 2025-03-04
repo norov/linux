@@ -92,35 +92,13 @@ EXPORT_SYMBOL(__bitmap_complement);
 void __bitmap_shift_right(unsigned long *dst, const unsigned long *src,
 			unsigned shift, unsigned nbits)
 {
-	unsigned k, lim = BITS_TO_LONGS(nbits);
-	unsigned off = shift/BITS_PER_LONG, rem = shift % BITS_PER_LONG;
-	unsigned long mask = BITMAP_LAST_WORD_MASK(nbits);
-	for (k = 0; off + k < lim; ++k) {
-		unsigned long upper, lower;
+	for (dst[0] = 0; shift + BITS_PER_LONG < nbits; shift += BITS_PER_LONG)
+		bitmap_write(dst, *src++, shift, BITS_PER_LONG);
 
-		/*
-		 * If shift is not word aligned, take lower rem bits of
-		 * word above and make them the top rem bits of result.
-		 */
-		if (!rem || off + k + 1 >= lim)
-			upper = 0;
-		else {
-			upper = src[off + k + 1];
-			if (off + k + 1 == lim - 1)
-				upper &= mask;
-			upper <<= (BITS_PER_LONG - rem);
-		}
-		lower = src[off + k];
-		if (off + k == lim - 1)
-			lower &= mask;
-		lower >>= rem;
-		dst[k] = lower | upper;
-	}
-	if (off)
-		memset(&dst[lim - off], 0, off*sizeof(unsigned long));
+	if (shift < nbits)
+		bitmap_write(dst, *src, shift, nbits - shift);
 }
 EXPORT_SYMBOL(__bitmap_shift_right);
-
 
 /**
  * __bitmap_shift_left - logical left shift of the bits in a bitmap
@@ -137,25 +115,11 @@ EXPORT_SYMBOL(__bitmap_shift_right);
 void __bitmap_shift_left(unsigned long *dst, const unsigned long *src,
 			unsigned int shift, unsigned int nbits)
 {
-	int k;
-	unsigned int lim = BITS_TO_LONGS(nbits);
-	unsigned int off = shift/BITS_PER_LONG, rem = shift % BITS_PER_LONG;
-	for (k = lim - off - 1; k >= 0; --k) {
-		unsigned long upper, lower;
+	for (; shift + BITS_PER_LONG < nbits; shift += BITS_PER_LONG)
+		*dst++ = bitmap_read(src, shift, BITS_PER_LONG);
 
-		/*
-		 * If shift is not word aligned, take upper rem bits of
-		 * word below and make them the bottom rem bits of result.
-		 */
-		if (rem && k > 0)
-			lower = src[k - 1] >> (BITS_PER_LONG - rem);
-		else
-			lower = 0;
-		upper = src[k] << rem;
-		dst[k + off] = lower | upper;
-	}
-	if (off)
-		memset(dst, 0, off*sizeof(unsigned long));
+	if (shift < nbits)
+		*dst = bitmap_read(src, shift, nbits - shift);
 }
 EXPORT_SYMBOL(__bitmap_shift_left);
 
@@ -199,30 +163,18 @@ EXPORT_SYMBOL(__bitmap_shift_left);
 void bitmap_cut(unsigned long *dst, const unsigned long *src,
 		unsigned int first, unsigned int cut, unsigned int nbits)
 {
-	unsigned int len = BITS_TO_LONGS(nbits);
-	unsigned long keep = 0, carry;
-	int i;
+	unsigned long word;
 
-	if (first % BITS_PER_LONG) {
-		keep = src[first / BITS_PER_LONG] &
-		       (~0UL >> (BITS_PER_LONG - first % BITS_PER_LONG));
+	while (first + cut + BITS_PER_LONG < nbits) {
+		word = bitmap_read(src, first + cut, BITS_PER_LONG);
+		bitmap_write(dst, word, first, BITS_PER_LONG);
+		first += BITS_PER_LONG;
 	}
 
-	memmove(dst, src, len * sizeof(*dst));
-
-	while (cut--) {
-		for (i = first / BITS_PER_LONG; i < len; i++) {
-			if (i < len - 1)
-				carry = dst[i + 1] & 1UL;
-			else
-				carry = 0;
-
-			dst[i] = (dst[i] >> 1) | (carry << (BITS_PER_LONG - 1));
-		}
+	if (first + cut < nbits) {
+		word = bitmap_read(src, first + cut, nbits - first - cut);
+		bitmap_write(dst, word, first, nbits - first);
 	}
-
-	dst[first / BITS_PER_LONG] &= ~0UL << (first % BITS_PER_LONG);
-	dst[first / BITS_PER_LONG] |= keep;
 }
 EXPORT_SYMBOL(bitmap_cut);
 
