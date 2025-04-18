@@ -969,20 +969,22 @@ static void find_hw_thread_mask(uint hw_thread_no, cpumask_var_t hw_thread_mask,
 						node_affinity.num_online_nodes;
 
 	cpumask_copy(hw_thread_mask, &affinity->proc.mask);
-	if (affinity->num_core_siblings > 0) {
-		/* Removing other siblings not needed for now */
-		curr_cpu = cpumask_nth(num_cores_per_socket *
-				node_affinity.num_online_nodes, hw_thread_mask);
 
-		for_each_cpu_from(curr_cpu, hw_thread_mask)
-			__cpumask_clear_cpu(curr_cpu, hw_thread_mask);
+	if (affinity->num_core_siblings == 0)
+		return;
 
-		/* Identifying correct HW threads within physical cores */
-		cpumask_shift_left(hw_thread_mask, hw_thread_mask,
-				   num_cores_per_socket *
-				   node_affinity.num_online_nodes *
-				   hw_thread_no);
-	}
+	/* Removing other siblings not needed for now */
+	curr_cpu = cpumask_nth(num_cores_per_socket *
+			node_affinity.num_online_nodes, hw_thread_mask);
+
+	for_each_cpu_from(curr_cpu, hw_thread_mask)
+		__cpumask_clear_cpu(curr_cpu, hw_thread_mask);
+
+	/* Identifying correct HW threads within physical cores */
+	cpumask_shift_left(hw_thread_mask, hw_thread_mask,
+			   num_cores_per_socket *
+			   node_affinity.num_online_nodes *
+			   hw_thread_no);
 }
 
 int hfi1_get_proc_affinity(int node)
