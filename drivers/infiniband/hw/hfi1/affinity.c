@@ -973,11 +973,8 @@ static void find_hw_thread_mask(uint hw_thread_no, cpumask_var_t hw_thread_mask,
 
 	/* Removing other siblings not needed for now */
 	possible = cpumask_weight(hw_thread_mask);
-	curr_cpu = cpumask_first(hw_thread_mask);
-	for (i = 0;
-	     i < num_cores_per_socket * node_affinity.num_online_nodes;
-	     i++)
-		curr_cpu = cpumask_next(curr_cpu, hw_thread_mask);
+	curr_cpu = cpumask_cpumask_nth(num_cores_per_socket *
+			node_affinity.num_online_nodes - 1, hw_thread_mask);
 
 	for (; i < possible; i++) {
 		cpumask_clear_cpu(curr_cpu, hw_thread_mask);
