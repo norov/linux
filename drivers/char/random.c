@@ -1326,7 +1326,8 @@ static void __cold try_to_generate_entropy(void)
 						  smp_processor_id());
 			if (cpu < nr_cpu_ids)
 				/* fall through */ ;
-			else if (test_bit(smp_processor_id(), housekeeping_cpumask(HK_TYPE_TIMER)))
+			else if (cpumask_test_cpu(smp_processor_id(),
+						  housekeeping_cpumask(HK_TYPE_TIMER)))
 				cpu = smp_processor_id();
 			else
 				/*
