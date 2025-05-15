@@ -18,6 +18,7 @@
 #include <linux/math.h>
 #include <linux/minmax.h>
 #include <linux/swab.h>
+#include <linux/random.h>
 
 /*
  * Common helper for find_bit() function family
@@ -276,7 +277,21 @@ unsigned long _find_next_bit_le(const unsigned long *addr,
 	return FIND_NEXT_BIT(addr[idx], swab, size, offset);
 }
 EXPORT_SYMBOL(_find_next_bit_le);
-
 #endif
+
+unsigned long find_random_bit(const unsigned long *addr, unsigned long size)
+{
+	int w = bitmap_weight(addr, size);
+
+	switch (w) {
+	case 0:
+		return size;
+	case 1:
+		return find_first_bit(addr, size);
+	default:
+		return find_nth_bit(addr, size, get_random_u32_below(w));
+	}
+}
+EXPORT_SYMBOL(find_random_bit);
 
 #endif /* __BIG_ENDIAN */
