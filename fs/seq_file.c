@@ -1126,8 +1126,7 @@ seq_hlist_next_percpu(void *v, struct hlist_head __percpu *head,
 	if (node->next)
 		return node->next;
 
-	for (*cpu = cpumask_next(*cpu, cpu_possible_mask); *cpu < nr_cpu_ids;
-	     *cpu = cpumask_next(*cpu, cpu_possible_mask)) {
+	for_each_possible_cpu(*cpu) {
 		struct hlist_head *bucket = per_cpu_ptr(head, *cpu);
 
 		if (!hlist_empty(bucket))
