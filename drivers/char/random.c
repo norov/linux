@@ -1296,7 +1296,7 @@ static void __cold try_to_generate_entropy(void)
 	struct entropy_timer_state *stack = PTR_ALIGN((void *)stack_bytes, SMP_CACHE_BYTES);
 	unsigned int i, num_different = 0;
 	unsigned long last = random_get_entropy();
-	int cpu = -1;
+	int cpu;
 
 	for (i = 0; i < NUM_TRIAL_SAMPLES - 1; ++i) {
 		stack->entropy = random_get_entropy();
@@ -1316,9 +1316,6 @@ static void __cold try_to_generate_entropy(void)
 		 * executing by checking timer_delete_sync_try(), before queueing the next one.
 		 */
 		if (!timer_pending(&stack->timer) && timer_delete_sync_try(&stack->timer) >= 0) {
-			struct cpumask timer_cpus;
-			unsigned int num_cpus;
-
 			/*
 			 * Preemption must be disabled here, both to read the current CPU number
 			 * and to avoid scheduling a timer on a dead CPU.
@@ -1326,20 +1323,20 @@ static void __cold try_to_generate_entropy(void)
 			preempt_disable();
 
 			/* Only schedule callbacks on timer CPUs that are online. */
-			cpumask_and(&timer_cpus, housekeeping_cpumask(HK_TYPE_TIMER), cpu_online_mask);
-			num_cpus = cpumask_weight(&timer_cpus);
-			/* In very bizarre case of misconfiguration, fallback to all online. */
-			if (unlikely(num_cpus == 0)) {
-				timer_cpus = *cpu_online_mask;
-				num_cpus = cpumask_weight(&timer_cpus);
-			}
-
-			/* Basic CPU round-robin, which avoids the current CPU. */
-			do {
-				cpu = cpumask_next(cpu, &timer_cpus);
-				if (cpu >= nr_cpu_ids)
-					cpu = cpumask_first(&timer_cpus);
-			} while (cpu == smp_processor_id() && num_cpus > 1);
+			cpu = cpumask_any_and_but(cpu_online_mask,
+						  housekeeping_cpumask(HK_TYPE_TIMER),
+						  smp_processor_id());
+			if (cpu < nr_cpu_ids)
+				/* fall through */ ;
+			else if (cpumask_test_cpu(smp_processor_id(),
+						  housekeeping_cpumask(HK_TYPE_TIMER)))
+				cpu = smp_processor_id();
+			else
+				/*
+				 * In very bizarre case of misconfiguration,
+				 * fallback to all online.
+				 */
+				cpu = cpumask_first(cpu_online_mask);
 
 			/* Expiring the timer at `jiffies` means it's the next tick. */
 			stack->timer.expires = jiffies;
