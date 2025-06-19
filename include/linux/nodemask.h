@@ -266,11 +266,7 @@ static __always_inline unsigned int __next_node(int n, const nodemask_t *srcp)
 #define next_node_in(n, src) __next_node_in((n), &(src))
 static __always_inline unsigned int __next_node_in(int node, const nodemask_t *srcp)
 {
-	unsigned int ret = __next_node(node, srcp);
-
-	if (ret == MAX_NUMNODES)
-		ret = __first_node(srcp);
-	return ret;
+	return find_next_bit_wrap(srcp->bits, MAX_NUMNODES, node + 1);
 }
 
 static __always_inline void init_nodemask_of_node(nodemask_t *mask, int node)
