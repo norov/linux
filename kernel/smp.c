@@ -39,7 +39,6 @@
 
 struct call_function_data {
 	call_single_data_t	__percpu *csd;
-	cpumask_var_t		cpumask;
 	cpumask_var_t		cpumask_ipi;
 };
 
@@ -55,17 +54,11 @@ int smpcfd_prepare_cpu(unsigned int cpu)
 {
 	struct call_function_data *cfd = &per_cpu(cfd_data, cpu);
 
-	if (!zalloc_cpumask_var_node(&cfd->cpumask, GFP_KERNEL,
-				     cpu_to_node(cpu)))
+	if (!zalloc_cpumask_var_node(&cfd->cpumask_ipi, GFP_KERNEL, cpu_to_node(cpu)))
 		return -ENOMEM;
-	if (!zalloc_cpumask_var_node(&cfd->cpumask_ipi, GFP_KERNEL,
-				     cpu_to_node(cpu))) {
-		free_cpumask_var(cfd->cpumask);
-		return -ENOMEM;
-	}
+
 	cfd->csd = alloc_percpu(call_single_data_t);
 	if (!cfd->csd) {
-		free_cpumask_var(cfd->cpumask);
 		free_cpumask_var(cfd->cpumask_ipi);
 		return -ENOMEM;
 	}
@@ -77,7 +70,6 @@ int smpcfd_dead_cpu(unsigned int cpu)
 {
 	struct call_function_data *cfd = &per_cpu(cfd_data, cpu);
 
-	free_cpumask_var(cfd->cpumask);
 	free_cpumask_var(cfd->cpumask_ipi);
 	free_percpu(cfd->csd);
 	return 0;
