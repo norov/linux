@@ -771,7 +771,6 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 	bool wait = scf_flags & SCF_WAIT;
 	call_single_data_t *csd;
 	int nr_cpus = 0;
-	bool run_remote = false;
 
 	lockdep_assert_preemption_disabled();
 
@@ -793,18 +792,12 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 	 */
 	WARN_ON_ONCE(!in_task());
 
+	cfd = this_cpu_ptr(&cfd_data);
+
 	for_each_cpu_and(cpu, mask, cpu_online_mask) {
 		if (cpu == this_cpu)
 			continue;
 
-		if (!run_remote) {
-			/*
-			 * We need remote execution, i.e.,
-			 * any CPU excluding this one.
-			 */
-			run_remote = true;
-			cfd = this_cpu_ptr(&cfd_data);
-		}
 		csd = per_cpu_ptr(cfd->csd, cpu);
 
 		if (cond_func && !cond_func(cpu, info))
@@ -842,8 +835,6 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 		send_call_function_single_ipi(last_cpu);
 	else if (likely(nr_cpus > 1))
 		send_call_function_ipi_mask(cfd->cpumask_ipi);
-	else
-		run_remote = false;
 
 	/* Check if we need local execution. */
 	if ((scf_flags & SCF_RUN_LOCAL) && cpumask_test_cpu(this_cpu, mask) &&
@@ -855,7 +846,7 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 		local_irq_restore(flags);
 	}
 
-	if (!run_remote || !wait)
+	if (nr_cpus == 0 || !wait)
 		return;
 
 	for_each_cpu_and(cpu, mask, cpu_online_mask) {
