@@ -776,6 +776,7 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 {
 	int cpu, last_cpu, this_cpu = smp_processor_id();
 	struct call_function_data *cfd;
+	call_single_data_t *csd;
 	bool wait = scf_flags & SCF_WAIT;
 	int nr_cpus = 0;
 	bool run_remote = false;
@@ -800,23 +801,18 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 	 */
 	WARN_ON_ONCE(!in_task());
 
-	/* Check if we need remote execution, i.e., any CPU excluding this one. */
-	if (cpumask_any_and_but(mask, cpu_online_mask, this_cpu) < nr_cpu_ids)
-		goto local_exec;
-
-	run_remote = true;
 	cfd = this_cpu_ptr(&cfd_data);
-	cpumask_and(cfd->cpumask, mask, cpu_online_mask);
-	__cpumask_clear_cpu(this_cpu, cfd->cpumask);
-
-	for_each_cpu(cpu, cfd->cpumask) {
-		call_single_data_t *csd = per_cpu_ptr(cfd->csd, cpu);
-
-		if (cond_func && !cond_func(cpu, info)) {
-			__cpumask_clear_cpu(cpu, cfd->cpumask);
+	for_each_cpu_and(cpu, mask, cpu_online_mask) {
+		if (cpu == this_cpu)
 			continue;
-		}
 
+		if (cond_func && !cond_func(cpu, info))
+			continue;
+
+		/* We need remote execution, i.e., any CPU excluding this one. */
+		run_remote = true;
+
+		csd = per_cpu_ptr(cfd->csd, cpu);
 		csd_lock(csd);
 		if (wait)
 			csd->node.u_flags |= CSD_TYPE_SYNC;
@@ -853,7 +849,6 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 	else
 		run_remote = false;
 
-local_exec:
 	/* Check if we need local execution. */
 	if ((scf_flags & SCF_RUN_LOCAL) && cpumask_test_cpu(this_cpu, mask) &&
 	    (!cond_func || cond_func(this_cpu, info))) {
@@ -867,8 +862,12 @@ local_exec:
 	if (!run_remote || !wait)
 		return;
 
-	for_each_cpu(cpu, cfd->cpumask) {
-		call_single_data_t *csd;
+	for_each_cpu_and(cpu, mask, cpu_online_mask) {
+		if (cpu == this_cpu)
+			continue;
+
+		if (cond_func && !cond_func(cpu, info))
+			continue;
 
 		csd = per_cpu_ptr(cfd->csd, cpu);
 		csd_lock_wait(csd);
