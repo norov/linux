@@ -801,52 +801,55 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 	WARN_ON_ONCE(!in_task());
 
 	/* Check if we need remote execution, i.e., any CPU excluding this one. */
-	if (cpumask_any_and_but(mask, cpu_online_mask, this_cpu) < nr_cpu_ids) {
-		run_remote = true;
-		cfd = this_cpu_ptr(&cfd_data);
-		cpumask_and(cfd->cpumask, mask, cpu_online_mask);
-		__cpumask_clear_cpu(this_cpu, cfd->cpumask);
+	if (cpumask_any_and_but(mask, cpu_online_mask, this_cpu) < nr_cpu_ids)
+		goto local_exec;
 
-		cpumask_clear(cfd->cpumask_ipi);
-		for_each_cpu(cpu, cfd->cpumask) {
-			call_single_data_t *csd = per_cpu_ptr(cfd->csd, cpu);
+	run_remote = true;
+	cfd = this_cpu_ptr(&cfd_data);
+	cpumask_and(cfd->cpumask, mask, cpu_online_mask);
+	__cpumask_clear_cpu(this_cpu, cfd->cpumask);
 
-			if (cond_func && !cond_func(cpu, info)) {
-				__cpumask_clear_cpu(cpu, cfd->cpumask);
-				continue;
-			}
+	cpumask_clear(cfd->cpumask_ipi);
+	for_each_cpu(cpu, cfd->cpumask) {
+		call_single_data_t *csd = per_cpu_ptr(cfd->csd, cpu);
 
-			csd_lock(csd);
-			if (wait)
-				csd->node.u_flags |= CSD_TYPE_SYNC;
-			csd->func = func;
-			csd->info = info;
-#ifdef CONFIG_CSD_LOCK_WAIT_DEBUG
-			csd->node.src = smp_processor_id();
-			csd->node.dst = cpu;
-#endif
-			trace_csd_queue_cpu(cpu, _RET_IP_, func, csd);
-
-			if (llist_add(&csd->node.llist, &per_cpu(call_single_queue, cpu))) {
-				__cpumask_set_cpu(cpu, cfd->cpumask_ipi);
-				nr_cpus++;
-				last_cpu = cpu;
-			}
+		if (cond_func && !cond_func(cpu, info)) {
+			__cpumask_clear_cpu(cpu, cfd->cpumask);
+			continue;
 		}
 
-		/*
-		 * Choose the most efficient way to send an IPI. Note that the
-		 * number of CPUs might be zero due to concurrent changes to the
-		 * provided mask.
-		 */
-		if (nr_cpus == 1)
-			send_call_function_single_ipi(last_cpu);
-		else if (likely(nr_cpus > 1))
-			send_call_function_ipi_mask(cfd->cpumask_ipi);
-		else
-			run_remote = false;
+		csd_lock(csd);
+		if (wait)
+			csd->node.u_flags |= CSD_TYPE_SYNC;
+		csd->func = func;
+		csd->info = info;
+#ifdef CONFIG_CSD_LOCK_WAIT_DEBUG
+		csd->node.src = smp_processor_id();
+		csd->node.dst = cpu;
+#endif
+		trace_csd_queue_cpu(cpu, _RET_IP_, func, csd);
+
+		if (!llist_add(&csd->node.llist, &per_cpu(call_single_queue, cpu)))
+			continue;
+
+		__cpumask_set_cpu(cpu, cfd->cpumask_ipi);
+		nr_cpus++;
+		last_cpu = cpu;
 	}
 
+	/*
+	 * Choose the most efficient way to send an IPI. Note that the
+	 * number of CPUs might be zero due to concurrent changes to the
+	 * provided mask.
+	 */
+	if (nr_cpus == 1)
+		send_call_function_single_ipi(last_cpu);
+	else if (likely(nr_cpus > 1))
+		send_call_function_ipi_mask(cfd->cpumask_ipi);
+	else
+		run_remote = false;
+
+local_exec:
 	/* Check if we need local execution. */
 	if ((scf_flags & SCF_RUN_LOCAL) && cpumask_test_cpu(this_cpu, mask) &&
 	    (!cond_func || cond_func(this_cpu, info))) {
@@ -857,13 +860,14 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 		local_irq_restore(flags);
 	}
 
-	if (run_remote && wait) {
-		for_each_cpu(cpu, cfd->cpumask) {
-			call_single_data_t *csd;
+	if (!run_remote || !wait)
+		return;
 
-			csd = per_cpu_ptr(cfd->csd, cpu);
-			csd_lock_wait(csd);
-		}
+	for_each_cpu(cpu, cfd->cpumask) {
+		call_single_data_t *csd;
+
+		csd = per_cpu_ptr(cfd->csd, cpu);
+		csd_lock_wait(csd);
 	}
 }
 
