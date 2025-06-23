@@ -769,6 +769,7 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 	int cpu, last_cpu, this_cpu = smp_processor_id();
 	struct call_function_data *cfd;
 	bool wait = scf_flags & SCF_WAIT;
+	call_single_data_t *csd;
 	int nr_cpus = 0;
 	bool run_remote = false;
 
@@ -805,7 +806,7 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 			cfd = this_cpu_ptr(&cfd_data);
 			cpumask_clear(cfd->cpumask_ipi);
 		}
-		call_single_data_t *csd = per_cpu_ptr(cfd->csd, cpu);
+		csd = per_cpu_ptr(cfd->csd, cpu);
 
 		if (cond_func && !cond_func(cpu, info))
 			continue;
@@ -854,8 +855,6 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 		return;
 
 	for_each_cpu_and(cpu, mask, cpu_online_mask) {
-		call_single_data_t *csd;
-
 		if (cpu == this_cpu)
 			continue;
 
