@@ -798,10 +798,10 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 		if (cpu == this_cpu)
 			continue;
 
-		csd = per_cpu_ptr(cfd->csd, cpu);
-
 		if (cond_func && !cond_func(cpu, info))
 			continue;
+
+		csd = per_cpu_ptr(cfd->csd, cpu);
 
 		csd_lock(csd);
 		if (wait)
