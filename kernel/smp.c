@@ -814,16 +814,17 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 #endif
 		trace_csd_queue_cpu(cpu, _RET_IP_, func, csd);
 
-		if (llist_add(&csd->node.llist, &per_cpu(call_single_queue, cpu))) {
-			if (nr_cpus == 1) {
-				cpumask_clear(cfd->cpumask_ipi);
-				__cpumask_set_cpu(last_cpu, cfd->cpumask_ipi);
-			}
+		if (!llist_add(&csd->node.llist, &per_cpu(call_single_queue, cpu)))
+			continue;
 
-			__cpumask_set_cpu(cpu, cfd->cpumask_ipi);
-			nr_cpus++;
-			last_cpu = cpu;
+		if (nr_cpus == 1) {
+			cpumask_clear(cfd->cpumask_ipi);
+			__cpumask_set_cpu(last_cpu, cfd->cpumask_ipi);
 		}
+
+		__cpumask_set_cpu(cpu, cfd->cpumask_ipi);
+		nr_cpus++;
+		last_cpu = cpu;
 	}
 
 	/*
