@@ -1114,6 +1114,8 @@ extern const DECLARE_BITMAP(cpu_all_bits, NR_CPUS);
 #define for_each_online_cpu(cpu)	for ((cpu) = 0; (cpu) < 1; (cpu)++)
 #define for_each_present_cpu(cpu)	for ((cpu) = 0; (cpu) < 1; (cpu)++)
 
+#define for_each_possible_cpu_from(cpu)	for (; (cpu) < 1; (cpu)++)
+
 #define for_each_possible_cpu_wrap(cpu, start)	\
 	for ((void)(start), (cpu) = 0; (cpu) < 1; (cpu)++)
 #define for_each_online_cpu_wrap(cpu, start)	\
@@ -1123,6 +1125,8 @@ extern const DECLARE_BITMAP(cpu_all_bits, NR_CPUS);
 #define for_each_online_cpu(cpu)   for_each_cpu((cpu), cpu_online_mask)
 #define for_each_enabled_cpu(cpu)   for_each_cpu((cpu), cpu_enabled_mask)
 #define for_each_present_cpu(cpu)  for_each_cpu((cpu), cpu_present_mask)
+
+#define for_each_possible_cpu_from(cpu) for_each_cpu_from((cpu), cpu_possible_mask)
 
 #define for_each_possible_cpu_wrap(cpu, start)	\
 	for_each_cpu_wrap((cpu), cpu_possible_mask, (start))
