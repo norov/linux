@@ -809,7 +809,6 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 	cpumask_and(cfd->cpumask, mask, cpu_online_mask);
 	__cpumask_clear_cpu(this_cpu, cfd->cpumask);
 
-	cpumask_clear(cfd->cpumask_ipi);
 	for_each_cpu(cpu, cfd->cpumask) {
 		call_single_data_t *csd = per_cpu_ptr(cfd->csd, cpu);
 
@@ -831,6 +830,11 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 
 		if (!llist_add(&csd->node.llist, &per_cpu(call_single_queue, cpu)))
 			continue;
+
+		if (nr_cpus == 1) {
+			cpumask_clear(cfd->cpumask_ipi);
+			__cpumask_set_cpu(last_cpu, cfd->cpumask_ipi);
+		}
 
 		__cpumask_set_cpu(cpu, cfd->cpumask_ipi);
 		nr_cpus++;
