@@ -19,14 +19,6 @@
 #define LOCAL_PENDING_LIST_IDX	LOCAL_LIST_IDX(BPF_LRU_LOCAL_LIST_T_PENDING)
 #define IS_LOCAL_LIST_TYPE(t)	((t) >= BPF_LOCAL_LIST_T_OFFSET)
 
-static int get_next_cpu(int cpu)
-{
-	cpu = cpumask_next(cpu, cpu_possible_mask);
-	if (cpu >= nr_cpu_ids)
-		cpu = cpumask_first(cpu_possible_mask);
-	return cpu;
-}
-
 /* Local list helpers */
 static struct list_head *local_free_list(struct bpf_lru_locallist *loc_l)
 {
@@ -439,8 +431,8 @@ static struct bpf_lru_node *bpf_common_lru_pop_free(struct bpf_lru *lru,
 	struct bpf_lru_locallist *loc_l, *steal_loc_l;
 	struct bpf_common_lru *clru = &lru->common_lru;
 	struct bpf_lru_node *node;
-	int steal, first_steal;
 	unsigned long flags;
+	int steal;
 	int cpu = raw_smp_processor_id();
 
 	loc_l = per_cpu_ptr(clru->local_list, cpu);
@@ -469,9 +461,7 @@ static struct bpf_lru_node *bpf_common_lru_pop_free(struct bpf_lru *lru,
 	 * with the loc_l->next_steal CPU.
 	 */
 
-	first_steal = loc_l->next_steal;
-	steal = first_steal;
-	do {
+	for_each_cpu_wrap(steal, cpu_possible_mask, loc_l->next_steal) {
 		steal_loc_l = per_cpu_ptr(clru->local_list, steal);
 
 		raw_spin_lock_irqsave(&steal_loc_l->lock, flags);
@@ -481,9 +471,9 @@ static struct bpf_lru_node *bpf_common_lru_pop_free(struct bpf_lru *lru,
 			node = __local_list_pop_pending(lru, steal_loc_l);
 
 		raw_spin_unlock_irqrestore(&steal_loc_l->lock, flags);
-
-		steal = get_next_cpu(steal);
-	} while (!node && steal != first_steal);
+		if (node)
+			break;
+	}
 
 	loc_l->next_steal = steal;
 
