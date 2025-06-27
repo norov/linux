@@ -477,12 +477,12 @@ static struct bpf_lru_node *bpf_common_lru_pop_free(struct bpf_lru *lru,
 
 	loc_l->next_steal = steal;
 
-	if (node) {
-		raw_spin_lock_irqsave(&loc_l->lock, flags);
-		__local_list_add_pending(lru, loc_l, cpu, node, hash);
-		raw_spin_unlock_irqrestore(&loc_l->lock, flags);
-	}
+	if (!node)
+		return NULL;
 
+	raw_spin_lock_irqsave(&loc_l->lock, flags);
+	__local_list_add_pending(lru, loc_l, cpu, node, hash);
+	raw_spin_unlock_irqrestore(&loc_l->lock, flags);
 	return node;
 }
 
