@@ -76,6 +76,56 @@ static int __init test_fns(void)
 	return 0;
 }
 
+static void __init test_bitops_const_eval(void)
+{
+	/*
+	 * ror/rol operations on parameters known at compile-time must be
+	 * optimized to compile-time constants on any supported optimization
+	 * level (-O2, -Os) and all architectures. Otherwise, trigger a build
+	 * bug.
+	 */
+
+	u64 r64 = ror64(0x1234567890abcdefull, 24);
+
+	BUILD_BUG_ON(!__builtin_constant_p(r64));
+	BUILD_BUG_ON(r64 != 0xabcdef1234567890ull);
+
+	u64 l64 = rol64(0x1234567890abcdefull, 24);
+
+	BUILD_BUG_ON(!__builtin_constant_p(l64));
+	BUILD_BUG_ON(l64 != 0x7890abcdef123456ull);
+
+	u32 r32 = ror32(0x12345678, 24);
+
+	BUILD_BUG_ON(!__builtin_constant_p(r32));
+	BUILD_BUG_ON(r32 != 0x34567812);
+
+	u32 l32 = rol32(0x12345678, 24);
+
+	BUILD_BUG_ON(!__builtin_constant_p(l32));
+	BUILD_BUG_ON(l32 != 0x78123456);
+
+	u16 r16 = ror16(0x1234, 12);
+
+	BUILD_BUG_ON(!__builtin_constant_p(r16));
+	BUILD_BUG_ON(r16 != 0x2341);
+
+	u16 l16 = rol16(0x1234, 12);
+
+	BUILD_BUG_ON(!__builtin_constant_p(l16));
+	BUILD_BUG_ON(l16 != 0x4123);
+
+	u8 r8 = ror8(0x12, 6);
+
+	BUILD_BUG_ON(!__builtin_constant_p(r16));
+	BUILD_BUG_ON(r8 != 0x48);
+
+	u8 l8 = rol8(0x12, 6);
+
+	BUILD_BUG_ON(!__builtin_constant_p(l16));
+	BUILD_BUG_ON(l8 != 0x84);
+}
+
 static int __init test_bitops_startup(void)
 {
 	int i, bit_set;
@@ -121,6 +171,7 @@ static int __init test_bitops_startup(void)
 		pr_err("ERROR: FOUND SET BIT %d\n", bit_set);
 
 	test_fns();
+	test_bitops_const_eval();
 
 	pr_info("Completed bitops test\n");
 
