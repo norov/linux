@@ -335,11 +335,39 @@ EXPORT_SYMBOL(__bitmap_subset);
 	w;									\
 })
 
+#define BITMAP_WEIGHT_FROM(FETCH, start, bits)					\
+({										\
+	unsigned long __start = (start), __bits = (bits);			\
+	unsigned int idx, w = 0;						\
+										\
+	if (unlikely(__start >= bits))						\
+		goto out;							\
+										\
+	idx = __start / BITS_PER_LONG;						\
+	w = (FETCH) & BITMAP_FIRST_WORD_MASK(__start);				\
+										\
+	for (++idx; idx < __bits / BITS_PER_LONG; idx++)			\
+		w += hweight_long(FETCH);					\
+										\
+	if (__bits % BITS_PER_LONG)						\
+		w += hweight_long((FETCH) & BITMAP_LAST_WORD_MASK(__bits));	\
+										\
+out:										\
+	w;									\
+})
+
 unsigned int __bitmap_weight(const unsigned long *bitmap, unsigned int bits)
 {
 	return BITMAP_WEIGHT(bitmap[idx], bits);
 }
 EXPORT_SYMBOL(__bitmap_weight);
+
+unsigned int __bitmap_weight_from(const unsigned long *bitmap,
+					unsigned int start, unsigned int bits)
+{
+	return BITMAP_WEIGHT_FROM(bitmap[idx], start, bits);
+}
+EXPORT_SYMBOL(__bitmap_weight_from);
 
 unsigned int __bitmap_weight_and(const unsigned long *bitmap1,
 				const unsigned long *bitmap2, unsigned int bits)

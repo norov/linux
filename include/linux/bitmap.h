@@ -56,6 +56,7 @@ struct device;
  *  bitmap_weight(src, nbits)                   Hamming Weight: number set bits
  *  bitmap_weight_and(src1, src2, nbits)        Hamming Weight of and'ed bitmap
  *  bitmap_weight_andnot(src1, src2, nbits)     Hamming Weight of andnot'ed bitmap
+ *  bitmap_weight_from(src, start, nbits)       Hamming Weight starting from @start
  *  bitmap_set(dst, pos, nbits)                 Set specified bit area
  *  bitmap_clear(dst, pos, nbits)               Clear specified bit area
  *  bitmap_find_next_zero_area(buf, len, pos, n, mask)  Find bit free area
@@ -181,6 +182,8 @@ unsigned int __bitmap_weight_and(const unsigned long *bitmap1,
 				 const unsigned long *bitmap2, unsigned int nbits);
 unsigned int __bitmap_weight_andnot(const unsigned long *bitmap1,
 				    const unsigned long *bitmap2, unsigned int nbits);
+unsigned int __bitmap_weight_from(const unsigned long *bitmap,
+					unsigned int start, unsigned int nbits);
 void __bitmap_set(unsigned long *map, unsigned int start, int len);
 void __bitmap_clear(unsigned long *map, unsigned int start, int len);
 
@@ -444,6 +447,14 @@ unsigned int bitmap_weight(const unsigned long *src, unsigned int nbits)
 	if (small_const_nbits(nbits))
 		return hweight_long(*src & BITMAP_LAST_WORD_MASK(nbits));
 	return __bitmap_weight(src, nbits);
+}
+
+static __always_inline
+unsigned int bitmap_weight_from(const unsigned long *src, unsigned int start, unsigned int nbits)
+{
+	if (small_const_nbits(start + nbits - 1))
+		return hweight_long(*src & GENMASK(start + nbits - 1, start));
+	return __bitmap_weight_from(src, start, nbits);
 }
 
 static __always_inline
