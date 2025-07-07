@@ -314,23 +314,15 @@ static struct pnv_ioda_pe *pnv_ioda_pick_m64_pe(struct pci_bus *bus, bool all)
 	pnv_ioda_reserve_m64_pe(bus, pe_alloc, all);
 
 	/*
-	 * the current bus might not own M64 window and that's all
+	 * Figure out the master PE and put all slave PEs to master
+	 * PE's list to form compound PE.
+	 *
+	 * The current bus might not own M64 window and that's all
 	 * contributed by its child buses. For the case, we needn't
 	 * pick M64 dependent PE#.
 	 */
-	if (bitmap_empty(pe_alloc, phb->ioda.total_pe_num)) {
-		kfree(pe_alloc);
-		return NULL;
-	}
-
-	/*
-	 * Figure out the master PE and put all slave PEs to master
-	 * PE's list to form compound PE.
-	 */
 	master_pe = NULL;
-	i = -1;
-	while ((i = find_next_bit(pe_alloc, phb->ioda.total_pe_num, i + 1)) <
-		phb->ioda.total_pe_num) {
+	for_each_set_bit(i, pe_alloc, phb->ioda.total_pe_num) {
 		pe = &phb->ioda.pe_array[i];
 
 		phb->ioda.m64_segmap[pe->pe_number] = pe->pe_number;
