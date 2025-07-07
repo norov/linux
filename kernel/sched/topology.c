@@ -1932,10 +1932,9 @@ void sched_init_numa(int offline_node)
 		return;
 	}
 
-	for (i = 0, j = 0; i < nr_levels; i++, j++) {
-		j = find_next_bit(distance_map, NR_DISTANCE_VALUES, j);
-		distances[i] = j;
-	}
+	for_each_set_bit(j, distance_map, NR_DISTANCE_VALUES)
+		distances[i++] = j;
+
 	rcu_assign_pointer(sched_domains_numa_distance, distances);
 
 	bitmap_free(distance_map);
