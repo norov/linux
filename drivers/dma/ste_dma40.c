@@ -1664,7 +1664,7 @@ static irqreturn_t d40_handle_interrupt(int irq, void *data)
 	int i;
 	u32 idx;
 	u32 row;
-	long chan = -1;
+	long chan;
 	struct d40_chan *d40c;
 	struct d40_base *base = data;
 	u32 *regs = base->regs_interrupt;
@@ -1677,15 +1677,7 @@ static irqreturn_t d40_handle_interrupt(int irq, void *data)
 	for (i = 0; i < il_size; i++)
 		regs[i] = readl(base->virtbase + il[i].src);
 
-	for (;;) {
-
-		chan = find_next_bit((unsigned long *)regs,
-				     BITS_PER_LONG * il_size, chan + 1);
-
-		/* No more set bits found? */
-		if (chan == BITS_PER_LONG * il_size)
-			break;
-
+	for_each_set_bit(chan, (unsigned long *)regs, BITS_PER_LONG * il_size) {
 		row = chan / BITS_PER_LONG;
 		idx = chan & (BITS_PER_LONG - 1);
 
