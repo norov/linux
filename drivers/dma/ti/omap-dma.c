@@ -1530,12 +1530,9 @@ static void omap_dma_free(struct omap_dmadev *od)
 static bool omap_dma_busy(struct omap_dmadev *od)
 {
 	struct omap_chan *c;
-	int lch = -1;
+	int lch;
 
-	while (1) {
-		lch = find_next_bit(od->lch_bitmap, od->lch_count, lch + 1);
-		if (lch >= od->lch_count)
-			break;
+	for_each_set_bit(lch, od->lch_bitmap, od->lch_count) {
 		c = od->lch_map[lch];
 		if (!c)
 			continue;
