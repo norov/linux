@@ -290,12 +290,8 @@ static int o2cb_cluster_check(void)
 	}
 
 	printk(KERN_ERR "o2cb: This node could not connect to nodes:");
-	i = -1;
-	while ((i = find_next_bit(hbmap, O2NM_MAX_NODES,
-				  i + 1)) < O2NM_MAX_NODES) {
-		if (!test_bit(i, netmap))
+	for_each_andnot_bit(i, hbmap, netmap, O2NM_MAX_NODES)
 			printk(" %u", i);
-	}
 	printk(".\n");
 
 	return -ENOTCONN;
