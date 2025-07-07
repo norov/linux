@@ -290,15 +290,11 @@ static inline void IRQ_resetbit(struct irq_queue *q, int n_IRQ)
 
 static void IRQ_check(struct openpic *opp, struct irq_queue *q)
 {
-	int irq = -1;
+	int irq;
 	int next = -1;
 	int priority = -1;
 
-	for (;;) {
-		irq = find_next_bit(q->queue, opp->max_irq, irq + 1);
-		if (irq == opp->max_irq)
-			break;
-
+	for_each_set_bit(irq, q->queue, opp->max_irq) {
 		pr_debug("IRQ_check: irq %d set ivpr_pr=%d pr=%d\n",
 			irq, IVPR_PRIORITY(opp->src[irq].ivpr), priority);
 
