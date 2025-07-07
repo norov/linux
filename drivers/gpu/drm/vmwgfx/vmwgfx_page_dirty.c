@@ -324,7 +324,7 @@ void vmw_bo_dirty_transfer_to_res(struct vmw_resource *res)
 void vmw_bo_dirty_clear(struct vmw_bo *vbo)
 {
 	struct vmw_bo_dirty *dirty = vbo->dirty;
-	pgoff_t start, cur, end;
+	pgoff_t start, end;
 	unsigned long res_start = 0;
 	unsigned long res_end = vbo->tbo.base.size;
 
@@ -335,20 +335,11 @@ void vmw_bo_dirty_clear(struct vmw_bo *vbo)
 	if (res_start >= dirty->end || res_end <= dirty->start)
 		return;
 
-	cur = max(res_start, dirty->start);
+	start = max(res_start, dirty->start);
 	res_end = max(res_end, dirty->end);
-	while (cur < res_end) {
-		unsigned long num;
 
-		start = find_next_bit(&dirty->bitmap[0], res_end, cur);
-		if (start >= res_end)
-			break;
-
-		end = find_next_zero_bit(&dirty->bitmap[0], res_end, start + 1);
-		cur = end + 1;
-		num = end - start;
-		bitmap_clear(&dirty->bitmap[0], start, num);
-	}
+	for_each_set_bitrange_from(start, end, &dirty->bitmap[0], res_end)
+		bitmap_clear(&dirty->bitmap[0], start, end - start);
 
 	if (res_start <= dirty->start && res_end > dirty->start)
 		dirty->start = res_end;
