@@ -135,7 +135,7 @@ void __check_limbo(struct rdt_mon_domain *d, bool force_free)
 	struct rdt_resource *r = resctrl_arch_get_resource(RDT_RESOURCE_L3);
 	u32 idx_limit = resctrl_arch_system_num_rmid_idx();
 	struct rmid_entry *entry;
-	u32 idx, cur_idx = 1;
+	u32 idx = 1;
 	void *arch_mon_ctx;
 	bool rmid_dirty;
 	u64 val = 0;
@@ -153,11 +153,7 @@ void __check_limbo(struct rdt_mon_domain *d, bool force_free)
 	 * is less than the threshold decrement the busy counter of the
 	 * RMID and move it to the free list when the counter reaches 0.
 	 */
-	for (;;) {
-		idx = find_next_bit(d->rmid_busy_llc, idx_limit, cur_idx);
-		if (idx >= idx_limit)
-			break;
-
+	for_each_set_bit_from(idx, d->rmid_busy_llc, idx_limit) {
 		entry = __rmid_entry(idx);
 		if (resctrl_arch_rmid_read(r, d, entry->closid, entry->rmid,
 					   QOS_L3_OCCUP_EVENT_ID, &val,
@@ -178,11 +174,10 @@ void __check_limbo(struct rdt_mon_domain *d, bool force_free)
 		}
 
 		if (force_free || !rmid_dirty) {
-			clear_bit(idx, d->rmid_busy_llc);
+			__clear_bit(idx, d->rmid_busy_llc);
 			if (!--entry->busy)
 				limbo_release_entry(entry);
 		}
-		cur_idx = idx + 1;
 	}
 
 	resctrl_arch_mon_ctx_free(r, QOS_L3_OCCUP_EVENT_ID, arch_mon_ctx);
