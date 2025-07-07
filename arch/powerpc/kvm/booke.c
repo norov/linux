@@ -692,15 +692,9 @@ static void kvmppc_core_check_exceptions(struct kvm_vcpu *vcpu)
 	unsigned long *pending = &vcpu->arch.pending_exceptions;
 	unsigned int priority;
 
-	priority = __ffs(*pending);
-	while (priority < BOOKE_IRQPRIO_MAX) {
+	for_each_set_bit(priority, pending, BOOKE_IRQPRIO_MAX)
 		if (kvmppc_booke_irqprio_deliver(vcpu, priority))
 			break;
-
-		priority = find_next_bit(pending,
-		                         BITS_PER_BYTE * sizeof(*pending),
-		                         priority + 1);
-	}
 
 	/* Tell the guest about our interrupt status */
 	vcpu->arch.shared->int_pending = !!*pending;
