@@ -279,15 +279,9 @@ static inline void __sbitmap_for_each_set(struct sbitmap *sb,
 		 * On all other iterations, nr is zero, so this is a noop.
 		 */
 		depth += nr;
-		while (1) {
-			nr = find_next_bit(&word, depth, nr);
-			if (nr >= depth)
-				break;
+		for_each_set_bit_from(nr, &word, depth)
 			if (!fn(sb, (index << sb->shift) + nr, data))
 				return;
-
-			nr++;
-		}
 next:
 		nr = 0;
 		if (++index >= sb->map_nr)
