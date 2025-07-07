@@ -1157,9 +1157,7 @@ static int vmw_binding_emit_dirty(struct vmw_ctx_binding_state *cbs)
 	int ret = 0;
 	unsigned long hit = 0;
 
-	while ((hit = find_next_bit(&cbs->dirty, VMW_BINDING_NUM_BITS, hit))
-	      < VMW_BINDING_NUM_BITS) {
-
+	for_each_set_bit(hit, &cbs->dirty, VMW_BINDING_NUM_BITS) {
 		switch (hit) {
 		case VMW_BINDING_RT_BIT:
 			ret = vmw_emit_set_rt(cbs);
