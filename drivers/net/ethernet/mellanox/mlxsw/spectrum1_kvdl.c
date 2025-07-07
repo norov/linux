@@ -278,16 +278,11 @@ static u64 mlxsw_sp1_kvdl_part_occ(struct mlxsw_sp1_kvdl_part *part)
 {
 	const struct mlxsw_sp1_kvdl_part_info *info = &part->info;
 	unsigned int nr_entries;
-	int bit = -1;
-	u64 occ = 0;
 
 	nr_entries = (info->end_index -
 		      info->start_index + 1) /
 		      info->alloc_size;
-	while ((bit = find_next_bit(part->usage, nr_entries, bit + 1))
-		< nr_entries)
-		occ += info->alloc_size;
-	return occ;
+	return (u64)info->alloc_size * bitmap_weight(part->usage, nr_entries);
 }
 
 static u64 mlxsw_sp1_kvdl_occ_get(void *priv)
