@@ -73,14 +73,10 @@ irqreturn_t dw_handle_msi_irq(struct dw_pcie_rp *pp)
 
 		ret = IRQ_HANDLED;
 		val = status;
-		pos = 0;
-		while ((pos = find_next_bit(&val, MAX_MSI_IRQS_PER_CTRL,
-					    pos)) != MAX_MSI_IRQS_PER_CTRL) {
+		for_each_set_bit(pos, &val, MAX_MSI_IRQS_PER_CTRL)
 			generic_handle_domain_irq(pp->irq_domain,
 						  (i * MAX_MSI_IRQS_PER_CTRL) +
 						  pos);
-			pos++;
-		}
 	}
 
 	return ret;
