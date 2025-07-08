@@ -393,8 +393,8 @@ static int tegra_channel_enum_format(struct file *file, void *fh,
 				     struct v4l2_fmtdesc *f)
 {
 	struct tegra_vi_channel *chan = video_drvdata(file);
-	unsigned int index = 0, i;
 	unsigned long *fmts_bitmap = chan->tpg_fmts_bitmap;
+	unsigned int index;
 
 	if (!IS_ENABLED(CONFIG_VIDEO_TEGRA_TPG))
 		fmts_bitmap = chan->fmts_bitmap;
@@ -402,9 +402,7 @@ static int tegra_channel_enum_format(struct file *file, void *fh,
 	if (f->index >= bitmap_weight(fmts_bitmap, MAX_FORMAT_NUM))
 		return -EINVAL;
 
-	for (i = 0; i < f->index + 1; i++, index++)
-		index = find_next_bit(fmts_bitmap, MAX_FORMAT_NUM, index);
-
+	index = find_nth_bit(fmts_bitmap, MAX_FORMAT_NUM, f->index);
 	f->pixelformat = tegra_get_format_fourcc_by_idx(chan->vi, index - 1);
 
 	return 0;
