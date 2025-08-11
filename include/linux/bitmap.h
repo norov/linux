@@ -14,6 +14,15 @@
 #include <linux/types.h>
 #include <linux/bitmap-str.h>
 
+
+/**
+ * DOC: declare bitmap
+ * The DECLARE_BITMAP(name,bits) macro can be used to declare an array named
+ * 'name' of just enough unsigned longs to contain all bit positions from
+ * 0 to 'bits' - 1.
+ */
+#define DECLARE_BITMAP(name,bits)	unsigned long name[BITS_TO_LONGS(bits)]
+
 struct device;
 
 /*
@@ -116,13 +125,6 @@ struct device;
  *                                      Same as find_next_bit, but in
  *                                      (*addr1 & *addr2)
  *
- */
-
-/**
- * DOC: declare bitmap
- * The DECLARE_BITMAP(name,bits) macro, in linux/types.h, can be used
- * to declare an array named 'name' of just enough unsigned longs to
- * contain all bit positions from 0 to 'bits' - 1.
  */
 
 /*
