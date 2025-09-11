@@ -8153,7 +8153,7 @@ static inline void eenv_pd_busy_time(struct energy_env *eenv,
 	unsigned long busy_time = 0;
 	int cpu;
 
-	for_each_cpu(cpu, pd_cpus) {
+	for_each_cpu_and(cpu, pd_cpus, cpu_online_mask) {
 		unsigned long util = cpu_util(cpu, p, -1, 0);
 
 		busy_time += effective_cpu_util(cpu, util, NULL, NULL);
@@ -8176,7 +8176,7 @@ eenv_pd_max_util(struct energy_env *eenv, struct cpumask *pd_cpus,
 	unsigned long max_util = 0;
 	int cpu;
 
-	for_each_cpu(cpu, pd_cpus) {
+	for_each_cpu_and(cpu, pd_cpus, cpu_online_mask) {
 		struct task_struct *tsk = (cpu == dst_cpu) ? p : NULL;
 		unsigned long util = cpu_util(cpu, p, dst_cpu, 1);
 		unsigned long eff_util, min, max;
@@ -8275,7 +8275,6 @@ compute_energy(struct energy_env *eenv, struct perf_domain *pd,
  */
 static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 {
-	struct cpumask *cpus = this_cpu_cpumask_var_ptr(select_rq_mask);
 	unsigned long prev_delta = ULONG_MAX, best_delta = ULONG_MAX;
 	unsigned long p_util_min = uclamp_is_used() ? uclamp_eff_value(p, UCLAMP_MIN) : 0;
 	unsigned long p_util_max = uclamp_is_used() ? uclamp_eff_value(p, UCLAMP_MAX) : 1024;
@@ -8313,6 +8312,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 
 	for (; pd; pd = pd->next) {
 		unsigned long util_min = p_util_min, util_max = p_util_max;
+		struct cpumask *perf_domain_cpus = perf_domain_span(pd);
 		unsigned long cpu_cap, cpu_actual_cap, util;
 		long prev_spare_cap = -1, max_spare_cap = -1;
 		unsigned long rq_util_min, rq_util_max;
@@ -8320,17 +8320,14 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 		int max_spare_cap_cpu = -1;
 		int fits, max_fits = -1;
 
-		if (!cpumask_and(cpus, perf_domain_span(pd), cpu_online_mask))
-			continue;
-
 		/* Account external pressure for the energy estimation */
-		cpu = cpumask_first(cpus);
+		cpu = cpumask_first_and(perf_domain_cpus, cpu_online_mask);
 		cpu_actual_cap = get_actual_cpu_capacity(cpu);
 
 		eenv.cpu_cap = cpu_actual_cap;
 		eenv.pd_cap = 0;
 
-		for_each_cpu(cpu, cpus) {
+		for_each_cpu_and(cpu, perf_domain_cpus, cpu_online_mask) {
 			struct rq *rq = cpu_rq(cpu);
 
 			eenv.pd_cap += cpu_actual_cap;
@@ -8392,13 +8389,13 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 		if (max_spare_cap_cpu < 0 && prev_spare_cap < 0)
 			continue;
 
-		eenv_pd_busy_time(&eenv, cpus, p);
+		eenv_pd_busy_time(&eenv, perf_domain_cpus, p);
 		/* Compute the 'base' energy of the pd, without @p */
-		base_energy = compute_energy(&eenv, pd, cpus, p, -1);
+		base_energy = compute_energy(&eenv, pd, perf_domain_cpus, p, -1);
 
 		/* Evaluate the energy impact of using prev_cpu. */
 		if (prev_spare_cap > -1) {
-			prev_delta = compute_energy(&eenv, pd, cpus, p,
+			prev_delta = compute_energy(&eenv, pd, perf_domain_cpus, p,
 						    prev_cpu);
 			/* CPU utilization has changed */
 			if (prev_delta < base_energy)
@@ -8422,7 +8419,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 			    (cpu_actual_cap <= best_actual_cap))
 				continue;
 
-			cur_delta = compute_energy(&eenv, pd, cpus, p,
+			cur_delta = compute_energy(&eenv, pd, perf_domain_cpus, p,
 						   max_spare_cap_cpu);
 			/* CPU utilization has changed */
 			if (cur_delta < base_energy)
