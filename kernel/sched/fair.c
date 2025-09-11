@@ -2161,11 +2161,10 @@ static void task_numa_assign(struct task_numa_env *env,
 		int start = env->dst_cpu;
 
 		/* Find alternative idle CPU. */
-		for_each_cpu_wrap(cpu, cpumask_of_node(env->dst_nid), start + 1) {
-			if (cpu == env->best_cpu || !idle_cpu(cpu) ||
-			    !cpumask_test_cpu(cpu, env->p->cpus_ptr)) {
+		for_each_cpu_and_wrap(cpu, env->p->cpus_ptr, cpumask_of_node(env->dst_nid),
+					start + 1) {
+			if (cpu == env->best_cpu || !idle_cpu(cpu))
 				continue;
-			}
 
 			env->dst_cpu = cpu;
 			rq = cpu_rq(env->dst_cpu);
@@ -7660,18 +7659,15 @@ static int
 select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 {
 	unsigned long task_util, util_min, util_max, best_cap = 0;
+	struct cpumask *sched_domain_cpus = sched_domain_span(sd);
 	int fits, best_fits = 0;
 	int cpu, best_cpu = -1;
-	struct cpumask *cpus;
-
-	cpus = this_cpu_cpumask_var_ptr(select_rq_mask);
-	cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr);
 
 	task_util = task_util_est(p);
 	util_min = uclamp_eff_value(p, UCLAMP_MIN);
 	util_max = uclamp_eff_value(p, UCLAMP_MAX);
 
-	for_each_cpu_wrap(cpu, cpus, target) {
+	for_each_cpu_and_wrap(cpu, sched_domain_span(sd), p->cpus_ptr, target) {
 		unsigned long cpu_cap = capacity_of(cpu);
 
 		if (!available_idle_cpu(cpu) && !sched_idle_cpu(cpu))
