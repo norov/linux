@@ -98,7 +98,8 @@ void __init housekeeping_init(void)
 
 	for_each_set_bit(type, &housekeeping.flags, HK_TYPE_MAX) {
 		/* We need at least one CPU to handle housekeeping work */
-		WARN_ON_ONCE(cpumask_empty(housekeeping.cpumasks[type]));
+		if (WARN_ON_ONCE(cpumask_empty(housekeeping.cpumasks[type])))
+			break;
 	}
 }
 
