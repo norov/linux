@@ -1475,7 +1475,7 @@ static int storvsc_do_io(struct hv_device *device,
 			 * available on the same NUMA node.
 			 */
 			node_mask = cpumask_of_node(cpu_to_node(q_num));
-			for_each_cpu_wrap(tgt_cpu,
+			for_each_cpu_and_wrap(tgt_cpu,
 				 &stor_device->alloced_cpus, node_mask, q_num + 1) {
 				if (tgt_cpu == q_num)
 					continue;
