@@ -407,6 +407,22 @@ unsigned int cpumask_random(const struct cpumask *src)
 	for_each_and_bit(cpu, cpumask_bits(mask1), cpumask_bits(mask2), small_cpumask_bits)
 
 /**
+ * for_each_cpu_and_wrap - iterate over every cpu in (mask1 & mask2),
+ *			   starting at a specified location
+ * @cpu: the (optionally unsigned) integer iterator
+ * @mask1: the cpumask pointer
+ * @mask2: the cpumask pointer
+ * @start: the start location
+ *
+ * The implementation does not assume any bit in @mask is set (including @start).
+ *
+ * After the loop, cpu is >= nr_cpu_ids.
+ */
+#define for_each_cpu_and_wrap(cpu, mask1, mask2, start)					\
+	for_each_set_and_bit_wrap(cpu, cpumask_bits(mask1), cpumask_bits(mask2),	\
+					small_cpumask_bits, start)
+
+/**
  * for_each_cpu_and_andnot_from - iterate over every cpu in all masks
  * @cpu: the (optionally unsigned) integer iterator
  * @mask1: the first cpumask pointer
