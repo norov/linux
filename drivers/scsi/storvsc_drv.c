@@ -1476,9 +1476,7 @@ static int storvsc_do_io(struct hv_device *device,
 			 */
 			node_mask = cpumask_of_node(cpu_to_node(q_num));
 			for_each_cpu_wrap(tgt_cpu,
-				 &stor_device->alloced_cpus, q_num + 1) {
-				if (!cpumask_test_cpu(tgt_cpu, node_mask))
-					continue;
+				 &stor_device->alloced_cpus, node_mask, q_num + 1) {
 				if (tgt_cpu == q_num)
 					continue;
 				channel = READ_ONCE(
