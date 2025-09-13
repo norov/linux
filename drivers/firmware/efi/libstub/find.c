@@ -26,7 +26,7 @@
 		idx++;								\
 	}									\
 										\
-	sz = min(idx * BITS_PER_LONG + __ffs(MUNGE(tmp)), sz);			\
+	sz = idx * BITS_PER_LONG + __ffs(MUNGE(tmp));				\
 out:										\
 	sz;									\
 })
