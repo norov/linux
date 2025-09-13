@@ -340,7 +340,7 @@ static int smmu_pmu_apply_event_filter(struct smmu_pmu *smmu_pmu,
 	 * Per-counter filtering, or scheduling the first globally-filtered
 	 * event into an empty PMU so idx == 0 and it works out equivalent.
 	 */
-	if (!smmu_pmu->global_filter || cur_idx == num_ctrs) {
+	if (!smmu_pmu->global_filter || cur_idx >= num_ctrs) {
 		smmu_pmu_set_event_filter(event, idx, span, sid);
 		return 0;
 	}
