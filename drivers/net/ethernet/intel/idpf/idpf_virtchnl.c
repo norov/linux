@@ -381,7 +381,7 @@ struct idpf_vc_xn *idpf_vc_xn_pop_free(struct idpf_vc_xn_manager *vcxn_mngr)
 
 	spin_lock_bh(&vcxn_mngr->xn_bm_lock);
 	free_idx = find_first_bit(vcxn_mngr->free_xn_bm, IDPF_VC_XN_RING_LEN);
-	if (free_idx == IDPF_VC_XN_RING_LEN)
+	if (free_idx >= IDPF_VC_XN_RING_LEN)
 		goto do_unlock;
 
 	clear_bit(free_idx, vcxn_mngr->free_xn_bm);
