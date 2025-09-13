@@ -7609,7 +7609,7 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 		struct sched_group *sg = sd->groups;
 
 		if (sg->flags & SD_CLUSTER) {
-			for_each_cpu_wrap(cpu, cpus, sched_group_span(sg), target + 1) {
+			for_each_cpu_and_wrap(cpu, cpus, sched_group_span(sg), target + 1) {
 				if (has_idle_core) {
 					i = select_idle_core(p, cpu, cpus, &idle_cpu);
 					if ((unsigned int)i < nr_cpumask_bits)
@@ -7664,7 +7664,7 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 	util_min = uclamp_eff_value(p, UCLAMP_MIN);
 	util_max = uclamp_eff_value(p, UCLAMP_MAX);
 
-	for_each_cpu_and_wrap(cpu, sched_domain_span(sd), p->cpus_ptr, target) {
+	for_each_cpu_and_wrap(cpu, sched_domain_cpus, p->cpus_ptr, target) {
 		unsigned long cpu_cap = capacity_of(cpu);
 
 		if (!available_idle_cpu(cpu) && !sched_idle_cpu(cpu))

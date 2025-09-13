@@ -538,7 +538,7 @@ unsigned long __for_each_and_wrap(const unsigned long *bitmap1, const unsigned l
 	}
 
 	/* Search the other part. */
-	bit = find_next_bit(bitmap1, bitmap2, start, n);
+	bit = find_next_and_bit(bitmap1, bitmap2, start, n);
 	return bit < start ? bit : size;
 }
 
