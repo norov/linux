@@ -244,11 +244,7 @@ static void cgx_notify_pfs(struct cgx_link_event *event, struct rvu *rvu)
 		return;
 	}
 
-	do {
-		pfid = find_first_bit(&pfmap,
-				      rvu->cgx_cnt_max * rvu->hw->lmac_per_cgx);
-		clear_bit(pfid, &pfmap);
-
+	for_each_set_bit(pfid, &pfmap, rvu->cgx_cnt_max * rvu->hw->lmac_per_cgx) {
 		/* check if notification is enabled */
 		if (!test_bit(pfid, &rvu->pf_notify_bmap)) {
 			dev_info(rvu->dev, "cgx %d: lmac %d Link status %s\n",
@@ -275,7 +271,7 @@ static void cgx_notify_pfs(struct cgx_link_event *event, struct rvu *rvu)
 		otx2_mbox_wait_for_rsp(&rvu->afpf_wq_info.mbox_up, pfid);
 
 		mutex_unlock(&rvu->mbox_lock);
-	} while (pfmap);
+	}
 }
 
 static void cgx_evhandler_task(struct work_struct *work)
