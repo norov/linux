@@ -155,7 +155,7 @@ static unsigned long reserve_resources(unsigned long *p, int n, int mmax,
 
 	while (n--) {
 		i = find_first_bit(p, mmax);
-		if (i == mmax)
+		if (i >= mmax)
 			BUG();
 		__clear_bit(i, p);
 		__set_bit(i, &bits);
