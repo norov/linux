@@ -641,7 +641,7 @@ int bnxt_qplib_alloc_pd(struct bnxt_qplib_res  *res, struct bnxt_qplib_pd *pd)
 
 	mutex_lock(&res->pd_tbl_lock);
 	bit_num = find_first_bit(pdt->tbl, pdt->max);
-	if (bit_num == pdt->max) {
+	if (bit_num >= pdt->max) {
 		rc = -ENOMEM;
 		goto exit;
 	}
@@ -714,7 +714,7 @@ int bnxt_qplib_alloc_dpi(struct bnxt_qplib_res *res,
 	mutex_lock(&res->dpi_tbl_lock);
 
 	bit_num = find_first_bit(dpit->tbl, dpit->max);
-	if (bit_num == dpit->max) {
+	if (bit_num >= dpit->max) {
 		mutex_unlock(&res->dpi_tbl_lock);
 		return -ENOMEM;
 	}
