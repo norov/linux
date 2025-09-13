@@ -761,10 +761,9 @@ static int gic_ipi_domain_alloc(struct irq_domain *d, unsigned int virq,
 		return -ENOMEM;
 
 	/* check that we have enough space */
-	for (i = base_hwirq; i < nr_irqs; i++) {
-		if (!test_bit(i, ipi_available))
-			return -EBUSY;
-	}
+	if (find_next_zero_bit(ipi_available, nr_irqs, base_hwirq) < nr_irqs)
+		return -EBUSY;
+
 	bitmap_clear(ipi_available, base_hwirq, nr_irqs);
 
 	/* map the hwirq for each cpu consecutively */
