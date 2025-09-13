@@ -1939,7 +1939,7 @@ int wl12xx_croc(struct wl1271 *wl, u8 role_id)
 	 * recoveries due to just finished ROCs - when Tx hasn't yet had
 	 * a chance to get out.
 	 */
-	if (find_first_bit(wl->roc_map, WL12XX_MAX_ROLES) >= WL12XX_MAX_ROLES)
+	if (bitmap_empty(wl->roc_map, WL12XX_MAX_ROLES))
 		wl12xx_rearm_tx_watchdog_locked(wl);
 out:
 	return ret;
