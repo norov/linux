@@ -368,7 +368,7 @@ unlock:
 static void ti_sci_inta_free_parent_irq(struct ti_sci_inta_irq_domain *inta,
 					struct ti_sci_inta_vint_desc *vint_desc)
 {
-	if (find_first_bit(vint_desc->event_map, MAX_EVENTS_PER_VINT) == MAX_EVENTS_PER_VINT) {
+	if (find_first_bit(vint_desc->event_map, MAX_EVENTS_PER_VINT) >= MAX_EVENTS_PER_VINT) {
 		list_del(&vint_desc->list);
 		ti_sci_release_resource(inta->vint, vint_desc->vint_id);
 		irq_dispose_mapping(vint_desc->parent_virq);
