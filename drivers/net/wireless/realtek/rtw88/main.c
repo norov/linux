@@ -692,8 +692,7 @@ static void rtw_txq_ba_iter(void *data, struct ieee80211_sta *sta)
 	int ret;
 	u8 tid;
 
-	tid = find_first_bit(si->tid_ba, IEEE80211_NUM_TIDS);
-	while (tid != IEEE80211_NUM_TIDS) {
+	for_each_set_bit(tid, si->tid_ba, IEEE80211_NUM_TIDS) {
 		clear_bit(tid, si->tid_ba);
 		ret = ieee80211_start_tx_ba_session(sta, tid, 0);
 		if (ret == -EINVAL) {
@@ -704,8 +703,6 @@ static void rtw_txq_ba_iter(void *data, struct ieee80211_sta *sta)
 			rtwtxq = (struct rtw_txq *)txq->drv_priv;
 			set_bit(RTW_TXQ_BLOCK_BA, &rtwtxq->flags);
 		}
-
-		tid = find_first_bit(si->tid_ba, IEEE80211_NUM_TIDS);
 	}
 }
 
