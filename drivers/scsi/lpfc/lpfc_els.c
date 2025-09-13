@@ -12110,7 +12110,7 @@ u32 lpfc_vmid_get_cs_ctl(struct lpfc_vport *vport)
 	i = find_first_bit(vport->vmid_priority_range,
 			   LPFC_VMID_MAX_PRIORITY_RANGE);
 
-	if (i == LPFC_VMID_MAX_PRIORITY_RANGE)
+	if (i >= LPFC_VMID_MAX_PRIORITY_RANGE)
 		return 0;
 
 	clear_bit(i, vport->vmid_priority_range);
