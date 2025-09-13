@@ -757,7 +757,7 @@ static int gic_ipi_domain_alloc(struct irq_domain *d, unsigned int virq,
 	int cpu, ret, i;
 
 	base_hwirq = find_first_bit(ipi_available, gic_shared_intrs);
-	if (base_hwirq == gic_shared_intrs)
+	if (base_hwirq >= gic_shared_intrs)
 		return -ENOMEM;
 
 	/* check that we have enough space */
