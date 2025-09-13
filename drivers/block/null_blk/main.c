@@ -882,9 +882,7 @@ static void null_free_page(struct nullb_page *t_page)
 
 static bool null_page_empty(struct nullb_page *page)
 {
-	int size = MAP_SZ - 2;
-
-	return find_first_bit(page->bitmap, size) == size;
+	return bitmap_empty(page->bitmap, MAP_SZ - 2);
 }
 
 static void null_free_sector(struct nullb *nullb, sector_t sector,
