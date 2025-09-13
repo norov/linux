@@ -10654,9 +10654,7 @@ static void hclge_sync_vlan_filter(struct hclge_dev *hdev)
 	for (i = 0; i < hdev->num_alloc_vport; i++) {
 		struct hclge_vport *vport = &hdev->vport[i];
 
-		vlan_id = find_first_bit(vport->vlan_del_fail_bmap,
-					 VLAN_N_VID);
-		while (vlan_id != VLAN_N_VID) {
+		for_each_set_bit(vlan_id, vport->vlan_del_fail_bmap, VLAN_N_VID) {
 			ret = hclge_set_vlan_filter_hw(hdev, htons(ETH_P_8021Q),
 						       vport->vport_id, vlan_id,
 						       true);
@@ -10674,9 +10672,6 @@ static void hclge_sync_vlan_filter(struct hclge_dev *hdev)
 				mutex_unlock(&hdev->vport_lock);
 				return;
 			}
-
-			vlan_id = find_first_bit(vport->vlan_del_fail_bmap,
-						 VLAN_N_VID);
 		}
 	}
 	mutex_unlock(&hdev->vport_lock);

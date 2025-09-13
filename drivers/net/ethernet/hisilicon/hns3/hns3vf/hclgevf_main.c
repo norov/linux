@@ -1275,8 +1275,7 @@ static void hclgevf_sync_vlan_filter(struct hclgevf_dev *hdev)
 		return;
 
 	rtnl_lock();
-	vlan_id = find_first_bit(hdev->vlan_del_fail_bmap, VLAN_N_VID);
-	while (vlan_id != VLAN_N_VID) {
+	for_each_set_bit(vlan_id, hdev->vlan_del_fail_bmap, VLAN_N_VID) {
 		ret = hclgevf_set_vlan_filter(handle, htons(ETH_P_8021Q),
 					      vlan_id, true);
 		if (ret)
@@ -1286,8 +1285,6 @@ static void hclgevf_sync_vlan_filter(struct hclgevf_dev *hdev)
 		sync_cnt++;
 		if (sync_cnt >= HCLGEVF_MAX_SYNC_COUNT)
 			break;
-
-		vlan_id = find_first_bit(hdev->vlan_del_fail_bmap, VLAN_N_VID);
 	}
 	rtnl_unlock();
 }
