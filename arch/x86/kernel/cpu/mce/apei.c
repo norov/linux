@@ -40,8 +40,8 @@ void apei_mce_report_mem_error(int severity, struct cper_sec_mem_err *mem_err)
 	 * to be extra safe, check and reject an error radius '0',
 	 * and fall back to the default page size.
 	 */
-	if (mem_err->validation_bits & CPER_MEM_VALID_PA_MASK)
-		lsb = find_first_bit((void *)&mem_err->physical_addr_mask, PAGE_SHIFT);
+	if (mem_err->validation_bits & CPER_MEM_VALID_PA_MASK && mem_err->physical_addr_mask)
+		lsb = __ffs64(mem_err->physical_addr_mask);
 	else
 		lsb = PAGE_SHIFT;
 
