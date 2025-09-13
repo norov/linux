@@ -276,7 +276,7 @@ int iwl_mvm_mac_ctxt_init(struct iwl_mvm *mvm, struct ieee80211_vif *vif)
 
 	mvmvif->id = find_first_bit(data.available_mac_ids,
 				    NUM_MAC_INDEX_DRIVER);
-	if (mvmvif->id == NUM_MAC_INDEX_DRIVER) {
+	if (mvmvif->id >= NUM_MAC_INDEX_DRIVER) {
 		IWL_ERR(mvm, "Failed to init MAC context - no free ID!\n");
 		ret = -EIO;
 		goto exit_fail;
@@ -287,7 +287,7 @@ int iwl_mvm_mac_ctxt_init(struct iwl_mvm *mvm, struct ieee80211_vif *vif)
 	else
 		mvmvif->tsf_id = find_first_bit(data.available_tsf_ids,
 						NUM_TSF_IDS);
-	if (mvmvif->tsf_id == NUM_TSF_IDS) {
+	if (mvmvif->tsf_id >= NUM_TSF_IDS) {
 		IWL_ERR(mvm, "Failed to init MAC context - no free TSF!\n");
 		ret = -EIO;
 		goto exit_fail;
