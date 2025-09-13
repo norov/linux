@@ -3385,11 +3385,10 @@ static bool hclge_reset_vf_in_bitmap(struct hclge_dev *hdev,
 	int func_id;
 	int ret;
 
-	func_id = find_first_bit(bitmap, HCLGE_VPORT_NUM);
-	if (func_id == PF_VPORT_ID)
-		return false;
+	for_each_set_bit(func_id, bitmap, HCLGE_VPORT_NUM) {
+		if (func_id == PF_VPORT_ID)
+			return false;
 
-	while (func_id != HCLGE_VPORT_NUM) {
 		vport = hclge_get_vf_vport(hdev,
 					   func_id - HCLGE_VF_VPORT_START_NUM);
 		if (!vport) {
@@ -3417,7 +3416,6 @@ static bool hclge_reset_vf_in_bitmap(struct hclge_dev *hdev,
 
 		exist_set = true;
 		clear_bit(func_id, bitmap);
-		func_id = find_first_bit(bitmap, HCLGE_VPORT_NUM);
 	}
 
 	return exist_set;
