@@ -182,7 +182,7 @@ static int ampere_cspmu_validate_event(struct arm_cspmu *cspmu,
 			     cspmu->cycle_counter_logical_idx);
 
 	/* This is the first event, thus any configuration is fine */
-	if (idx == cspmu->cycle_counter_logical_idx)
+	if (idx >= cspmu->cycle_counter_logical_idx)
 		return 0;
 
 	curr = cspmu->hw_events.events[idx];
