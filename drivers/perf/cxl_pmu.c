@@ -544,11 +544,8 @@ static int cxl_pmu_get_event_idx(struct perf_event *event, int *counter_idx,
 		if (!counter_idx)
 			return 0;
 
-		bitmap_andnot(configurable_and_free, info->conf_counter_bm,
-			info->used_counter_bm, CXL_PMU_MAX_COUNTERS);
-
-		i = find_first_bit(configurable_and_free, CXL_PMU_MAX_COUNTERS);
-		if (i == CXL_PMU_MAX_COUNTERS)
+		if (bitmap_empty_andnot(info->conf_counter_bm,
+					info->used_counter_bm, CXL_PMU_MAX_COUNTERS))
 			return -EINVAL;
 
 		*counter_idx = i;

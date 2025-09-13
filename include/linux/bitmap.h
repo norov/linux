@@ -430,6 +430,15 @@ bool bitmap_empty(const unsigned long *src, unsigned nbits)
 }
 
 static __always_inline
+bool bitmap_empty_andnot(const unsigned long *src1, const unsigned long *src2, unsigned nbits)
+{
+	if (small_const_nbits(nbits))
+		return !(*src1 & ~(*src2) & BITMAP_LAST_WORD_MASK(nbits));
+
+	return find_first_andnot_bit(src1, src2, nbits) >= nbits;
+}
+
+static __always_inline
 bool bitmap_full(const unsigned long *src, unsigned int nbits)
 {
 	if (small_const_nbits(nbits))
