@@ -261,7 +261,7 @@ static void wl12xx_tx_watchdog_work(struct work_struct *work)
 	 * if a ROC is in progress, we might not have any Tx for a long
 	 * time (e.g. pending Tx on the non-ROC channels)
 	 */
-	if (find_first_bit(wl->roc_map, WL12XX_MAX_ROLES) < WL12XX_MAX_ROLES) {
+	if (!bitmap_empty(wl->roc_map, WL12XX_MAX_ROLES)) {
 		wl1271_debug(DEBUG_TX, "No Tx (in FW) for %d ms due to ROC",
 			     wl->conf.tx.tx_watchdog_timeout);
 		wl12xx_rearm_tx_watchdog_locked(wl);
@@ -3764,7 +3764,7 @@ static int wl1271_op_hw_scan(struct ieee80211_hw *hw,
 		goto out;
 
 	/* fail if there is any role in ROC */
-	if (find_first_bit(wl->roc_map, WL12XX_MAX_ROLES) < WL12XX_MAX_ROLES) {
+	if (!bitmap_empty(wl->roc_map, WL12XX_MAX_ROLES)) {
 		/* don't allow scanning right now */
 		ret = -EBUSY;
 		goto out_sleep;
@@ -5154,8 +5154,7 @@ static int wl12xx_sta_remove(struct wl1271 *wl,
 static void wlcore_roc_if_possible(struct wl1271 *wl,
 				   struct wl12xx_vif *wlvif)
 {
-	if (find_first_bit(wl->roc_map,
-			   WL12XX_MAX_ROLES) < WL12XX_MAX_ROLES)
+	if (!bitmap_empty(wl->roc_map, WL12XX_MAX_ROLES))
 		return;
 
 	if (WARN_ON(wlvif->role_id == WL12XX_INVALID_ROLE_ID))
@@ -5306,8 +5305,7 @@ static int wl12xx_update_sta_state(struct wl1271 *wl,
 	if (is_sta &&
 	    old_state == IEEE80211_STA_NOTEXIST &&
 	    new_state == IEEE80211_STA_NONE) {
-		if (find_first_bit(wl->roc_map,
-				   WL12XX_MAX_ROLES) >= WL12XX_MAX_ROLES) {
+		if (bitmap_empty(wl->roc_map, WL12XX_MAX_ROLES)) {
 			WARN_ON(wlvif->role_id == WL12XX_INVALID_ROLE_ID);
 			wl12xx_roc(wl, wlvif, wlvif->role_id,
 				   wlvif->band, wlvif->channel);
