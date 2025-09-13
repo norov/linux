@@ -2627,7 +2627,7 @@ static void nfp_net_rss_init(struct nfp_net *nn)
 					  NFP_NET_CFG_RSS_TOEPLITZ);
 
 	func_bit = find_first_bit(&rss_cap_hfunc, NFP_NET_CFG_RSS_HFUNCS);
-	if (func_bit == NFP_NET_CFG_RSS_HFUNCS) {
+	if (func_bit >= NFP_NET_CFG_RSS_HFUNCS) {
 		dev_warn(nn->dp.dev,
 			 "Bad RSS config, defaulting to Toeplitz hash\n");
 		func_bit = ETH_RSS_HASH_TOP_BIT;
