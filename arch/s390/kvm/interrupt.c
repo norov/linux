@@ -1951,7 +1951,7 @@ static void __floating_irq_kick(struct kvm *kvm, u64 type)
 
 	/* find idle VCPUs first, then round robin */
 	sigcpu = find_first_bit(kvm->arch.idle_mask, online_vcpus);
-	if (sigcpu == online_vcpus) {
+	if (sigcpu >= online_vcpus) {
 		do {
 			sigcpu = kvm->arch.float_int.next_rr_cpu++;
 			kvm->arch.float_int.next_rr_cpu %= online_vcpus;
