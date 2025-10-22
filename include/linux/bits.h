@@ -57,6 +57,15 @@
 #define GENMASK_U64(h, l)	GENMASK_TYPE(u64, h, l)
 #define GENMASK_U128(h, l)	GENMASK_TYPE(u128, h, l)
 
+#define BITS(l, h)		GENMASK(h, l)
+#define BITS_ULL(l, h)		GENMASK_ULL(h, l)
+
+#define BITS_U8(l, h)		GENMASK_U8(h, l)
+#define BITS_U16(l, h)		GENMASK_U16(h, l)
+#define BITS_U32(l, h)		GENMASK_U32(h, l)
+#define BITS_U64(l, h)		GENMASK_U64(h, l)
+#define BITS_U128(l, h)		GENMASK_U128(h, l)
+
 /*
  * Fixed-type variants of BIT(), with additional checks like GENMASK_TYPE(). The
  * following examples generate compiler warnings due to -Wshift-count-overflow:
