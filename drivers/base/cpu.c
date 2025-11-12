@@ -241,9 +241,6 @@ static ssize_t print_cpus_kernel_max(struct device *dev,
 }
 static DEVICE_ATTR(kernel_max, 0444, print_cpus_kernel_max, NULL);
 
-/* arch-optional setting to enable display of offline cpus >= nr_cpu_ids */
-unsigned int total_cpus;
-
 static ssize_t print_cpus_offline(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
@@ -256,17 +253,6 @@ static ssize_t print_cpus_offline(struct device *dev,
 	cpumask_andnot(offline, cpu_possible_mask, cpu_online_mask);
 	len += sysfs_emit_at(buf, len, "%*pbl", cpumask_pr_args(offline));
 	free_cpumask_var(offline);
-
-	/* display offline cpus >= nr_cpu_ids */
-	if (total_cpus && nr_cpu_ids < total_cpus) {
-		len += sysfs_emit_at(buf, len, ",");
-
-		if (nr_cpu_ids == total_cpus-1)
-			len += sysfs_emit_at(buf, len, "%u", nr_cpu_ids);
-		else
-			len += sysfs_emit_at(buf, len, "%u-%d",
-					     nr_cpu_ids, total_cpus - 1);
-	}
 
 	len += sysfs_emit_at(buf, len, "\n");
 

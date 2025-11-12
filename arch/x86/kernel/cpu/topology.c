@@ -503,7 +503,6 @@ void __init topology_init_possible_cpus(void)
 	topo_info.nr_assigned_cpus = assigned;
 	topo_info.nr_disabled_cpus = disabled;
 
-	total_cpus = allowed;
 	set_nr_cpu_ids(allowed);
 
 	cnta = domain_weight(TOPO_PKG_DOMAIN);
