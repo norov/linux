@@ -1966,10 +1966,8 @@ static void mlx4_allocate_port_vpps(struct mlx4_dev *dev, int port)
 	num_vfs = (available_vpp /
 		   bitmap_weight(port_qos->priority_bm, MLX4_NUM_UP));
 
-	for (i = 0; i < MLX4_NUM_UP; i++) {
-		if (test_bit(i, port_qos->priority_bm))
-			vpp_param[i] = num_vfs;
-	}
+	for_each_set_bit(i, port_qos->priority_bm, MLX4_NUM_UP)
+		vpp_param[i] = num_vfs;
 
 	err = mlx4_ALLOCATE_VPP_set(dev, port, vpp_param);
 	if (err) {
