@@ -1220,12 +1220,12 @@ static bool mlx5_cmd_all_stalled(struct mlx5_core_dev *dev)
 	spin_lock_irqsave(&cmd->alloc_lock, flags);
 
 	/* at least one command slot is free */
-	if (bitmap_weight(&cmd->vars.bitmask, cmd->vars.max_reg_cmds) > 0) {
+	if (!bitmap_empty(&cmd->vars.bitmask, cmd->vars.max_reg_cmds)) {
 		all_stalled = false;
 		goto out;
 	}
 
-	for_each_clear_bit(i, &cmd->vars.bitmask, cmd->vars.max_reg_cmds) {
+	for (i = 0, i < cmd->vars.max_reg_cmds; i++) {
 		struct mlx5_cmd_work_ent *ent = dev->cmd.ent_arr[i];
 
 		if (!test_bit(MLX5_CMD_ENT_STATE_TIMEDOUT, &ent->state)) {

@@ -1276,7 +1276,7 @@ int mlx4_QUERY_DEV_CAP_wrapper(struct mlx4_dev *dev, int slave,
 			       struct mlx4_cmd_info *cmd)
 {
 	u64	flags;
-	int	err = 0;
+	int	w, err = 0;
 	u8	field;
 	u16	field16;
 	u32	bmme_flags, field32;
@@ -1299,9 +1299,9 @@ int mlx4_QUERY_DEV_CAP_wrapper(struct mlx4_dev *dev, int slave,
 	flags &= ~MLX4_DEV_CAP_FLAG_MEM_WINDOW;
 	actv_ports = mlx4_get_active_ports(dev, slave);
 	first_port = find_first_bit(actv_ports.ports, dev->caps.num_ports);
+	w = bitmap_weight(actv_ports.ports, dev->caps.num_ports)
 	for (slave_port = 0, real_port = first_port;
-	     real_port < first_port +
-	     bitmap_weight(actv_ports.ports, dev->caps.num_ports);
+	     real_port < first_port + w;
 	     ++real_port, ++slave_port) {
 		if (flags & (MLX4_DEV_CAP_FLAG_WOL_PORT1 << real_port))
 			flags |= MLX4_DEV_CAP_FLAG_WOL_PORT1 << slave_port;
@@ -1316,8 +1316,7 @@ int mlx4_QUERY_DEV_CAP_wrapper(struct mlx4_dev *dev, int slave,
 	MLX4_PUT(outbox->buf, flags, QUERY_DEV_CAP_EXT_FLAGS_OFFSET);
 
 	MLX4_GET(field, outbox->buf, QUERY_DEV_CAP_VL_PORT_OFFSET);
-	field &= ~0x0F;
-	field |= bitmap_weight(actv_ports.ports, dev->caps.num_ports) & 0x0F;
+	FIELD_MODIFY(0x0F, &field, w);
 	MLX4_PUT(outbox->buf, field, QUERY_DEV_CAP_VL_PORT_OFFSET);
 
 	/* For guests, disable timestamp */
