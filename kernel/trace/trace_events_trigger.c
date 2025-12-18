@@ -12,6 +12,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/rculist.h>
+#include <linux/trace_printk.h>
 
 #include "trace.h"
 

@@ -16,6 +16,7 @@
 #include <linux/ctype.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/trace_printk.h>
 
 #include "trace.h"
 

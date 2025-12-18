@@ -17,6 +17,7 @@
 #include <linux/fprobe.h>
 #include <linux/sched/debug.h>
 #include <linux/slab.h>
+#include <linux/trace_printk.h>
 
 #define BACKTRACE_DEPTH 16
 #define MAX_SYMBOL_LEN 4096

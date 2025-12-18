@@ -22,6 +22,7 @@
 #include <linux/pagevec.h>
 #include <linux/scatterlist.h>
 #include <linux/workqueue.h>
+#include <linux/trace_printk.h>
 
 #include <drm/drm_mm.h>
 

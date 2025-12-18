@@ -2,6 +2,7 @@
 #include <linux/module.h>
 #include <linux/kthread.h>
 #include <linux/irq_work.h>
+#include <linux/trace_printk.h>
 
 /* Must not be static to force gcc to consider these non constant */
 char *trace_printk_test_global_str =

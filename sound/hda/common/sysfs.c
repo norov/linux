@@ -19,6 +19,7 @@
 #include "hda_local.h"
 #include <sound/hda_hwdep.h>
 #include <sound/minors.h>
+#include <linux/trace_printk.h>
 
 /* hint string pair */
 struct hda_hint {

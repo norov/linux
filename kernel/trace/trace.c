@@ -53,6 +53,7 @@
 #include <linux/sort.h>
 #include <linux/io.h> /* vmap_page_range() */
 #include <linux/fs_context.h>
+#include <linux/trace_printk.h>
 
 #include <asm/setup.h> /* COMMAND_LINE_SIZE */
 

@@ -20,6 +20,7 @@
 #include <asm/time.h>
 
 #include <linux/seq_file.h>
+#include <linux/trace_printk.h>
 
 #include "book3s_xics.h"
 
