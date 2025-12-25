@@ -12,6 +12,7 @@
 #include <linux/tracepoint.h>
 #include <linux/ftrace.h>
 #include <linux/trace.h>
+#include <linux/trace_control.h>
 #include <linux/trace_printk.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/trace_seq.h>

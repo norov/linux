@@ -20,6 +20,7 @@
 #include <linux/gfp.h>
 #include <linux/crash_dump.h>
 #include <linux/debug_locks.h>
+#include <linux/trace_control.h>
 #include <linux/vmalloc.h>
 #include <linux/secure_boot.h>
 #include <asm/asm-extable.h>

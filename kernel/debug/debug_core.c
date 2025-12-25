@@ -53,6 +53,7 @@
 #include <linux/rcupdate.h>
 #include <linux/irq.h>
 #include <linux/security.h>
+#include <linux/trace_control.h>
 
 #include <asm/cacheflush.h>
 #include <asm/byteorder.h>
