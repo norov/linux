@@ -27,6 +27,7 @@
 
 #include <linux/bug.h>
 #include <linux/types.h>
+#include <linux/trace_printk.h>
 
 #include <drm/drm_drv.h>
 

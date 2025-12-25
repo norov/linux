@@ -51,6 +51,7 @@
 #include <linux/syscalls.h>
 #include <linux/of.h>
 #include <linux/rcupdate.h>
+#include <linux/trace_printk.h>
 
 #include <asm/ptrace.h>
 #include <asm/irq_regs.h>

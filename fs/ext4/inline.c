@@ -9,6 +9,7 @@
 #include <linux/namei.h>
 #include <linux/iversion.h>
 #include <linux/sched/mm.h>
+#include <linux/trace_printk.h>
 
 #include "ext4_jbd2.h"
 #include "ext4.h"
