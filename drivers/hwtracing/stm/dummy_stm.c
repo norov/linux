@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/stm.h>
+#include <linux/trace_printk.h>
 #include <uapi/linux/stm.h>
 
 static ssize_t notrace

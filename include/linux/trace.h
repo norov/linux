@@ -2,6 +2,8 @@
 #ifndef _LINUX_TRACE_H
 #define _LINUX_TRACE_H
 
+#include <linux/trace_printk.h>
+
 #define TRACE_EXPORT_FUNCTION	BIT(0)
 #define TRACE_EXPORT_EVENT	BIT(1)
 #define TRACE_EXPORT_MARKER	BIT(2)

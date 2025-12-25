@@ -10,6 +10,7 @@
 #include <uapi/linux/sched/types.h>
 #include <linux/module.h>
 #include <linux/ktime.h>
+#include <linux/trace_printk.h>
 #include <asm/local.h>
 
 struct rb_page {

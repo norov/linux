@@ -8,6 +8,7 @@
 
 #include <linux/tracepoint.h>
 #include <linux/trace_seq.h>
+#include <linux/trace_printk.h>
 
 #include "hfi.h"
 
