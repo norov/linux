@@ -4,6 +4,7 @@
 
 #include <linux/compiler_attributes.h>
 #include <linux/instruction_pointer.h>
+#include <linux/stdarg.h>
 #include <linux/stddef.h>
 #include <linux/stringify.h>
 

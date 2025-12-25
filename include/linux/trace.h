@@ -2,6 +2,13 @@
 #ifndef _LINUX_TRACE_H
 #define _LINUX_TRACE_H
 
+#include <linux/bits.h>
+#include <linux/compiler_types.h>
+#include <linux/errno.h>
+#include <linux/instruction_pointer.h>
+#include <linux/stddef.h>
+#include <linux/string.h>
+
 #define TRACE_EXPORT_FUNCTION	BIT(0)
 #define TRACE_EXPORT_EVENT	BIT(1)
 #define TRACE_EXPORT_MARKER	BIT(2)
