@@ -32,7 +32,6 @@
 #include <linux/sprintf.h>
 #include <linux/static_call_types.h>
 #include <linux/trace_control.h>
-#include <linux/trace_printk.h>
 #include <linux/util_macros.h>
 #include <linux/wordpart.h>
 
