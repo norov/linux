@@ -22,7 +22,7 @@
 
 #ifdef arch_trigger_cpumask_backtrace
 /* For reliability, we're prepared to waste bits here. */
-static DECLARE_BITMAP(backtrace_mask, NR_CPUS) __read_mostly;
+static struct cpumask backtrace_mask __read_mostly;
 
 /* "in progress" flag of arch_trigger_cpumask_backtrace */
 static unsigned long backtrace_flag;
@@ -48,9 +48,9 @@ void nmi_trigger_cpumask_backtrace(const cpumask_t *mask,
 		return;
 	}
 
-	cpumask_copy(to_cpumask(backtrace_mask), mask);
+	cpumask_copy(&backtrace_mask, mask);
 	if (exclude_cpu != -1)
-		cpumask_clear_cpu(exclude_cpu, to_cpumask(backtrace_mask));
+		cpumask_clear_cpu(exclude_cpu, &backtrace_mask);
 
 	/*
 	 * Don't try to send an NMI to this cpu; it may work on some
@@ -58,24 +58,24 @@ void nmi_trigger_cpumask_backtrace(const cpumask_t *mask,
 	 * information at least as useful just by doing a dump_stack() here.
 	 * Note that nmi_cpu_backtrace(NULL) will clear the cpu bit.
 	 */
-	if (cpumask_test_cpu(this_cpu, to_cpumask(backtrace_mask)))
+	if (cpumask_test_cpu(this_cpu, &backtrace_mask))
 		nmi_cpu_backtrace(NULL);
 
-	if (!cpumask_empty(to_cpumask(backtrace_mask))) {
+	if (!cpumask_empty(&backtrace_mask)) {
 		pr_info("Sending NMI from CPU %d to CPUs %*pbl:\n",
-			this_cpu, nr_cpumask_bits, to_cpumask(backtrace_mask));
-		nmi_backtrace_stall_snap(to_cpumask(backtrace_mask));
-		raise(to_cpumask(backtrace_mask));
+			this_cpu, nr_cpumask_bits, &backtrace_mask);
+		nmi_backtrace_stall_snap(&backtrace_mask);
+		raise(&backtrace_mask);
 	}
 
 	/* Wait for up to 10 seconds for all CPUs to do the backtrace */
 	for (i = 0; i < 10 * 1000; i++) {
-		if (cpumask_empty(to_cpumask(backtrace_mask)))
+		if (cpumask_empty(&backtrace_mask))
 			break;
 		mdelay(1);
 		touch_softlockup_watchdog();
 	}
-	nmi_backtrace_stall_check(to_cpumask(backtrace_mask));
+	nmi_backtrace_stall_check(&backtrace_mask);
 
 	/*
 	 * Force flush any remote buffers that might be stuck in IRQ context
@@ -96,7 +96,7 @@ bool nmi_cpu_backtrace(struct pt_regs *regs)
 	int cpu = smp_processor_id();
 	unsigned long flags;
 
-	if (cpumask_test_cpu(cpu, to_cpumask(backtrace_mask))) {
+	if (cpumask_test_cpu(cpu, &backtrace_mask)) {
 		/*
 		 * Allow nested NMI backtraces while serializing
 		 * against other CPUs.
@@ -113,7 +113,7 @@ bool nmi_cpu_backtrace(struct pt_regs *regs)
 				dump_stack();
 		}
 		printk_cpu_sync_put_irqrestore(flags);
-		cpumask_clear_cpu(cpu, to_cpumask(backtrace_mask));
+		cpumask_clear_cpu(cpu, &backtrace_mask);
 		return true;
 	}
 
