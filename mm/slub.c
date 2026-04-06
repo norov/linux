@@ -8734,7 +8734,7 @@ struct location {
 	long max_time;
 	long min_pid;
 	long max_pid;
-	DECLARE_BITMAP(cpus, NR_CPUS);
+	struct cpumask cpus;
 	nodemask_t nodes;
 };
 
@@ -8821,8 +8821,7 @@ static int add_location(struct loc_track *t, struct kmem_cache *s,
 				if (track->pid > l->max_pid)
 					l->max_pid = track->pid;
 
-				cpumask_set_cpu(track->cpu,
-						to_cpumask(l->cpus));
+				cpumask_set_cpu(track->cpu, &l->cpus);
 			}
 			node_set(page_to_nid(virt_to_page(track)), l->nodes);
 			return 1;
@@ -8859,8 +8858,8 @@ static int add_location(struct loc_track *t, struct kmem_cache *s,
 	l->max_pid = track->pid;
 	l->handle = handle;
 	l->waste = waste;
-	cpumask_clear(to_cpumask(l->cpus));
-	cpumask_set_cpu(track->cpu, to_cpumask(l->cpus));
+	cpumask_clear(&l->cpus);
+	cpumask_set_cpu(track->cpu, &l->cpus);
 	nodes_clear(l->nodes);
 	node_set(page_to_nid(virt_to_page(track)), l->nodes);
 	return 1;
@@ -9727,9 +9726,8 @@ static int slab_debugfs_show(struct seq_file *seq, void *v)
 			seq_printf(seq, " pid=%ld",
 				l->min_pid);
 
-		if (num_online_cpus() > 1 && !cpumask_empty(to_cpumask(l->cpus)))
-			seq_printf(seq, " cpus=%*pbl",
-				 cpumask_pr_args(to_cpumask(l->cpus)));
+		if (num_online_cpus() > 1 && !cpumask_empty(&l->cpus))
+			seq_printf(seq, " cpus=%*pbl", cpumask_pr_args(&l->cpus));
 
 		if (nr_online_nodes > 1 && !nodes_empty(l->nodes))
 			seq_printf(seq, " nodes=%*pbl",
