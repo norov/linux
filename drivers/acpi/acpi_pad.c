@@ -85,10 +85,10 @@ static void power_saving_mwait_init(void)
 
 static unsigned long cpu_weight[NR_CPUS];
 static int tsk_in_cpu[NR_CPUS] = {[0 ... NR_CPUS-1] = -1};
-static DECLARE_BITMAP(pad_busy_cpus_bits, NR_CPUS);
+static struct cpumask pad_busy_cpus;
+
 static void round_robin_cpu(unsigned int tsk_index)
 {
-	struct cpumask *pad_busy_cpus = to_cpumask(pad_busy_cpus_bits);
 	cpumask_var_t tmp;
 	int cpu;
 	unsigned long min_weight = -1;
@@ -99,12 +99,12 @@ static void round_robin_cpu(unsigned int tsk_index)
 
 	mutex_lock(&round_robin_lock);
 	cpumask_clear(tmp);
-	for_each_cpu(cpu, pad_busy_cpus)
+	for_each_cpu(cpu, &pad_busy_cpus)
 		cpumask_or(tmp, tmp, topology_sibling_cpumask(cpu));
 	cpumask_andnot(tmp, cpu_online_mask, tmp);
 	/* avoid HT siblings if possible */
 	if (cpumask_empty(tmp))
-		cpumask_andnot(tmp, cpu_online_mask, pad_busy_cpus);
+		cpumask_andnot(tmp, cpu_online_mask, &pad_busy_cpus);
 	if (cpumask_empty(tmp)) {
 		mutex_unlock(&round_robin_lock);
 		free_cpumask_var(tmp);
@@ -118,9 +118,9 @@ static void round_robin_cpu(unsigned int tsk_index)
 	}
 
 	if (tsk_in_cpu[tsk_index] != -1)
-		cpumask_clear_cpu(tsk_in_cpu[tsk_index], pad_busy_cpus);
+		cpumask_clear_cpu(tsk_in_cpu[tsk_index], &pad_busy_cpus);
 	tsk_in_cpu[tsk_index] = preferred_cpu;
-	cpumask_set_cpu(preferred_cpu, pad_busy_cpus);
+	cpumask_set_cpu(preferred_cpu, &pad_busy_cpus);
 	cpu_weight[preferred_cpu]++;
 	mutex_unlock(&round_robin_lock);
 
@@ -131,10 +131,8 @@ static void round_robin_cpu(unsigned int tsk_index)
 
 static void exit_round_robin(unsigned int tsk_index)
 {
-	struct cpumask *pad_busy_cpus = to_cpumask(pad_busy_cpus_bits);
-
 	if (tsk_in_cpu[tsk_index] != -1) {
-		cpumask_clear_cpu(tsk_in_cpu[tsk_index], pad_busy_cpus);
+		cpumask_clear_cpu(tsk_in_cpu[tsk_index], &pad_busy_cpus);
 		tsk_in_cpu[tsk_index] = -1;
 	}
 }
@@ -334,8 +332,7 @@ static ssize_t idlecpus_store(struct device *dev,
 static ssize_t idlecpus_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return cpumap_print_to_pagebuf(false, buf,
-				       to_cpumask(pad_busy_cpus_bits));
+	return cpumap_print_to_pagebuf(false, buf, pad_busy_cpus_bits);
 }
 
 static DEVICE_ATTR_RW(idlecpus);
