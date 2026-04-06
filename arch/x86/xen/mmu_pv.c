@@ -1331,11 +1331,10 @@ static void xen_flush_tlb_multi(const struct cpumask *cpus,
 {
 	struct {
 		struct mmuext_op op;
-		DECLARE_BITMAP(mask, NR_CPUS);
+		struct cpumask mask;
 	} *args;
 	struct multicall_space mcs;
-	const size_t mc_entry_size = sizeof(args->op) +
-		sizeof(args->mask[0]) * BITS_TO_LONGS(num_possible_cpus());
+	const size_t mc_entry_size = sizeof(args->op) + cpumask_size();
 
 	trace_xen_mmu_flush_tlb_multi(cpus, info->mm, info->start, info->end);
 
@@ -1344,10 +1343,10 @@ static void xen_flush_tlb_multi(const struct cpumask *cpus,
 
 	mcs = xen_mc_entry(mc_entry_size);
 	args = mcs.args;
-	args->op.arg2.vcpumask = to_cpumask(args->mask);
+	args->op.arg2.vcpumask = &args->mask;
 
 	/* Remove any offline CPUs */
-	cpumask_and(to_cpumask(args->mask), cpus, cpu_online_mask);
+	cpumask_and(&args->mask, cpus, cpu_online_mask);
 
 	args->op.cmd = MMUEXT_TLB_FLUSH_MULTI;
 	if (info->end != TLB_FLUSH_ALL &&
