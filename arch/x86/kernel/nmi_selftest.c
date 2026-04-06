@@ -24,7 +24,7 @@
 static int __initdata nmi_fail;
 
 /* check to see if NMI IPIs work on this machine */
-static DECLARE_BITMAP(nmi_ipi_mask, NR_CPUS) __initdata;
+static struct cpumask nmi_ipi_mask  __initdata;
 
 static int __initdata testcase_total;
 static int __initdata testcase_successes;
@@ -53,7 +53,7 @@ static int __init test_nmi_ipi_callback(unsigned int val, struct pt_regs *regs)
 {
         int cpu = raw_smp_processor_id();
 
-        if (cpumask_test_and_clear_cpu(cpu, to_cpumask(nmi_ipi_mask)))
+        if (cpumask_test_and_clear_cpu(cpu, &nmi_ipi_mask))
                 return NMI_HANDLED;
 
         return NMI_DONE;
@@ -89,17 +89,17 @@ static void __init test_nmi_ipi(struct cpumask *mask)
 
 static void __init remote_ipi(void)
 {
-	cpumask_copy(to_cpumask(nmi_ipi_mask), cpu_online_mask);
-	cpumask_clear_cpu(smp_processor_id(), to_cpumask(nmi_ipi_mask));
-	if (!cpumask_empty(to_cpumask(nmi_ipi_mask)))
-		test_nmi_ipi(to_cpumask(nmi_ipi_mask));
+	cpumask_copy(&nmi_ipi_mask, cpu_online_mask);
+	cpumask_clear_cpu(smp_processor_id(), &nmi_ipi_mask);
+	if (!cpumask_empty(&nmi_ipi_mask))
+		test_nmi_ipi(&nmi_ipi_mask);
 }
 
 static void __init local_ipi(void)
 {
-	cpumask_clear(to_cpumask(nmi_ipi_mask));
-	cpumask_set_cpu(smp_processor_id(), to_cpumask(nmi_ipi_mask));
-	test_nmi_ipi(to_cpumask(nmi_ipi_mask));
+	cpumask_clear(&nmi_ipi_mask);
+	cpumask_set_cpu(smp_processor_id(), &nmi_ipi_mask);
+	test_nmi_ipi(&nmi_ipi_mask);
 }
 
 static void __init reset_nmi(void)
