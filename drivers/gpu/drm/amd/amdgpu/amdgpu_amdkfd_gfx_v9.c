@@ -1028,7 +1028,6 @@ void kgd_gfx_v9_get_cu_occupancy(struct amdgpu_device *adev,
 	int se_cnt;
 	int queue_map;
 	int max_queue_cnt;
-	DECLARE_BITMAP(cp_queue_bitmap, AMDGPU_MAX_QUEUES);
 
 	lock_spi_csq_mutexes(adev);
 	soc15_grbm_select(adev, 1, 0, 0, 0, GET_INST(GC, inst));
@@ -1037,8 +1036,6 @@ void kgd_gfx_v9_get_cu_occupancy(struct amdgpu_device *adev,
 	 * Iterate through the shader engines and arrays of the device
 	 * to get number of waves in flight
 	 */
-	bitmap_complement(cp_queue_bitmap, adev->gfx.mec_bitmap[0].queue_bitmap,
-			  AMDGPU_MAX_QUEUES);
 	max_queue_cnt = adev->gfx.mec.num_pipe_per_mec *
 			adev->gfx.mec.num_queue_per_pipe;
 	se_cnt = adev->gfx.config.max_shader_engines;
@@ -1056,7 +1053,7 @@ void kgd_gfx_v9_get_cu_occupancy(struct amdgpu_device *adev,
 			/* Skip qeueus that are not associated with
 			 * compute functions
 			 */
-			if (!test_bit(qidx, cp_queue_bitmap))
+			if (test_bit(qidx, adev->gfx.mec_bitmap[0].queue_bitmap))
 				continue;
 
 			if (!(queue_map & (1 << qidx)))
