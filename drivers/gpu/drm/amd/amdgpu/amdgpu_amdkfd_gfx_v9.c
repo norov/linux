@@ -1026,9 +1026,8 @@ void kgd_gfx_v9_get_cu_occupancy(struct amdgpu_device *adev,
 	int qidx;
 	int se_idx;
 	int se_cnt;
-	int queue_map;
-	int max_queue_cnt;
-	DECLARE_BITMAP(cp_queue_bitmap, AMDGPU_MAX_QUEUES);
+	DECLARE_BITMAP(queue_map, 32);
+	int max_queue_cnt, queue_reg;
 
 	lock_spi_csq_mutexes(adev);
 	soc15_grbm_select(adev, 1, 0, 0, 0, GET_INST(GC, inst));
@@ -1037,35 +1036,26 @@ void kgd_gfx_v9_get_cu_occupancy(struct amdgpu_device *adev,
 	 * Iterate through the shader engines and arrays of the device
 	 * to get number of waves in flight
 	 */
-	bitmap_complement(cp_queue_bitmap, adev->gfx.mec_bitmap[0].queue_bitmap,
-			  AMDGPU_MAX_QUEUES);
 	max_queue_cnt = adev->gfx.mec.num_pipe_per_mec *
 			adev->gfx.mec.num_queue_per_pipe;
 	se_cnt = adev->gfx.config.max_shader_engines;
 	for (se_idx = 0; se_idx < se_cnt; se_idx++) {
 		amdgpu_gfx_select_se_sh(adev, se_idx, 0, 0xffffffff, inst);
-		queue_map = RREG32_SOC15(GC, GET_INST(GC, inst), mmSPI_CSQ_WF_ACTIVE_STATUS);
+		queue_reg = RREG32_SOC15(GC, GET_INST(GC, inst), mmSPI_CSQ_WF_ACTIVE_STATUS);
+		bitmap_from_arr32(queue_map, &queue_reg, 32);
 
 		/*
 		 * Assumption: queue map encodes following schema: four
 		 * pipes per each micro-engine, with each pipe mapping
 		 * eight queues. This schema is true for GFX9 devices
-		 * and must be verified for newer device families
+		 * and must be verified for newer device families.
+		 *
+		 * Get number of waves in flight and aggregate them, and skip
+		 * queues that are not associated with compute functions.
 		 */
-		for (qidx = 0; qidx < max_queue_cnt; qidx++) {
-			/* Skip qeueus that are not associated with
-			 * compute functions
-			 */
-			if (!test_bit(qidx, cp_queue_bitmap))
-				continue;
-
-			if (!(queue_map & (1 << qidx)))
-				continue;
-
-			/* Get number of waves in flight and aggregate them */
-			get_wave_count(adev, qidx, &cu_occupancy[qidx],
-					inst);
-		}
+		for_each_andnot_bit(qidx, adev->gfx.mec_bitmap[0].queue_bitmap,
+					queue_map, max_queue_cnt)
+			get_wave_count(adev, qidx, &cu_occupancy[qidx], inst);
 	}
 
 	amdgpu_gfx_select_se_sh(adev, 0xffffffff, 0xffffffff, 0xffffffff, inst);
