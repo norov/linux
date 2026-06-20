@@ -12,7 +12,7 @@
 
 #include <linux/slab.h>
 #include <trace/events/rcu.h>
-#include <linux/trace_printk.h>
+#include <linux/trace_control.h>
 
 /*
  * Grace-period counter management.

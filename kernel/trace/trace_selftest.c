@@ -6,7 +6,7 @@
 #include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
-#include <linux/trace_printk.h>
+#include <linux/trace_control.h>
 
 static inline int trace_valid_entry(struct trace_entry *entry)
 {
@@ -1565,4 +1565,3 @@ trace_selftest_startup_branch(struct tracer *trace, struct trace_array *tr)
 	return ret;
 }
 #endif /* CONFIG_BRANCH_TRACER */
-

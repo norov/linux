@@ -48,7 +48,7 @@
 #include <linux/tick.h>
 #include <linux/rcupdate_trace.h>
 #include <linux/nmi.h>
-#include <linux/trace_printk.h>
+#include <linux/trace_control.h>
 
 #include "rcu.h"
 

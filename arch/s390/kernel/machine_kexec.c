@@ -14,7 +14,7 @@
 #include <linux/ftrace.h>
 #include <linux/debug_locks.h>
 #include <linux/cpufeature.h>
-#include <linux/trace_printk.h>
+#include <linux/trace_control.h>
 #include <asm/guarded_storage.h>
 #include <asm/machine.h>
 #include <asm/pfault.h>

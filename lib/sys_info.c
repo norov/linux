@@ -10,7 +10,7 @@
 #include <linux/sched/debug.h>
 #include <linux/string.h>
 #include <linux/sysctl.h>
-#include <linux/trace_printk.h>
+#include <linux/trace_control.h>
 
 #include <linux/sys_info.h>
 

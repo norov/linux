@@ -51,7 +51,7 @@
 #include <linux/syscalls.h>
 #include <linux/of.h>
 #include <linux/rcupdate.h>
-#include <linux/trace_printk.h>
+#include <linux/trace_control.h>
 
 #include <asm/ptrace.h>
 #include <asm/irq_regs.h>
@@ -325,8 +325,6 @@ static const struct sysrq_key_op sysrq_showstate_blocked_op = {
 };
 
 #ifdef CONFIG_TRACING
-#include <linux/ftrace.h>
-
 static void sysrq_ftrace_dump(u8 key)
 {
 	ftrace_dump(DUMP_ALL);
