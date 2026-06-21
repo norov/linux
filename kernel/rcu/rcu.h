@@ -11,6 +11,7 @@
 #define __LINUX_RCU_H
 
 #include <linux/slab.h>
+#include <linux/ftrace.h>
 #include <trace/events/rcu.h>
 #include <linux/trace_control.h>
 

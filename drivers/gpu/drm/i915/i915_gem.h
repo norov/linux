@@ -26,8 +26,8 @@
 #define __I915_GEM_H__
 
 #include <linux/bug.h>
+#include <linux/ftrace.h>
 #include <linux/types.h>
-#include <linux/trace_control.h>
 #include <linux/trace_printk.h>
 
 #include <drm/drm_drv.h>

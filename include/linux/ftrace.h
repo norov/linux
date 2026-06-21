@@ -22,6 +22,13 @@
 
 #include <asm/ftrace.h>
 
+enum ftrace_dump_mode {
+	DUMP_NONE,
+	DUMP_ALL,
+	DUMP_ORIG,
+	DUMP_PARAM,
+};
+
 /*
  * If the arch supports passing the variable contents of
  * function_trace_op as the third parameter back from the
@@ -1381,13 +1388,13 @@ static inline void unpause_graph_tracing(void) { }
 #endif /* CONFIG_FUNCTION_GRAPH_TRACER */
 
 #ifdef CONFIG_TRACING
-enum ftrace_dump_mode;
-
+extern void ftrace_dump(enum ftrace_dump_mode oops_dump_mode);
 extern int ftrace_dump_on_oops_enabled(void);
 
 extern void disable_trace_on_warning(void);
 
 #else /* CONFIG_TRACING */
+static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
 static inline void  disable_trace_on_warning(void) { }
 #endif /* CONFIG_TRACING */
 

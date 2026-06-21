@@ -53,6 +53,9 @@ int __trace_array_puts(struct trace_array *tr, unsigned long ip,
 		       const char *str, int size);
 
 void trace_printk_init_buffers(void);
+void tracing_snapshot(void);
+void tracing_snapshot_alloc(void);
+void trace_dump_stack(int skip);
 __printf(3, 4)
 int trace_array_printk(struct trace_array *tr, unsigned long ip,
 		       const char *fmt, ...);
@@ -77,6 +80,15 @@ static inline int unregister_ftrace_export(struct trace_export *export)
 	return 0;
 }
 static inline void trace_printk_init_buffers(void)
+{
+}
+static inline void tracing_snapshot(void)
+{
+}
+static inline void tracing_snapshot_alloc(void)
+{
+}
+static inline void trace_dump_stack(int skip)
 {
 }
 static inline __printf(3, 4)

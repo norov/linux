@@ -24,6 +24,7 @@
 #include <linux/bug.h>
 #include <linux/nmi.h>
 #include <linux/ctype.h>
+#include <linux/ftrace.h>
 #include <linux/highmem.h>
 #include <linux/security.h>
 #include <linux/debugfs.h>
