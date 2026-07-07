@@ -25,6 +25,7 @@
 static u32 ccp_lsb_alloc(struct ccp_cmd_queue *cmd_q, unsigned int count)
 {
 	struct ccp_device *ccp;
+	unsigned int nbits = MAX_LSB_CNT * LSB_SIZE;
 	int start;
 
 	/* First look at the map for the queue */
@@ -43,11 +44,10 @@ static u32 ccp_lsb_alloc(struct ccp_cmd_queue *cmd_q, unsigned int count)
 	for (;;) {
 		mutex_lock(&ccp->sb_mutex);
 
-		start = (u32)bitmap_find_next_zero_area(ccp->lsbmap,
-							MAX_LSB_CNT * LSB_SIZE,
+		start = (u32)bitmap_find_next_zero_area(ccp->lsbmap, nbits,
 							0,
 							count, 0);
-		if (start <= MAX_LSB_CNT * LSB_SIZE) {
+		if (start < nbits) {
 			bitmap_set(ccp->lsbmap, start, count);
 
 			mutex_unlock(&ccp->sb_mutex);
