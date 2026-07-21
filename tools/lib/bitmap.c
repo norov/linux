@@ -5,9 +5,9 @@
  */
 #include <linux/bitmap.h>
 
-unsigned int __bitmap_weight(const unsigned long *bitmap, int bits)
+unsigned long __bitmap_weight(const unsigned long *bitmap, unsigned long bits)
 {
-	unsigned int k, w = 0, lim = bits/BITS_PER_LONG;
+	unsigned long k, w = 0, lim = bits / BITS_PER_LONG;
 
 	for (k = 0; k < lim; k++)
 		w += hweight_long(bitmap[k]);

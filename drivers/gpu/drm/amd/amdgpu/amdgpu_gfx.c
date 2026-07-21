@@ -234,7 +234,7 @@ void amdgpu_gfx_compute_queue_acquire(struct amdgpu_device *adev)
 	}
 
 	for (j = 0; j < num_xcc; j++) {
-		dev_dbg(adev->dev, "mec queue bitmap weight=%d\n",
+		dev_dbg(adev->dev, "mec queue bitmap weight=%lu\n",
 			bitmap_weight(adev->gfx.mec_bitmap[j].queue_bitmap, AMDGPU_MAX_COMPUTE_QUEUES));
 	}
 }
@@ -2754,4 +2754,3 @@ int amdgpu_gfx_ring_preempt_ib(struct amdgpu_ring *ring)
 
 	return 0;
 }
-

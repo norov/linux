@@ -941,7 +941,7 @@ int armpmu_register(struct arm_pmu *pmu)
 	if (ret)
 		goto out_destroy;
 
-	pr_info("enabled with %s PMU driver, %d (%*pb) counters available%s\n",
+	pr_info("enabled with %s PMU driver, %lu (%*pb) counters available%s\n",
 		pmu->name, bitmap_weight(pmu->cntr_mask, ARMPMU_MAX_HWEVENTS),
 		ARMPMU_MAX_HWEVENTS, &pmu->cntr_mask,
 		has_nmi ? ", using NMIs" : "");

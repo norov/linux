@@ -409,7 +409,7 @@ static void dm_pcache_status(struct dm_target *ti, status_type_t type,
 
 	switch (type) {
 	case STATUSTYPE_INFO:
-		DMEMIT("%x %u %u %u %u %x %u:%u %u:%u %u:%u",
+		DMEMIT("%x %u %u %lu %u %x %u:%u %u:%u %u:%u",
 		       cache_dev->sb_flags,
 		       cache_dev->seg_num,
 		       cache->n_segs,

@@ -295,7 +295,7 @@ EXPORT_SYMBOL(_find_next_bit_le);
  */
 unsigned long find_random_bit(const unsigned long *addr, unsigned long size)
 {
-	int w = bitmap_weight(addr, size);
+	unsigned long w = bitmap_weight(addr, size);
 
 	switch (w) {
 	case 0:
@@ -303,8 +303,20 @@ unsigned long find_random_bit(const unsigned long *addr, unsigned long size)
 	case 1:
 		/* Performance trick for single-bit bitmaps */
 		return find_first_bit(addr, size);
-	default:
-		return find_nth_bit(addr, size, get_random_u32_below(w));
+	default: {
+		unsigned long n, random;
+
+		if (w <= U32_MAX) {
+			n = get_random_u32_below(w);
+		} else {
+			do {
+				random = get_random_long();
+			} while (random < -w % w);
+			n = random % w;
+		}
+
+		return find_nth_bit(addr, size, n);
+	}
 	}
 }
 EXPORT_SYMBOL(find_random_bit);

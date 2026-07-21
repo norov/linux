@@ -13,7 +13,7 @@
 #define DECLARE_BITMAP(name,bits) \
 	unsigned long name[BITS_TO_LONGS(bits)]
 
-unsigned int __bitmap_weight(const unsigned long *bitmap, int bits);
+unsigned long __bitmap_weight(const unsigned long *bitmap, unsigned long bits);
 void __bitmap_or(unsigned long *dst, const unsigned long *bitmap1,
 		 const unsigned long *bitmap2, unsigned long bits);
 bool __bitmap_and(unsigned long *dst, const unsigned long *bitmap1,
@@ -82,7 +82,7 @@ static inline bool bitmap_full(const unsigned long *src, unsigned long nbits)
 	return find_first_zero_bit(src, nbits) == nbits;
 }
 
-static inline unsigned int bitmap_weight(const unsigned long *src, unsigned int nbits)
+static inline unsigned long bitmap_weight(const unsigned long *src, unsigned long nbits)
 {
 	if (small_const_nbits(nbits))
 		return hweight_long(*src & BITMAP_LAST_WORD_MASK(nbits));

@@ -325,7 +325,7 @@ EXPORT_SYMBOL(__bitmap_subset);
 
 #define BITMAP_WEIGHT(FETCH, bits)	\
 ({										\
-	unsigned int __bits = (bits), idx, w = 0;				\
+	unsigned long __bits = (bits), idx, w = 0;				\
 										\
 	for (idx = 0; idx < __bits / BITS_PER_LONG; idx++)			\
 		w += hweight_long(FETCH);					\
@@ -336,35 +336,37 @@ EXPORT_SYMBOL(__bitmap_subset);
 	w;									\
 })
 
-unsigned int __bitmap_weight(const unsigned long *bitmap, unsigned int bits)
+unsigned long __bitmap_weight(const unsigned long *bitmap, unsigned long bits)
 {
 	return BITMAP_WEIGHT(bitmap[idx], bits);
 }
 EXPORT_SYMBOL(__bitmap_weight);
 
-unsigned int __bitmap_weight_and(const unsigned long *bitmap1,
-				 const unsigned long *bitmap2, unsigned int bits)
+unsigned long __bitmap_weight_and(const unsigned long *bitmap1,
+				  const unsigned long *bitmap2,
+				  unsigned long bits)
 {
 	return BITMAP_WEIGHT(bitmap1[idx] & bitmap2[idx], bits);
 }
 EXPORT_SYMBOL(__bitmap_weight_and);
 
-unsigned int __bitmap_weight_andnot(const unsigned long *bitmap1,
-				const unsigned long *bitmap2, unsigned int bits)
+unsigned long __bitmap_weight_andnot(const unsigned long *bitmap1,
+				     const unsigned long *bitmap2,
+				     unsigned long bits)
 {
 	return BITMAP_WEIGHT(bitmap1[idx] & ~bitmap2[idx], bits);
 }
 EXPORT_SYMBOL(__bitmap_weight_andnot);
 
-unsigned int __bitmap_weighted_or(unsigned long *dst, const unsigned long *bitmap1,
-				  const unsigned long *bitmap2, unsigned int bits)
+unsigned long __bitmap_weighted_or(unsigned long *dst, const unsigned long *bitmap1,
+				   const unsigned long *bitmap2, unsigned long bits)
 {
 	return BITMAP_WEIGHT(({dst[idx] = bitmap1[idx] | bitmap2[idx]; dst[idx]; }), bits);
 }
 EXPORT_SYMBOL(__bitmap_weighted_or);
 
-unsigned int __bitmap_weighted_xor(unsigned long *dst, const unsigned long *bitmap1,
-				  const unsigned long *bitmap2, unsigned int bits)
+unsigned long __bitmap_weighted_xor(unsigned long *dst, const unsigned long *bitmap1,
+				    const unsigned long *bitmap2, unsigned long bits)
 {
 	return BITMAP_WEIGHT(({dst[idx] = bitmap1[idx] ^ bitmap2[idx]; dst[idx]; }), bits);
 }

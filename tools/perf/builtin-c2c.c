@@ -1362,7 +1362,7 @@ cpucnt_entry(struct perf_hpp_fmt *fmt, struct perf_hpp *hpp,
 
 	c2c_he = container_of(he, struct c2c_hist_entry, he);
 
-	scnprintf(buf, 10, "%d", bitmap_weight(c2c_he->cpuset, c2c.cpus_cnt));
+	scnprintf(buf, 10, "%lu", bitmap_weight(c2c_he->cpuset, c2c.cpus_cnt));
 	return scnprintf(hpp->buf, hpp->size, "%*s", width, buf);
 }
 

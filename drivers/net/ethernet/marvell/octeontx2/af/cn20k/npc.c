@@ -1944,7 +1944,7 @@ static int __npc_subbank_non_contig_alloc(struct rvu *rvu,
 		index = find_next_zero_bit(bmap, sbd, sidx - b);
 		if (index >= sbd) {
 			dev_err(rvu->dev,
-				"%s: Error happened to alloc %u, bitmap_weight=%u, sb->idx=%u\n",
+				"%s: Error happened to alloc %u, bitmap_weight=%lu, sb->idx=%u\n",
 				__func__, count,
 				bitmap_weight(bmap, sbd),
 				sb->idx);

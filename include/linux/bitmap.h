@@ -168,10 +168,10 @@ bool __bitmap_and(unsigned long *dst, const unsigned long *bitmap1,
 		 const unsigned long *bitmap2, unsigned long nbits);
 void __bitmap_or(unsigned long *dst, const unsigned long *bitmap1,
 		 const unsigned long *bitmap2, unsigned long nbits);
-unsigned int __bitmap_weighted_or(unsigned long *dst, const unsigned long *bitmap1,
-				  const unsigned long *bitmap2, unsigned int nbits);
-unsigned int __bitmap_weighted_xor(unsigned long *dst, const unsigned long *bitmap1,
-				  const unsigned long *bitmap2, unsigned int nbits);
+unsigned long __bitmap_weighted_or(unsigned long *dst, const unsigned long *bitmap1,
+				   const unsigned long *bitmap2, unsigned long nbits);
+unsigned long __bitmap_weighted_xor(unsigned long *dst, const unsigned long *bitmap1,
+				    const unsigned long *bitmap2, unsigned long nbits);
 void __bitmap_xor(unsigned long *dst, const unsigned long *bitmap1,
 		  const unsigned long *bitmap2, unsigned long nbits);
 bool __bitmap_andnot(unsigned long *dst, const unsigned long *bitmap1,
@@ -183,11 +183,11 @@ bool __bitmap_intersects(const unsigned long *bitmap1,
 			 const unsigned long *bitmap2, unsigned long nbits);
 bool __bitmap_subset(const unsigned long *bitmap1,
 		     const unsigned long *bitmap2, unsigned long nbits);
-unsigned int __bitmap_weight(const unsigned long *bitmap, unsigned int nbits);
-unsigned int __bitmap_weight_and(const unsigned long *bitmap1,
-				 const unsigned long *bitmap2, unsigned int nbits);
-unsigned int __bitmap_weight_andnot(const unsigned long *bitmap1,
-				    const unsigned long *bitmap2, unsigned int nbits);
+unsigned long __bitmap_weight(const unsigned long *bitmap, unsigned long nbits);
+unsigned long __bitmap_weight_and(const unsigned long *bitmap1,
+				  const unsigned long *bitmap2, unsigned long nbits);
+unsigned long __bitmap_weight_andnot(const unsigned long *bitmap1,
+				     const unsigned long *bitmap2, unsigned long nbits);
 void __bitmap_set(unsigned long *map, unsigned long start, unsigned long len);
 void __bitmap_clear(unsigned long *map, unsigned long start, unsigned long len);
 
@@ -348,8 +348,8 @@ void bitmap_or(unsigned long *dst, const unsigned long *src1,
 }
 
 static __always_inline
-unsigned int bitmap_weighted_or(unsigned long *dst, const unsigned long *src1,
-				const unsigned long *src2, unsigned int nbits)
+unsigned long bitmap_weighted_or(unsigned long *dst, const unsigned long *src1,
+				 const unsigned long *src2, unsigned long nbits)
 {
 	if (small_const_nbits(nbits)) {
 		*dst = *src1 | *src2;
@@ -360,8 +360,8 @@ unsigned int bitmap_weighted_or(unsigned long *dst, const unsigned long *src1,
 }
 
 static __always_inline
-unsigned int bitmap_weighted_xor(unsigned long *dst, const unsigned long *src1,
-				const unsigned long *src2, unsigned int nbits)
+unsigned long bitmap_weighted_xor(unsigned long *dst, const unsigned long *src1,
+				  const unsigned long *src2, unsigned long nbits)
 {
 	if (small_const_nbits(nbits)) {
 		*dst = *src1 ^ *src2;
@@ -473,7 +473,7 @@ bool bitmap_full(const unsigned long *src, unsigned long nbits)
 }
 
 static __always_inline
-unsigned int bitmap_weight(const unsigned long *src, unsigned int nbits)
+unsigned long bitmap_weight(const unsigned long *src, unsigned long nbits)
 {
 	if (small_const_nbits(nbits))
 		return hweight_long(*src & BITMAP_LAST_WORD_MASK(nbits));
@@ -482,7 +482,7 @@ unsigned int bitmap_weight(const unsigned long *src, unsigned int nbits)
 
 static __always_inline
 unsigned long bitmap_weight_and(const unsigned long *src1,
-				const unsigned long *src2, unsigned int nbits)
+				const unsigned long *src2, unsigned long nbits)
 {
 	if (small_const_nbits(nbits))
 		return hweight_long(*src1 & *src2 & BITMAP_LAST_WORD_MASK(nbits));
@@ -491,7 +491,7 @@ unsigned long bitmap_weight_and(const unsigned long *src1,
 
 static __always_inline
 unsigned long bitmap_weight_andnot(const unsigned long *src1,
-				   const unsigned long *src2, unsigned int nbits)
+				   const unsigned long *src2, unsigned long nbits)
 {
 	if (small_const_nbits(nbits))
 		return hweight_long(*src1 & ~(*src2) & BITMAP_LAST_WORD_MASK(nbits));
@@ -509,7 +509,7 @@ unsigned long bitmap_weight_andnot(const unsigned long *src1,
  */
 static __always_inline
 unsigned long bitmap_weight_from(const unsigned long *bitmap,
-				   unsigned int start, unsigned int end)
+				 unsigned long start, unsigned long end)
 {
 	unsigned long w;
 
