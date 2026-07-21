@@ -255,9 +255,8 @@ impl BitmapVec {
         if nbits > Self::MAX_LEN {
             return Err(AllocError);
         }
-        let nbits_u32 = u32::try_from(nbits).unwrap();
         // SAFETY: `MAX_INLINE_LEN < nbits` and `nbits <= MAX_LEN`.
-        let ptr = unsafe { bindings::bitmap_zalloc(nbits_u32, flags.as_raw()) };
+        let ptr = unsafe { bindings::bitmap_zalloc(nbits, flags.as_raw()) };
         let ptr = NonNull::new(ptr).ok_or(AllocError)?;
         // INVARIANT: `ptr` returned by C `bitmap_zalloc` and `nbits` checked.
         Ok(BitmapVec {

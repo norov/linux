@@ -246,19 +246,22 @@ unsigned long _find_next_bit_be(const unsigned long *p, unsigned long size, unsi
 
 #ifdef __ARMEB__
 
-static inline int find_first_zero_bit_le(const void *p, unsigned size)
+static inline unsigned long
+find_first_zero_bit_le(const void *p, unsigned long size)
 {
 	return _find_first_zero_bit_le(p, size);
 }
 #define find_first_zero_bit_le find_first_zero_bit_le
 
-static inline int find_next_zero_bit_le(const void *p, int size, int offset)
+static inline unsigned long
+find_next_zero_bit_le(const void *p, unsigned long size, unsigned long offset)
 {
 	return _find_next_zero_bit_le(p, size, offset);
 }
 #define find_next_zero_bit_le find_next_zero_bit_le
 
-static inline int find_next_bit_le(const void *p, int size, int offset)
+static inline unsigned long
+find_next_bit_le(const void *p, unsigned long size, unsigned long offset)
 {
 	return _find_next_bit_le(p, size, offset);
 }
