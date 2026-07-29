@@ -168,7 +168,8 @@ nodes with particular properties as defined by ``enum node_states``:
   The node has regular or high memory. When ``CONFIG_HIGHMEM`` is disabled
   aliased to ``N_NORMAL_MEMORY``.
 ``N_MEMORY``
-  The node has memory(regular, high, movable)
+  The node has online memory (regular, high, movable) available to ordinary
+  allocations and kernel memory management services.
 ``N_CPU``
   The node has one or more CPUs
 ``N_GENERIC_INITIATOR``
