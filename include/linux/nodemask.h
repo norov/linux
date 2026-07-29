@@ -411,6 +411,11 @@ enum node_states {
 
 extern nodemask_t node_states[NR_NODE_STATES];
 
+/* Iterate the nodes in a mask that also belong to the specified state. */
+#define for_each_node_mask_state(node, mask, state)			\
+	for_each_and_bit(node, nodes_addr(mask),			\
+			 nodes_addr(node_states[state]), MAX_NUMNODES)
+
 #if MAX_NUMNODES > 1
 static __always_inline int node_state(int node, enum node_states state)
 {
@@ -434,6 +439,12 @@ static __always_inline int num_node_state(enum node_states state)
 
 #define for_each_node_state(__node, __state) \
 	for_each_node_mask((__node), node_states[__state])
+
+#define first_node_state(state)	first_node(node_states[state])
+static __always_inline unsigned int next_node_state(int nid, enum node_states state)
+{
+	return next_node(nid, node_states[state]);
+}
 
 #define first_online_node	first_node(node_states[N_ONLINE])
 #define first_memory_node	first_node(node_states[N_MEMORY])
@@ -480,6 +491,12 @@ static __always_inline int num_node_state(enum node_states state)
 
 #define for_each_node_state(node, __state) \
 	for ( (node) = 0; (node) == 0; (node) = 1)
+
+#define first_node_state(state)	0
+static __always_inline unsigned int next_node_state(int nid, enum node_states state)
+{
+	return MAX_NUMNODES;
+}
 
 #define first_online_node	0
 #define first_memory_node	0
