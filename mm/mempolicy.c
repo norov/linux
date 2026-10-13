@@ -451,9 +451,13 @@ static int mpol_set_nodemask(struct mempolicy *pol,
 	if (!pol || pol->mode == MPOL_LOCAL)
 		return 0;
 
-	/* Check N_MEMORY */
-	nodes_and(nsc->mask1,
-		  cpuset_current_mems_allowed, node_states[N_MEMORY]);
+	/* Private bindings name a private node; others use common memory. */
+	if (pol->flags & MPOL_F_PRIVATE_NODES)
+		nodes_and(nsc->mask1, node_states[N_MEMORY_MEMPOLICY],
+			  node_states[N_MEMORY_NOALLOC]);
+	else
+		nsc->mask1 = node_states[N_MEMORY];
+	nodes_and(nsc->mask1, nsc->mask1, cpuset_current_mems_allowed);
 
 	VM_BUG_ON(!nodes);
 
@@ -487,6 +491,13 @@ static struct mempolicy *mpol_new(unsigned short mode, unsigned short flags,
 		return NULL;
 	}
 	VM_BUG_ON(!nodes);
+
+	/*
+	 * The private zonelist covers a single node, so a private bind must name
+	 * exactly one node; a memoryless bit would later widen the binding.
+	 */
+	if ((flags & MPOL_F_PRIVATE_NODES) && nodes_weight(*nodes) != 1)
+		return ERR_PTR(-EINVAL);
 
 	/*
 	 * MPOL_PREFERRED cannot be used with MPOL_F_STATIC_NODES or
@@ -579,6 +590,9 @@ static void mpol_rebind_policy(struct mempolicy *pol, const nodemask_t *newmask)
 	nodemask_t mems;
 
 	if (!pol || pol->mode == MPOL_LOCAL)
+		return;
+	/* Allocation checks a private binding against the current cpuset. */
+	if (pol->flags & MPOL_F_PRIVATE_NODES)
 		return;
 	mpol_rebindable_mems(&mems, newmask);
 	if (!mpol_store_user_nodemask(pol) &&
@@ -1587,6 +1601,21 @@ static long do_mbind(unsigned long start, unsigned long len,
 	if (err)
 		goto mpol_out;
 
+	/* Private nodes cannot hold HugeTLB pages; this is unsupported. */
+	if (new && (new->flags & MPOL_F_PRIVATE_NODES)) {
+		vma_iter_init(&vmi, mm, start);
+		for_each_vma_range(vmi, vma, end) {
+			if (vma_is_hugetlb(vma)) {
+				err = -EINVAL;
+				break;
+			}
+		}
+		if (err) {
+			mmap_write_unlock(mm);
+			goto mpol_out;
+		}
+	}
+
 	/*
 	 * Lock the VMAs before scanning for pages to migrate,
 	 * to ensure we don't miss a concurrently inserted page.
@@ -1771,6 +1800,11 @@ static inline int sanitize_mpol_flags(int *mode, unsigned short *flags)
 		return -EINVAL;
 	if ((*flags & MPOL_F_STATIC_NODES) && (*flags & MPOL_F_RELATIVE_NODES))
 		return -EINVAL;
+	/* A private binding is never rebound or balanced. */
+	if ((*flags & MPOL_F_PRIVATE_NODES) &&
+	    (*mode != MPOL_BIND ||
+	     (*flags & (MPOL_USER_NODEMASK_FLAGS | MPOL_F_NUMA_BALANCING))))
+		return -EINVAL;
 	if (*flags & MPOL_F_NUMA_BALANCING) {
 		if (*mode == MPOL_BIND || *mode == MPOL_PREFERRED_MANY)
 			*flags |= (MPOL_F_MOF | MPOL_F_MORON);
@@ -1851,6 +1885,11 @@ SYSCALL_DEFINE4(set_mempolicy_home_node, unsigned long, start, unsigned long, le
 			err = -EOPNOTSUPP;
 			break;
 		}
+		if ((old->flags & MPOL_F_PRIVATE_NODES) &&
+		    !node_isset(home_node, old->nodes)) {
+			err = -EINVAL;
+			break;
+		}
 		new = mpol_dup(old);
 		if (IS_ERR(new)) {
 			err = PTR_ERR(new);
@@ -1887,6 +1926,10 @@ static long kernel_set_mempolicy(int mode, const unsigned long __user *nmask,
 	err = sanitize_mpol_flags(&lmode, &mode_flags);
 	if (err)
 		return err;
+
+	/* A task policy also steers the task's kernel allocations. */
+	if (mode_flags & MPOL_F_PRIVATE_NODES)
+		return -EINVAL;
 
 	err = get_nodes(&nodes, nmask, maxnode);
 	if (err)
@@ -2124,7 +2167,8 @@ bool apply_policy_zone(struct mempolicy *policy, enum zone_type zone)
 	 * if policy->nodes has movable memory only,
 	 * we apply policy when gfp_zone(gfp) = ZONE_MOVABLE only.
 	 *
-	 * policy->nodes is intersect with node_states[N_MEMORY].
+	 * policy->nodes is intersect with node_states[N_MEMORY], or with
+	 * the private N_MEMORY_MEMPOLICY nodes for MPOL_F_PRIVATE_NODES.
 	 * so if the following test fails, it implies
 	 * policy->nodes has movable memory only.
 	 */
@@ -2495,10 +2539,20 @@ static struct page *alloc_pages_preferred_many(gfp_t gfp, unsigned int order,
 static struct page *alloc_pages_mpol(gfp_t gfp, unsigned int order,
 		struct mempolicy *pol, pgoff_t ilx, int nid)
 {
+	unsigned int alloc_flags = ALLOC_DEFAULT;
 	nodemask_t *nodemask;
 	struct page *page;
 
 	nodemask = policy_nodemask(gfp, pol, ilx, &nid);
+	if (nodemask && (pol->flags & MPOL_F_PRIVATE_NODES)) {
+		int private_nid = first_node(*nodemask);
+
+		if (node_state(private_nid, N_MEMORY_MEMPOLICY) &&
+		    node_state(private_nid, N_MEMORY_NOALLOC)) {
+			nid = private_nid;
+			alloc_flags = ALLOC_ZONELIST_PRIVATE;
+		}
+	}
 
 	if (pol->mode == MPOL_PREFERRED_MANY)
 		return alloc_pages_preferred_many(gfp, order, nid, nodemask);
@@ -2520,24 +2574,26 @@ static struct page *alloc_pages_mpol(gfp_t gfp, unsigned int order,
 		    pol->mode != MPOL_WEIGHTED_INTERLEAVE &&
 		    (!nodemask || node_isset(nid, *nodemask))) {
 			/*
-			 * First, try to allocate THP only on local node, but
+			 * First, try to allocate THP only on the selected node, but
 			 * don't reclaim unnecessarily, just compact.
 			 */
 			page = __alloc_frozen_pages_noprof(
 				gfp | __GFP_THISNODE | __GFP_NORETRY, order,
-				nid, NULL, ALLOC_DEFAULT);
+				nid, (alloc_flags & ALLOC_ZONELIST_PRIVATE) ?
+					 nodemask : NULL, alloc_flags);
 			if (page || !(gfp & __GFP_DIRECT_RECLAIM))
 				return page;
 			/*
 			 * If hugepage allocations are configured to always
 			 * synchronous compact or the vma has been madvised
 			 * to prefer hugepage backing, retry allowing remote
-			 * memory with both reclaim and compact as well.
+			 * memory with both reclaim and compact as well. A
+			 * private binding stays on its local zonelist.
 			 */
 		}
 	}
 
-	page = __alloc_frozen_pages_noprof(gfp, order, nid, nodemask, ALLOC_DEFAULT);
+	page = __alloc_frozen_pages_noprof(gfp, order, nid, nodemask, alloc_flags);
 
 	if (unlikely(pol->mode == MPOL_INTERLEAVE ||
 		     pol->mode == MPOL_WEIGHTED_INTERLEAVE) && page) {
@@ -3651,12 +3707,14 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 		p += snprintf(p, buffer + maxlen - p, "=");
 
 		/*
-		 * Static and relative are mutually exclusive.
+		 * Static, relative and private are mutually exclusive.
 		 */
 		if (flags & MPOL_F_STATIC_NODES)
 			p += snprintf(p, buffer + maxlen - p, "static");
 		else if (flags & MPOL_F_RELATIVE_NODES)
 			p += snprintf(p, buffer + maxlen - p, "relative");
+		else if (flags & MPOL_F_PRIVATE_NODES)
+			p += snprintf(p, buffer + maxlen - p, "private");
 
 		if (flags & MPOL_F_NUMA_BALANCING) {
 			if (!is_power_of_2(flags & MPOL_MODE_FLAGS))
