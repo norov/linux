@@ -1340,7 +1340,7 @@ static bool migrate_folio_add(struct folio *folio, struct list_head *foliolist,
 static long migrate_to_node(struct mm_struct *mm, int source, int dest,
 			    int flags)
 {
-	nodemask_t nmask;
+	nodemask_t nmask, dest_mask;
 	struct vm_area_struct *vma;
 	LIST_HEAD(pagelist);
 	long nr_failed;
@@ -1350,6 +1350,14 @@ static long migrate_to_node(struct mm_struct *mm, int source, int dest,
 		.gfp_mask = GFP_HIGHUSER_MOVABLE | __GFP_THISNODE,
 		.reason = MR_SYSCALL,
 	};
+
+	/* Private placement is reachable only through the private zonelist. */
+	if (node_state(dest, N_MEMORY_MEMPOLICY) &&
+	    node_state(dest, N_MEMORY_NOALLOC)) {
+		init_nodemask_of_node(&dest_mask, dest);
+		mtc.nmask = &dest_mask;
+		mtc.alloc_flags = ALLOC_ZONELIST_PRIVATE;
+	}
 
 	nodes_clear(nmask);
 	node_set(source, nmask);
@@ -1951,7 +1959,7 @@ static int kernel_migrate_pages(pid_t pid, unsigned long maxnode,
 	struct mm_struct *mm = NULL;
 	struct task_struct *task;
 	nodemask_t task_nodes;
-	int err;
+	int err, nid;
 	nodemask_t *old;
 	nodemask_t *new;
 	NODEMASK_SCRATCH(scratch);
@@ -2001,8 +2009,11 @@ static int kernel_migrate_pages(pid_t pid, unsigned long maxnode,
 	}
 
 	task_nodes = cpuset_mems_allowed(current);
-	/* Private memory is not a migration destination. */
-	nodes_andnot(task_nodes, task_nodes, node_states[N_MEMORY_NOALLOC]);
+	/* Private nodes are destinations only if they permit userspace placement. */
+	for_each_node_state(nid, N_MEMORY_NOALLOC) {
+		if (!node_state(nid, N_MEMORY_MEMPOLICY))
+			node_clear(nid, task_nodes);
+	}
 	if (!nodes_and(*new, *new, task_nodes))
 		goto out_put;
 

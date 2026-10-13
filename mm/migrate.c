@@ -2250,6 +2250,9 @@ struct folio *alloc_migration_target(struct folio *src, unsigned long private)
 	if (is_highmem_idx(zidx) || zidx == ZONE_MOVABLE)
 		gfp_mask |= __GFP_HIGHMEM;
 
+	if (mtc->alloc_flags)
+		return __folio_alloc_flags(gfp_mask, order, nid, mtc->nmask,
+					   mtc->alloc_flags);
 	return __folio_alloc(gfp_mask, order, nid, mtc->nmask);
 }
 
@@ -2267,12 +2270,20 @@ static int store_status(int __user *status, int start, int value, int nr)
 
 static int do_move_pages_to_node(struct list_head *pagelist, int node)
 {
+	nodemask_t nmask;
 	int err;
 	struct migration_target_control mtc = {
 		.nid = node,
 		.gfp_mask = GFP_HIGHUSER_MOVABLE | __GFP_THISNODE,
 		.reason = MR_SYSCALL,
 	};
+
+	/* A private node is reachable only through its private zonelist. */
+	if (node_state(node, N_MEMORY_NOALLOC)) {
+		init_nodemask_of_node(&nmask, node);
+		mtc.nmask = &nmask;
+		mtc.alloc_flags = ALLOC_ZONELIST_PRIVATE;
+	}
 
 	err = migrate_pages(pagelist, alloc_migration_target, NULL,
 		(unsigned long)&mtc, MIGRATE_SYNC, MR_SYSCALL, NULL);
@@ -2411,7 +2422,7 @@ static int do_pages_move(struct mm_struct *mm, nodemask_t task_nodes,
 		err = -ENODEV;
 		if (node < 0 || node >= MAX_NUMNODES)
 			goto out_flush;
-		if (!node_state(node, N_MEMORY))
+		if (!node_state(node, N_MEMORY_MEMPOLICY))
 			goto out_flush;
 
 		err = -EACCES;
