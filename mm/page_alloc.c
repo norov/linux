@@ -4907,16 +4907,24 @@ retry:
 		goto got_pg;
 
 	reserve_flags = __gfp_pfmemalloc_flags(gfp_mask);
-	if (reserve_flags)
+	if (reserve_flags) {
+		unsigned int keep = ALLOC_KSWAPD;
+
+		/* The cpuset still grants a private request's node. */
+		if (ac->alloc_flags & ALLOC_ZONELIST_PRIVATE)
+			keep |= ALLOC_CPUSET;
 		alloc_flags = alloc_flags_cma(gfp_mask) | reserve_flags |
-				ac->alloc_flags | (alloc_flags & ALLOC_KSWAPD);
+				ac->alloc_flags | (alloc_flags & keep);
+	}
 
 	/*
 	 * Reset the nodemask and zonelist iterators if memory policies can be
 	 * ignored. These allocations are high priority and system rather than
-	 * user oriented.
+	 * user oriented. A private request keeps its node: private memory has
+	 * no reserves to grant.
 	 */
-	if (!(alloc_flags & ALLOC_CPUSET) || reserve_flags) {
+	if ((!(alloc_flags & ALLOC_CPUSET) || reserve_flags) &&
+	    !(ac->alloc_flags & ALLOC_ZONELIST_PRIVATE)) {
 		ac->nodemask = NULL;
 		ac->preferred_zoneref = first_zones_zonelist(ac->zonelist,
 					ac->highest_zoneidx, ac->nodemask);
@@ -5145,7 +5153,7 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 		unsigned int *alloc_flags)
 {
 	ac->highest_zoneidx = gfp_zone(gfp_mask);
-	ac->zonelist = node_zonelist(preferred_nid, gfp_mask);
+	ac->zonelist = select_zonelist(preferred_nid, gfp_mask, *alloc_flags);
 	ac->nodemask = nodemask;
 	ac->migratetype = gfp_migratetype(gfp_mask);
 
@@ -5458,7 +5466,8 @@ struct page *__alloc_frozen_pages_noprof(gfp_t gfp, unsigned int order,
 	unsigned int zonelist_iter_cookie;
 
 	/* Other flags could be supported later if needed. */
-	if (WARN_ON(alloc_flags & ~(ALLOC_NOLOCK | ALLOC_NO_CODETAG)))
+	if (WARN_ON(alloc_flags & ~(ALLOC_NOLOCK | ALLOC_NO_CODETAG |
+				    ALLOC_ZONELIST_PRIVATE)))
 		return NULL;
 
 	if (!alloc_order_allowed(gfp, order, alloc_flags))

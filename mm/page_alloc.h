@@ -56,6 +56,11 @@
  * alloc_tag_sub_check().
  */
 #define ALLOC_NO_CODETAG       0x1000
+#ifdef CONFIG_NUMA
+#define ALLOC_ZONELIST_PRIVATE 0x2000	/* use the local private zonelist */
+#else
+#define ALLOC_ZONELIST_PRIVATE 0x0
+#endif
 
 /* Flags that allow allocations below the min watermark. */
 #define ALLOC_RESERVES (ALLOC_MIN_RESERVE|ALLOC_HIGHATOMIC|ALLOC_OOM)
@@ -99,6 +104,16 @@ struct alloc_context {
 	/* Set by __alloc_pages_slowpath() before reclaim and compaction */
 	unsigned int reclaim_compact_order;
 };
+
+static inline struct zonelist *
+select_zonelist(int nid, gfp_t gfp, unsigned int alloc_flags)
+{
+#ifdef CONFIG_NUMA
+	if (alloc_flags & ALLOC_ZONELIST_PRIVATE)
+		return &NODE_DATA(nid)->node_zonelists[ZONELIST_PRIVATE];
+#endif
+	return node_zonelist(nid, gfp);
+}
 
 /*
  * This function returns the order of a free page in the buddy system. In
