@@ -4157,6 +4157,20 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 	 * failures more gracefully we should just bail out here.
 	 */
 
+	/*
+	 * Private memory is a fixed pool, exhausting it fails the allocation
+	 * rather than selecting an OOM victim. Otherwise, if there is some
+	 * indication of progress because of a revoked request, just report
+	 * some progress so the slowpath retries and relaxes it.
+	 */
+	if (ac->alloc_flags & ALLOC_ZONELIST_PRIVATE) {
+		if (!alloc_private_reachable(gfp_mask, ac))
+			*did_some_progress = 1;
+		else
+			current->private_alloc_failed = 1;
+		goto out;
+	}
+
 	/* Exhausted what can be done so it's blame time */
 	if (out_of_memory(&oc) ||
 	    WARN_ON_ONCE_GFP(gfp_mask & __GFP_NOFAIL, gfp_mask)) {

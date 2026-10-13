@@ -7003,6 +7003,7 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	}
 
 	is_droppable = !!(vma->vm_flags & VM_DROPPABLE);
+	current->private_alloc_failed = 0;
 
 	/*
 	 * Enable the memcg OOM handling for faults triggered in user
@@ -7033,6 +7034,10 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	 */
 	if (is_droppable && (flags & FAULT_FLAG_USER))
 		ret &= ~VM_FAULT_OOM;
+
+	/* Exhausted private memory fails like an empty HugeTLB pool. */
+	if (unlikely(current->private_alloc_failed) && (ret & VM_FAULT_OOM))
+		ret = (ret & ~VM_FAULT_OOM) | VM_FAULT_SIGBUS;
 
 	if (flags & FAULT_FLAG_USER) {
 		mem_cgroup_exit_user_fault();

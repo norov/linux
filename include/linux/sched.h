@@ -1038,6 +1038,8 @@ struct task_struct {
 	/* whether the LRU algorithm may apply to this access */
 	unsigned			in_lru_fault:1;
 #endif
+	/* A private memory allocation failed; a fault reports SIGBUS. */
+	unsigned			private_alloc_failed:1;
 #ifdef CONFIG_COMPAT_BRK
 	unsigned			brk_randomized:1;
 #endif
