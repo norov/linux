@@ -46,6 +46,7 @@ struct dax_kmem_data {
 	const char *res_name;
 	int mgid;
 	int state;
+	bool private;
 	struct mutex lock; /* protects hotplug state transitions */
 	struct resource *res[];
 };
@@ -89,8 +90,14 @@ static int dax_kmem_do_hotplug(struct dev_dax *dev_dax,
 			       int online_type)
 {
 	struct device *dev = &dev_dax->dev;
+	unsigned long features;
 	int i, rc, added = 0;
 	mhp_t mhp_flags;
+
+	features = data->private ? NODE_MEMORY_FEAT_MEMPOLICY |
+				   NODE_MEMORY_FEAT_RECLAIM |
+				   NODE_MEMORY_FEAT_COMPACTION :
+				   NODE_MEMORY_FEAT_ALL;
 
 	if (dax_kmem_state_is_online(data->state))
 		return -EINVAL;
@@ -126,7 +133,7 @@ static int dax_kmem_do_hotplug(struct dev_dax *dev_dax,
 		 */
 		rc = __add_memory_driver_managed(data->mgid, range.start,
 				range_len(&range), kmem_name, mhp_flags,
-				online_type, NODE_MEMORY_FEAT_ALL);
+				online_type, features);
 
 		if (rc) {
 			dev_warn(dev, "mapping%d: %#llx-%#llx memory add failed\n",
@@ -380,6 +387,33 @@ static ssize_t state_store(struct device *dev, struct device_attribute *attr,
 	return len;
 }
 
+static ssize_t private_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	struct dax_kmem_data *data = dev_get_drvdata(dev);
+
+	guard(mutex)(&data->lock);
+	return sysfs_emit(buf, "%d\n", data->private);
+}
+
+static ssize_t private_store(struct device *dev, struct device_attribute *attr,
+			     const char *buf, size_t len)
+{
+	struct dax_kmem_data *data = dev_get_drvdata(dev);
+	bool private;
+	int rc;
+
+	rc = kstrtobool(buf, &private);
+	if (rc)
+		return rc;
+
+	guard(mutex)(&data->lock);
+	if (data->private != private && data->state != DAX_KMEM_UNPLUGGED)
+		return -EBUSY;
+	data->private = private;
+	return len;
+}
+
 static int dev_dax_kmem_probe(struct dev_dax *dev_dax)
 {
 	struct device *dev = &dev_dax->dev;
@@ -560,12 +594,29 @@ static void dev_dax_kmem_remove(struct dev_dax *dev_dax)
 #endif /* CONFIG_MEMORY_HOTREMOVE */
 
 static DEVICE_ATTR_RW(state);
+static DEVICE_ATTR_RW(private);
 
 static struct attribute *dev_dax_kmem_attrs[] = {
 	&dev_attr_state.attr,
+	&dev_attr_private.attr,
 	NULL,
 };
-ATTRIBUTE_GROUPS(dev_dax_kmem);
+
+static umode_t dev_dax_kmem_visible(struct kobject *kobj,
+				    struct attribute *attr, int n)
+{
+	/* Selecting private memory needs an unplug, which needs hot-remove. */
+	if (attr == &dev_attr_private.attr &&
+	    (!IS_ENABLED(CONFIG_NUMA) || !IS_ENABLED(CONFIG_MEMORY_HOTREMOVE)))
+		return 0;
+	return attr->mode;
+}
+
+static const struct attribute_group dev_dax_kmem_group = {
+	.attrs = dev_dax_kmem_attrs,
+	.is_visible = dev_dax_kmem_visible,
+};
+__ATTRIBUTE_GROUPS(dev_dax_kmem);
 
 static struct dax_device_driver device_dax_kmem_driver = {
 	.probe = dev_dax_kmem_probe,

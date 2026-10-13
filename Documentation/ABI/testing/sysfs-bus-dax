@@ -175,3 +175,22 @@ Description:
 		A device can only be onlined from the "unplugged" state, so a
 		device must be returned to "unplugged" before it can be onlined
 		into a different state.
+
+What:		/sys/bus/dax/devices/daxX.Y/private
+Date:		October, 2026
+Contact:	nvdimm@lists.linux.dev
+Description:
+		(RW) Select private memory when a device is bound to kmem.
+		Accepts boolean values and defaults to 0. The value can only
+		change while state is "unplugged", before memory blocks exist.
+		The attribute is hidden without CONFIG_NUMA or
+		CONFIG_MEMORY_HOTREMOVE.
+
+		With private=1, the next online enables userspace NUMA
+		placement, together with the reclaim and compaction it
+		requires. The memory is excluded from ordinary allocations
+		and from other memory management services.
+
+		Userspace can bind anonymous and shmem-backed mappings to it
+		with a single-node mbind() policy using
+		(MPOL_BIND | MPOL_F_PRIVATE_NODES).
