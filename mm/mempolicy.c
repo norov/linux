@@ -419,6 +419,18 @@ static int mpol_new_preferred(struct mempolicy *pol, const nodemask_t *nodes)
 }
 
 /*
+ * Policies are rebound over the cpuset's nodes other than private ones. A node
+ * removed since the remap base was recorded keeps its position.
+ */
+static void mpol_rebindable_mems(nodemask_t *dst, const nodemask_t *nodes)
+{
+	nodes_andnot(*dst, *nodes, node_states[N_MEMORY_NOALLOC]);
+	/* Cpusets keep common memory in every effective mask. */
+	if (WARN_ON_ONCE(nodes_empty(*dst)))
+		*dst = *nodes;
+}
+
+/*
  * mpol_set_nodemask is called after mpol_new() to set up the nodemask, if
  * any, for the new policy.  mpol_new() has already validated the nodes
  * parameter with respect to the policy mode and flags.
@@ -453,7 +465,8 @@ static int mpol_set_nodemask(struct mempolicy *pol,
 	if (mpol_store_user_nodemask(pol))
 		pol->w.user_nodemask = *nodes;
 	else
-		pol->w.cpuset_mems_allowed = cpuset_current_mems_allowed;
+		mpol_rebindable_mems(&pol->w.cpuset_mems_allowed,
+				     &cpuset_current_mems_allowed);
 
 	ret = mpol_ops[pol->mode].create(pol, &nsc->mask2);
 	return ret;
@@ -528,20 +541,22 @@ static void mpol_rebind_default(struct mempolicy *pol, const nodemask_t *nodes)
 
 static void mpol_rebind_nodemask(struct mempolicy *pol, const nodemask_t *nodes)
 {
-	nodemask_t tmp;
+	nodemask_t tmp, allowed;
 
-	if (pol->flags & MPOL_F_STATIC_NODES)
-		nodes_and(tmp, pol->w.user_nodemask, *nodes);
-	else if (pol->flags & MPOL_F_RELATIVE_NODES)
-		mpol_relative_nodemask(&tmp, &pol->w.user_nodemask, nodes);
-	else {
+	mpol_rebindable_mems(&allowed, nodes);
+
+	if (pol->flags & MPOL_F_STATIC_NODES) {
+		nodes_and(tmp, pol->w.user_nodemask, allowed);
+	} else if (pol->flags & MPOL_F_RELATIVE_NODES) {
+		mpol_relative_nodemask(&tmp, &pol->w.user_nodemask, &allowed);
+	} else {
 		nodes_remap(tmp, pol->nodes, pol->w.cpuset_mems_allowed,
-								*nodes);
-		pol->w.cpuset_mems_allowed = *nodes;
+			    allowed);
+		pol->w.cpuset_mems_allowed = allowed;
 	}
 
 	if (nodes_empty(tmp))
-		tmp = *nodes;
+		tmp = allowed;
 
 	pol->nodes = tmp;
 }
@@ -549,7 +564,7 @@ static void mpol_rebind_nodemask(struct mempolicy *pol, const nodemask_t *nodes)
 static void mpol_rebind_preferred(struct mempolicy *pol,
 						const nodemask_t *nodes)
 {
-	pol->w.cpuset_mems_allowed = *nodes;
+	mpol_rebindable_mems(&pol->w.cpuset_mems_allowed, nodes);
 }
 
 /*
@@ -561,10 +576,13 @@ static void mpol_rebind_preferred(struct mempolicy *pol,
  */
 static void mpol_rebind_policy(struct mempolicy *pol, const nodemask_t *newmask)
 {
+	nodemask_t mems;
+
 	if (!pol || pol->mode == MPOL_LOCAL)
 		return;
+	mpol_rebindable_mems(&mems, newmask);
 	if (!mpol_store_user_nodemask(pol) &&
-	    nodes_equal(pol->w.cpuset_mems_allowed, *newmask))
+	    nodes_equal(pol->w.cpuset_mems_allowed, mems))
 		return;
 
 	mpol_ops[pol->mode].rebind(pol, newmask);
