@@ -2452,7 +2452,7 @@ bool madvise_free_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 
 	folio = pmd_folio(orig_pmd);
 
-	if (!folio_is_common_memory(folio))
+	if (!folio_allows_reclaim(folio))
 		goto out;
 
 	/*

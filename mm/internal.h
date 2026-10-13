@@ -77,6 +77,13 @@ static inline bool page_is_common_memory(struct page *page)
 	return folio_is_common_memory(page_folio(page));
 }
 
+/* May reclaim act on this folio's memory? */
+static inline bool folio_allows_reclaim(struct folio *folio)
+{
+	return !folio_is_zone_device(folio) &&
+	       node_state(folio_nid(folio), N_MEMORY_RECLAIM);
+}
+
 /* mm/vmscan.c */
 unsigned long zone_reclaimable_pages(struct zone *zone);
 unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
