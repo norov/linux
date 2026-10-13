@@ -4059,16 +4059,20 @@ __alloc_pages_cpuset_fallback(gfp_t gfp_mask, unsigned int order,
 	return page;
 }
 
-/* A request on the private zonelist. */
+/* A private request, or a nodemask that names a private node. */
 static bool alloc_is_private(const struct alloc_context *ac)
 {
-	return ac->alloc_flags & ALLOC_ZONELIST_PRIVATE;
+	if (ac->alloc_flags & ALLOC_ZONELIST_PRIVATE)
+		return true;
+	return ac->nodemask &&
+	       nodes_intersects(*ac->nodemask, node_states[N_MEMORY_NOALLOC]);
 }
 
 /*
- * Whether a private request can still allocate: some node in its zonelist is
- * in its nodemask and allowed by the cpuset. Any zone type counts, so neither a
- * GFP zone restriction nor an exhausted node makes the request unsatisfiable.
+ * Whether a request that names private memory can still allocate: some node in
+ * its zonelist is in its nodemask and allowed by the cpuset. Any zone type
+ * counts, so neither a GFP zone restriction nor an exhausted node makes the
+ * request unsatisfiable.
  */
 static bool alloc_private_reachable(gfp_t gfp, const struct alloc_context *ac)
 {
@@ -4076,7 +4080,7 @@ static bool alloc_private_reachable(gfp_t gfp, const struct alloc_context *ac)
 	struct zone *zone;
 
 	/* A strict local private request keeps its allocation domain. */
-	if (gfp & __GFP_THISNODE)
+	if ((gfp & __GFP_THISNODE) && (ac->alloc_flags & ALLOC_ZONELIST_PRIVATE))
 		return true;
 
 	for_each_zone_zonelist_nodemask(zone, z, ac->zonelist, MAX_NR_ZONES - 1,
@@ -4800,10 +4804,11 @@ check_retry_cpuset(int cpuset_mems_cookie, struct alloc_context *ac)
 }
 
 /*
- * Relax a private request that can no longer allocate, because the cpuset
- * revoked its node or memory hotplug removed it. Drop the nodemask and allocate
- * from the common zonelist of the preferred node. Called after
- * check_retry_cpuset() and check_retry_zonelist() found no concurrent update.
+ * Relax a request that names private memory but can no longer allocate,
+ * because the cpuset revoked its node or memory hotplug removed it or made it
+ * private. Drop the nodemask and allocate from the common zonelist of the
+ * preferred node. Called after check_retry_cpuset() and check_retry_zonelist()
+ * found no concurrent update.
  */
 static bool relax_private_alloc(gfp_t gfp, struct alloc_context *ac)
 {
@@ -4811,8 +4816,10 @@ static bool relax_private_alloc(gfp_t gfp, struct alloc_context *ac)
 		return false;
 
 	ac->nodemask = NULL;
-	ac->alloc_flags &= ~ALLOC_ZONELIST_PRIVATE;
-	ac->zonelist = node_zonelist(ac->preferred_nid, gfp);
+	if (ac->alloc_flags & ALLOC_ZONELIST_PRIVATE) {
+		ac->alloc_flags &= ~ALLOC_ZONELIST_PRIVATE;
+		ac->zonelist = node_zonelist(ac->preferred_nid, gfp);
+	}
 	return true;
 }
 
