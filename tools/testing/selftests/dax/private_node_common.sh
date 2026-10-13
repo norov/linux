@@ -12,6 +12,7 @@
 
 DAX_BASE=/sys/bus/dax/devices
 NODE_BASE=/sys/devices/system/node
+CGROOT=/sys/fs/cgroup
 
 # Whether nodelist $1 (e.g. "0-2,4") contains node $2.
 pn_nodelist_has()
@@ -211,4 +212,31 @@ pn_setup()
 		return 0
 	done
 	pn_skip_or_fail "no private kmem device"
+}
+
+# Set COMMON to the first $1 nodes with common memory.
+pn_find_common_nodes()
+{
+	local node nid
+
+	COMMON=()
+	for node in "$NODE_BASE"/node[0-9]*; do
+		nid=${node##*node}
+		pn_node_in "$nid" has_memory || continue
+		COMMON+=("$nid")
+		[ "${#COMMON[@]}" = "$1" ] && return 0
+	done
+	pn_skip "requires $1 common memory node(s)"
+}
+
+# The helper tools pass node masks as a single unsigned long.
+pn_require_mask_nodes()
+{
+	local nid bits
+
+	bits=$(getconf LONG_BIT)
+	for nid in "$@"; do
+		[ "$nid" -lt "$bits" ] ||
+			pn_skip "node $nid does not fit the helper node mask"
+	done
 }
