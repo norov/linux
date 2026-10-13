@@ -1,2 +1,3 @@
 # SPDX-License-Identifier: GPL-2.0-only
 kmem_private_policy_tool
+kmem_private_rebind_tool

@@ -240,3 +240,35 @@ pn_require_mask_nodes()
 			pn_skip "node $nid does not fit the helper node mask"
 	done
 }
+
+# Create cgroup $1 with the cpuset controller enabled and all CPUs.
+pn_cpuset_cgroup()
+{
+	[ "$(stat -fc %T "$CGROOT" 2>/dev/null)" = cgroup2fs ] ||
+		pn_skip "requires cgroup v2"
+	grep -qw cpuset "$CGROOT/cgroup.controllers" 2>/dev/null ||
+		pn_skip "cpuset controller unavailable"
+	if ! grep -qw cpuset "$CGROOT/cgroup.subtree_control"; then
+		echo +cpuset > "$CGROOT/cgroup.subtree_control" 2>/dev/null ||
+			pn_skip "cannot enable cpuset controller"
+		PN_CPUSET_ENABLED=1
+	fi
+	if ! mkdir "$1" ||
+	   ! cat "$CGROOT/cpuset.cpus.effective" > "$1/cpuset.cpus"; then
+		ktap_exit_fail_msg "cannot create $1"
+	fi
+}
+
+# Remove the cgroups $@ made by pn_cpuset_cgroup(), and the cpuset
+# controller if it enabled it.
+pn_cpuset_cleanup()
+{
+	local cg
+
+	for cg in "$@"; do
+		[ -d "$cg" ] && rmdir "$cg" 2>/dev/null
+	done
+	[ -n "${PN_CPUSET_ENABLED:-}" ] || return 0
+	PN_CPUSET_ENABLED=
+	echo -cpuset > "$CGROOT/cgroup.subtree_control" 2>/dev/null
+}
