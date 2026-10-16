@@ -6636,6 +6636,21 @@ static void consider_reclaim_throttle(pg_data_t *pgdat, struct scan_control *sc)
 		reclaim_throttle(pgdat, VMSCAN_THROTTLE_NOPROGRESS);
 }
 
+/* Whether shrink_zones() reaches @nid through @zonelist. */
+static bool zonelist_reaches_node(struct zonelist *zonelist, int nid,
+				  struct scan_control *sc)
+{
+	struct zoneref *z;
+	struct zone *zone;
+
+	for_each_zone_zonelist_nodemask(zone, z, zonelist, sc->reclaim_idx,
+					sc->nodemask) {
+		if (zone_to_nid(zone) == nid)
+			return true;
+	}
+	return false;
+}
+
 /*
  * This is the direct reclaim path, for page-allocating processes.  We only
  * try to reclaim pages from zones which will satisfy the caller's allocation
@@ -6651,6 +6666,7 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 	gfp_t orig_mask;
 	pg_data_t *last_pgdat = NULL;
 	pg_data_t *first_pgdat = NULL;
+	int nid;
 
 	/*
 	 * If the number of buffer_heads in the machine exceeds the maximum
@@ -6706,6 +6722,14 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 		shrink_node(zone->zone_pgdat, sc);
 	}
 
+	/* A cgroup's memory may be on nodes that are not on the zonelist. */
+	if (cgroup_reclaim(sc)) {
+		for_each_node_state(nid, N_MEMORY_RECLAIM) {
+			if (!zonelist_reaches_node(zonelist, nid, sc))
+				shrink_node(NODE_DATA(nid), sc);
+		}
+	}
+
 	if (first_pgdat)
 		consider_reclaim_throttle(first_pgdat, sc);
 
@@ -6754,6 +6778,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	pg_data_t *last_pgdat;
 	struct zoneref *z;
 	struct zone *zone;
+	int nid;
 retry:
 	delayacct_freepages_start();
 
@@ -6788,6 +6813,21 @@ retry:
 
 			lruvec = mem_cgroup_lruvec(sc->target_mem_cgroup,
 						   zone->zone_pgdat);
+			clear_bit(LRUVEC_CGROUP_CONGESTED, &lruvec->flags);
+		}
+	}
+
+	/*
+	 * Also cover the nodes shrink_zones() reclaimed beyond the zonelist.
+	 * Finishing a zonelist node again is harmless.
+	 */
+	if (cgroup_reclaim(sc)) {
+		for_each_node_state(nid, N_MEMORY_RECLAIM) {
+			struct lruvec *lruvec;
+
+			snapshot_refaults(sc->target_mem_cgroup, NODE_DATA(nid));
+			lruvec = mem_cgroup_lruvec(sc->target_mem_cgroup,
+						   NODE_DATA(nid));
 			clear_bit(LRUVEC_CGROUP_CONGESTED, &lruvec->flags);
 		}
 	}
@@ -7038,7 +7078,8 @@ unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
 	/*
 	 * Traverse the ZONELIST_FALLBACK zonelist of the current node to put
 	 * equal pressure on all the nodes. This is based on the assumption that
-	 * the reclaim does not bail out early.
+	 * the reclaim does not bail out early. shrink_zones() also visits the
+	 * nodes that permit reclaim and are not on the zonelist.
 	 */
 	struct zonelist *zonelist = node_zonelist(numa_node_id(), sc.gfp_mask);
 
