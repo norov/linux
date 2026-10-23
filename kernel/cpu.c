@@ -3106,6 +3106,10 @@ EXPORT_SYMBOL(__num_online_cpus);
 #ifdef CONFIG_PREFERRED_CPU
 struct cpumask __cpu_preferred_mask __read_mostly;
 EXPORT_SYMBOL_GPL(__cpu_preferred_mask);
+
+/* Serialize policy drivers; acquire inside cpus_read_lock(). */
+DEFINE_MUTEX(cpu_preferred_mutex);
+EXPORT_SYMBOL_GPL(cpu_preferred_mutex);
 #endif
 
 void init_cpu_present(const struct cpumask *src)
