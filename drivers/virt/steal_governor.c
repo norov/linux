@@ -23,6 +23,7 @@
 #include <linux/ktime.h>
 #include <linux/math64.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/sched/isolation.h>
 #include <linux/topology.h>
 #include <linux/types.h>
@@ -139,7 +140,8 @@ static void decrease_preferred_cpus(void)
 	int target_cpu = nr_cpu_ids;
 	int cpu;
 
-	guard(cpus_read_lock)();
+	lockdep_assert_cpus_held();
+	lockdep_assert_held(&cpu_preferred_mutex);
 	cpu = cpumask_first_and(housekeeping_cpumask(HK_TYPE_KERNEL_NOISE),
 				cpu_preferred_mask);
 	if (cpu >= nr_cpu_ids)
@@ -179,7 +181,8 @@ static void increase_preferred_cpus(void)
 {
 	int first_cpu, cpu;
 
-	guard(cpus_read_lock)();
+	lockdep_assert_cpus_held();
+	lockdep_assert_held(&cpu_preferred_mutex);
 	first_cpu = cpumask_first_andnot(cpu_active_mask, cpu_preferred_mask);
 
 	/* All CPUs are preferred. Nothing to increase further */
@@ -193,6 +196,9 @@ static void increase_preferred_cpus(void)
 
 static bool preferred_cpus_valid(void)
 {
+	lockdep_assert_cpus_held();
+	lockdep_assert_held(&cpu_preferred_mutex);
+
 	if (cpumask_empty(cpu_preferred_mask)) {
 		pr_err("empty preferred mask. stopping\n");
 		return false;
@@ -212,6 +218,9 @@ static void steal_governor_loop(struct work_struct *work)
 {
 	u64 curr_steal, delta_steal, delta_ns, steal_ratio;
 	ktime_t now;
+
+	guard(cpus_read_lock)();
+	guard(mutex)(&cpu_preferred_mutex);
 
 	now = ktime_get();
 	delta_ns = ktime_to_ns(ktime_sub(now, sg_ctx.time));
@@ -238,8 +247,6 @@ static void steal_governor_loop(struct work_struct *work)
 	 * module restores to active if CPU hotplug breaks those assumptions.
 	 */
 	if (!preferred_cpus_valid()) {
-		guard(cpus_read_lock)();
-
 		reset_preferred_cpumask();
 		return;
 	}
@@ -276,6 +283,8 @@ static void __exit steal_governor_exit(void)
 {
 	disable_delayed_work_sync(&sg_ctx.work);
 	guard(cpus_read_lock)();
+	guard(mutex)(&cpu_preferred_mutex);
+
 	reset_preferred_cpumask();
 	pr_info("disabled\n");
 }

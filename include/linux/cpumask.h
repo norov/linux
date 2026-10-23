@@ -124,6 +124,14 @@ extern struct cpumask __cpu_dying_mask;
 
 #ifdef CONFIG_PREFERRED_CPU
 extern struct cpumask __cpu_preferred_mask;
+
+/*
+ * Drivers must take cpus_read_lock() before cpu_preferred_mutex and
+ * hold both across mask validation and updates. If cpus_write_lock()
+ * is held, it guarantees the exclusive access to the mask, thus
+ * holding cpu_preferred_mutex isn't necessary.
+ */
+extern struct mutex cpu_preferred_mutex;
 #else
 #define __cpu_preferred_mask __cpu_active_mask
 #endif
@@ -1199,7 +1207,8 @@ void init_cpu_possible(const struct cpumask *src);
  * reset_preferred_cpumask - reset preferred CPUs to the active mask.
  *
  * Callers must serialize against CPU hotplug and other preferred cpumask
- * writers.
+ * writers. Requires cpus_read_lock() and cpu_preferred_mutex; or
+ * cpus_write_lock().
  */
 static inline void reset_preferred_cpumask(void)
 {

@@ -166,3 +166,8 @@ unsigned int cpumask_any_distribute(const struct cpumask *srcp)
 	return next;
 }
 EXPORT_SYMBOL(cpumask_any_distribute);
+
+#ifdef CONFIG_PREFERRED_CPU
+DEFINE_MUTEX(cpu_preferred_mutex);
+EXPORT_SYMBOL_GPL(cpu_preferred_mutex);
+#endif
