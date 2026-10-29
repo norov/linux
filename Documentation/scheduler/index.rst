@@ -24,6 +24,7 @@ Scheduler
     sched-ext
     sched-debug
     sched-paravirt
+    preferred-cpu-thermal
     sched-preemption
 
     text_files
