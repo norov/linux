@@ -196,5 +196,19 @@ config SCHED_CLASS_EXT
 	    https://github.com/sched-ext/scx
 
 config PREFERRED_CPU
-	bool
+	bool "Preferred CPU scheduling"
 	depends on SMP && HAVE_CPUTIME_STEAL
+	help
+	  Hint the fair scheduler to favor a subset of active CPUs.
+	  Non-preferred CPUs remain online and can still run tasks
+	  if their affinity requires it.
+
+	  Preferred CPUs can be selected through the per-CPU preferred
+	  sysfs attribute or managed by a kernel module, like steal
+	  governor, to reduce CPU contention in virtual machines.
+
+	  See Documentation/scheduler/sched-paravirt.rst and
+	  Documentation/ABI/testing/sysfs-devices-system-cpu-preferred
+	  for details.
+
+	  If unsure, say N.

@@ -5,6 +5,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/cpu.h>
@@ -145,6 +146,75 @@ static DEVICE_ATTR(release, S_IWUSR, NULL, cpu_release_store);
 #endif /* CONFIG_ARCH_CPU_PROBE_RELEASE */
 #endif /* CONFIG_HOTPLUG_CPU */
 
+#ifdef CONFIG_PREFERRED_CPU
+static ssize_t preferred_cpu_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	ssize_t ret;
+
+	/* CPU removal drains active sysfs callbacks with cpus_write_lock held. */
+	if (!cpus_read_trylock())
+		return -EAGAIN;
+
+	mutex_lock(&cpu_preferred_mutex);
+	ret = sysfs_emit(buf, "%u\n", cpu_preferred(dev->id));
+	mutex_unlock(&cpu_preferred_mutex);
+
+	cpus_read_unlock();
+	return ret;
+}
+
+static ssize_t preferred_cpu_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count)
+{
+	unsigned int cpu = dev->id;
+	bool preferred;
+	int ret;
+
+	ret = kstrtobool(buf, &preferred);
+	if (ret)
+		return ret;
+
+	/* CPU removal drains active sysfs callbacks with cpus_write_lock held. */
+	if (!cpus_read_trylock())
+		return -EAGAIN;
+
+	mutex_lock(&cpu_preferred_mutex);
+
+	ret = -EBUSY;
+	if (!preferred_cpumask_owned_by(NULL))
+		goto out;
+
+	ret = -EINVAL;
+	if (preferred && !cpu_active(cpu))
+		goto out;
+
+	if (!preferred && cpu_preferred(cpu) &&
+	    cpumask_weight(cpu_preferred_mask) == 1)
+		goto out;
+
+	set_cpu_preferred(cpu, preferred);
+	ret = count;
+out:
+	mutex_unlock(&cpu_preferred_mutex);
+	cpus_read_unlock();
+	return ret;
+}
+
+static struct device_attribute dev_attr_cpu_preferred =
+	__DEVICE_ATTR(preferred, 0644, preferred_cpu_show, preferred_cpu_store);
+
+static struct attribute *preferred_cpu_attrs[] = {
+	&dev_attr_cpu_preferred.attr,
+	NULL
+};
+
+static const struct attribute_group preferred_cpu_attr_group = {
+	.attrs = preferred_cpu_attrs,
+};
+#endif /* CONFIG_PREFERRED_CPU */
+
 #ifdef CONFIG_CRASH_DUMP
 #include <linux/kexec.h>
 
@@ -190,6 +260,9 @@ static const struct attribute_group crash_note_cpu_attr_group = {
 #endif
 
 static const struct attribute_group *common_cpu_attr_groups[] = {
+#ifdef CONFIG_PREFERRED_CPU
+	&preferred_cpu_attr_group,
+#endif
 #ifdef CONFIG_CRASH_DUMP
 	&crash_note_cpu_attr_group,
 #endif
@@ -197,6 +270,9 @@ static const struct attribute_group *common_cpu_attr_groups[] = {
 };
 
 static const struct attribute_group *hotplugable_cpu_attr_groups[] = {
+#ifdef CONFIG_PREFERRED_CPU
+	&preferred_cpu_attr_group,
+#endif
 #ifdef CONFIG_CRASH_DUMP
 	&crash_note_cpu_attr_group,
 #endif

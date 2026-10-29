@@ -1,0 +1,42 @@
+What:		/sys/devices/system/cpu/cpu[0-9]*/preferred
+Date:		October 2026
+Contact:	Yury Norov <yury.norov@gmail.com>
+Description:
+		Control whether a CPU is preferred for fair tasks placement.
+		Reads 1 if this CPU is preferred, 0 otherwise. Fair tasks
+		whose allowed CPUs contain no preferred CPU can still run on
+		active non-preferred CPUs. Other scheduling classes are
+		unaffected.
+
+		As for the online attribute, boolean spellings such as 1/0, y/n
+		or on/off are accepted to set the preferred status of the CPU.
+
+		Writes change a system-wide fair tasks placement preference
+		without changing task affinities, cpuset settings or CPU
+		online state. Cpuset constraints continue to bound task
+		placement. Use cpusets to constrain a workload's eligible CPUs
+		or create exclusive CPU partitions.
+
+		This attribute does not reserve CPUs or configure tick
+		suppression, RCU offloading or interrupt affinity.
+
+		Selecting an inactive CPU, deselecting the last preferred CPU,
+		or writing an invalid boolean fails with EINVAL without changing
+		the mask. Writing the current value is a no-op. Writes across
+		all CPUs are serialized. To replace a selection, select new CPUs
+		before deselecting the old ones.
+
+		Reads and writes may fail with EAGAIN if CPU hotplug is in
+		progress. Retry the operation in that case.
+
+		The list of preferred CPUs can be found in:
+
+			/sys/devices/system/cpu/preferred.
+
+		CPU hotplug sets the status of new active CPU as preferred, and
+		deactivated CPUs become non-preferred. Offlining the last
+		preferred CPU resets the status such that all remaining active
+		CPUs become preferred; and emits a notice in the kernel log.
+
+		Writes fail with EBUSY if the preferred cpumask is claimed by a
+		kernel module. Reads remain available while the mask is claimed.

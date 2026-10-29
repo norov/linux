@@ -42,13 +42,25 @@ This is achieved by:
 ``/sys/devices/system/cpu/preferred`` prints the current ``cpu_preferred_mask``
 in cpulist format.
 
+Userspace governors may control preferred cpumask through the sysfs
+interface similar to CPU hotplug::
+
+    echo 0 > /sys/devices/system/cpu/cpu1/preferred
+    echo 1 > /sys/devices/system/cpu/cpu1/preferred
+
+If ``cpu_preferred_mask`` is claimed by a kernel module, an attempt to
+write would return EBUSY. Disabling the last preferred CPU or enabling
+non-active CPU in the preferred mask is not allowed, and EINVAL would
+be returned.
+
 Notes:
 
 1. This feature is available under ``CONFIG_PREFERRED_CPU``. Driver which
    makes decisions should enable it. For example, steal_governor driver
    (``CONFIG_STEAL_GOVERNOR``). On enabling the driver, CPU preferred state
-   can change based on steal time. Without the driver, preferred CPUs is
-   same as active CPUs. Only one governor may be enabled at a time.
+   can change based on steal time. Preferred CPUs mirror active cpumask unless
+   modified by governor or via sysfs. Only one governor may be enabled at a
+   time.
 
 2. This feature works for the FAIR class only.
 
@@ -56,8 +68,8 @@ Notes:
    to run based on its affinity. But no load balancing happens if it is affined
    only on non-preferred CPUs.
 
-4. Decision to change the preferred CPU state is driven by the kernel.
-   Hence it shouldn't break user affinities. One of the main reasons why
+4. Decision to change the preferred CPU state is driven by the governor
+   and does not break user affinities. One of the main reasons why
    CPU hotplug or Isolated cpuset partitions was not a solution.
 
 5. This feature works best only when all the Guest VMs enable the feature as

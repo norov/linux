@@ -829,4 +829,5 @@ Description:
 		CPUs outside of this list may lead to performance
 		degradations due to underlying physical CPU contention.
 
-		See Documentation/scheduler/sched-paravirt.rst for more details.
+		See Documentation/ABI/testing/sysfs-devices-system-cpu-preferred
+		and  Documentation/scheduler/sched-paravirt.rst for more details.
