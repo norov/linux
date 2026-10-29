@@ -1,0 +1,32 @@
+What:		/sys/devices/system/cpu/cpu[0-9]*/preferred
+Date:		October 2026
+Contact:	Linux kernel mailing list <linux-kernel@vger.kernel.org>
+Description:
+		Available with CONFIG_PREFERRED_CPU, including for
+		CPUs that cannot be offlined. Reads return 1 if this CPU is
+		preferred, or 0 otherwise.
+		Root may write 1 to select the CPU or 0 to deselect it.
+		Input is parsed with kstrtobool(), as for the online attribute;
+		boolean spellings such as y/n and on/off are also accepted.
+
+		Selecting an inactive CPU, deselecting the last preferred CPU,
+		or writing an invalid boolean fails with EINVAL without changing
+		the mask. Writing
+		the current value is a no-op, except selecting an inactive CPU
+		is always rejected.
+
+		Writes across all CPUs are serialized with each other, the steal
+		governor, and CPU hotplug. To replace a selection, select new CPUs
+		before deselecting the old ones. The full mask can still be read from
+		/sys/devices/system/cpu/preferred.
+
+		CPU hotplug may subsequently change the mask: newly active CPUs
+		become preferred, and deactivated CPUs cease to be preferred.
+		Offlining the last preferred CPU makes all remaining active CPUs
+		preferred and emits a notice in the kernel log.
+
+		Manual control can be used together with STEAL_GOVERNOR. Manual writes
+		change the current mask, not a persistent constraint on the
+		governor: subsequent samples may change the selection again.
+		Unloading the steal governor restores all active CPUs as
+		preferred.

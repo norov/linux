@@ -42,6 +42,23 @@ This is achieved by:
 ``/sys/devices/system/cpu/preferred`` prints the current ``cpu_preferred_mask``
 in cpulist format.
 
+Manual selection is available with ``CONFIG_PREFERRED_CPU``
+(which can coexist with ``CONFIG_STEAL_GOVERNOR``). Write ``1`` or ``0`` to a CPU's ``preferred`` attribute as root, for example::
+
+    echo 1 > /sys/devices/system/cpu/cpu1/preferred
+    echo 0 > /sys/devices/system/cpu/cpu0/preferred
+
+Only active CPUs can be selected, and the last preferred CPU cannot be
+deselected. The attribute is available even for CPUs without an ``online``
+attribute. The aggregate ``/sys/devices/system/cpu/preferred`` remains
+read-only.
+
+Manual writes and steal governor updates are serialized. Manual selections
+are not persistent constraints: subsequent governor samples may change them.
+
+See ``Documentation/ABI/testing/sysfs-devices-system-cpu-preferred`` for the
+interface and CPU hotplug semantics.
+
 Notes:
 
 1. This feature is available under ``CONFIG_PREFERRED_CPU``. Driver which
