@@ -8712,6 +8712,14 @@ int sched_cpu_deactivate(unsigned int cpu)
 
 	set_cpu_active(cpu, false);
 
+#ifdef CONFIG_PREFERRED_CPU
+	if (cpumask_empty(cpu_preferred_mask)) {
+		pr_notice("sched: last preferred CPU%u offlined; make all active CPUs preferred\n",
+			  cpu);
+		reset_preferred_cpumask();
+	}
+#endif
+
 	/*
 	 * From this point forward, this CPU will refuse to run any task that
 	 * is not: migrate_disable() or KTHREAD_IS_PER_CPU, and will actively
