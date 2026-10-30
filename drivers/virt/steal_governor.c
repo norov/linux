@@ -50,15 +50,6 @@ static struct steal_governor sg_ctx = {
 	.low_threshold	=	200,	/* 2% */
 };
 
-static void restore_preferred_to_active(void)
-{
-	int cpu;
-
-	guard(cpus_read_lock)();
-	for_each_cpu(cpu, cpu_active_mask)
-		set_cpu_preferred(cpu, true);
-}
-
 static int param_set_interval_ms(const char *val, const struct kernel_param *kp)
 {
 	unsigned int interval;
@@ -252,7 +243,8 @@ static void steal_governor_loop(struct work_struct *work)
 	 * module restores to active if CPU hotplug breaks those assumptions.
 	 */
 	if (!preferred_cpus_valid()) {
-		restore_preferred_to_active();
+		scoped_guard(cpus_read_lock)
+			reset_preferred_cpumask();
 		return;
 	}
 
@@ -288,7 +280,8 @@ static int __init steal_governor_init(void)
 static void __exit steal_governor_exit(void)
 {
 	disable_delayed_work_sync(&sg_ctx.work);
-	restore_preferred_to_active();
+	scoped_guard(cpus_read_lock)
+		reset_preferred_cpumask();
 	pr_info("disabled\n");
 }
 
