@@ -1195,6 +1195,19 @@ void init_cpu_possible(const struct cpumask *src);
 #define set_cpu_preferred(cpu, preferred) do { } while (0)
 #endif
 
+/**
+ * reset_preferred_cpumask - reset preferred CPUs to the active mask.
+ *
+ * Callers must serialize against CPU hotplug and other preferred cpumask
+ * writers.
+ */
+static inline void reset_preferred_cpumask(void)
+{
+#ifdef CONFIG_PREFERRED_CPU
+	cpumask_copy(&__cpu_preferred_mask, cpu_active_mask);
+#endif
+}
+
 void set_cpu_online(unsigned int cpu, bool online);
 void set_cpu_possible(unsigned int cpu, bool possible);
 
