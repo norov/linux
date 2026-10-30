@@ -148,7 +148,7 @@ static void decrease_preferred_cpus(void)
 	/* Always leave first housekeeping core as preferred. */
 	first_hk_core = topology_sibling_cpumask(cpu);
 	cpu = cpumask_last(cpu_preferred_mask);
-	if (cpu >= nr_cpu_ids)
+	if (WARN_ON(cpu >= nr_cpu_ids))
 		return;
 
 	/* Find the last CPU which doesn't belong to that first hk_core. */
@@ -193,9 +193,11 @@ static void increase_preferred_cpus(void)
 
 static bool preferred_cpus_valid(void)
 {
-	if (cpumask_empty(cpu_preferred_mask)) {
-		pr_err("empty preferred mask. stopping\n");
-		return false;
+	guard(cpus_read_lock)();
+
+	if (WARN_ON(cpumask_empty(cpu_preferred_mask))) {
+		reset_preferred_cpumask();
+		return true;
 	}
 
 	if (!cpumask_subset(cpu_preferred_mask, cpu_active_mask)) {
@@ -238,10 +240,8 @@ static void steal_governor_loop(struct work_struct *work)
 		decrease_preferred_cpus();
 	else if (steal_ratio <= sg_ctx.low_threshold)
 		increase_preferred_cpus();
-	/*
-	 * else: steal ratio is within bounds. Still do design checks so that
-	 * module restores to active if CPU hotplug breaks those assumptions.
-	 */
+
+	/* Validate the mask even when the steal ratio is within bounds. */
 	if (!preferred_cpus_valid()) {
 		scoped_guard(cpus_read_lock)
 			reset_preferred_cpumask();
