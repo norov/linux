@@ -142,6 +142,11 @@ static void decrease_preferred_cpus(void)
 
 	lockdep_assert_cpus_held();
 	lockdep_assert_held(&cpu_preferred_mutex);
+
+	/* We can't end up with no preferred CPUs under normal conditions. */
+	if (WARN_ON(cpumask_empty(cpu_preferred_mask)))
+		return;
+
 	cpu = cpumask_first_and(housekeeping_cpumask(HK_TYPE_KERNEL_NOISE),
 				cpu_preferred_mask);
 	if (cpu >= nr_cpu_ids)
@@ -150,8 +155,6 @@ static void decrease_preferred_cpus(void)
 	/* Always leave first housekeeping core as preferred. */
 	first_hk_core = topology_sibling_cpumask(cpu);
 	cpu = cpumask_last(cpu_preferred_mask);
-	if (cpu >= nr_cpu_ids)
-		return;
 
 	/* Find the last CPU which doesn't belong to that first hk_core. */
 	if (!cpumask_test_cpu(cpu, first_hk_core)) {
@@ -246,7 +249,7 @@ static void steal_governor_loop(struct work_struct *work)
 	 * else: steal ratio is within bounds. Still do design checks so that
 	 * module restores to active if CPU hotplug breaks those assumptions.
 	 */
-	if (!preferred_cpus_valid()) {
+	if (WARN_ON(!preferred_cpus_valid())) {
 		reset_preferred_cpumask();
 		return;
 	}
