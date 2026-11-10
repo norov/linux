@@ -132,6 +132,14 @@ extern struct cpumask __cpu_preferred_mask;
  * holding cpu_preferred_mutex isn't necessary.
  */
 extern struct mutex cpu_preferred_mutex;
+
+/*
+ * Drivers must claim exclusive ownership of cpu_preferred_mask
+ * for the whole period of operation.
+ */
+int claim_preferred_cpumask(const void *owner);
+void release_preferred_cpumask(const void *owner);
+bool preferred_cpumask_owned_by(const void *owner);
 #else
 #define __cpu_preferred_mask __cpu_active_mask
 #endif

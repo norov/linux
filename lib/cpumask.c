@@ -3,8 +3,10 @@
 #include <linux/kernel.h>
 #include <linux/bitops.h>
 #include <linux/cpumask.h>
+#include <linux/cpuhplock.h>
 #include <linux/export.h>
 #include <linux/memblock.h>
+#include <linux/mutex.h>
 #include <linux/numa.h>
 
 /* These are not inline because of header tangles. */
@@ -170,4 +172,64 @@ EXPORT_SYMBOL(cpumask_any_distribute);
 #ifdef CONFIG_PREFERRED_CPU
 DEFINE_MUTEX(cpu_preferred_mutex);
 EXPORT_SYMBOL_GPL(cpu_preferred_mutex);
+
+static const void *preferred_cpumask_owner;
+
+/**
+ * preferred_cpumask_owned_by - test preferred CPU policy ownership
+ * @owner: policy identity
+ *
+ * Return: true if @owner holds the policy, false otherwise.
+ */
+bool preferred_cpumask_owned_by(const void *owner)
+{
+	lockdep_assert_held(&cpu_preferred_mutex);
+
+	return preferred_cpumask_owner == owner;
+}
+EXPORT_SYMBOL_GPL(preferred_cpumask_owned_by);
+
+/**
+ * claim_preferred_cpumask - acquire exclusive preferred CPU policy ownership
+ * @owner: non-NULL identity that remains valid until ownership is released
+ *
+ * Call before starting policy work, normally on module init.
+ *
+ * Return: 0 on success, -EBUSY if claimed, or -EINVAL for a NULL identity.
+ */
+int claim_preferred_cpumask(const void *owner)
+{
+	if (!owner)
+		return -EINVAL;
+
+	guard(cpus_read_lock)();
+	guard(mutex)(&cpu_preferred_mutex);
+
+	if (preferred_cpumask_owner)
+		return -EBUSY;
+
+	preferred_cpumask_owner = owner;
+	reset_preferred_cpumask();
+	return 0;
+}
+EXPORT_SYMBOL_GPL(claim_preferred_cpumask);
+
+/**
+ * release_preferred_cpumask - release exclusive preferred CPU policy ownership
+ * @owner: identity used to claim ownership
+ *
+ * Call after stopping policy work, normally on module exit.
+ */
+void release_preferred_cpumask(const void *owner)
+{
+	guard(cpus_read_lock)();
+	guard(mutex)(&cpu_preferred_mutex);
+
+	if (WARN_ON_ONCE(!owner || !preferred_cpumask_owned_by(owner)))
+		return;
+
+	reset_preferred_cpumask();
+	preferred_cpumask_owner = NULL;
+}
+EXPORT_SYMBOL_GPL(release_preferred_cpumask);
 #endif

@@ -291,6 +291,10 @@ static int __init steal_governor_init(void)
 	}
 
 	INIT_DELAYED_WORK(&sg_ctx.work, steal_governor_loop);
+	ret = claim_preferred_cpumask(&sg_ctx);
+	if (ret)
+		return ret;
+
 	/* Lock to prevent unobserved hotplug event during setup. */
 	scoped_guard(cpus_read_lock) {
 		sg_ctx.steal = get_system_steal_time();
@@ -301,8 +305,10 @@ static int __init steal_governor_init(void)
 							 hotplug_callback,
 							 hotplug_callback);
 	}
-	if (ret < 0)
+	if (ret < 0) {
+		release_preferred_cpumask(&sg_ctx);
 		return ret;
+	}
 	sg_ctx.hp_state = ret;
 
 	schedule_delayed_work(&sg_ctx.work, sg_ctx.delay);
@@ -316,10 +322,7 @@ static void __exit steal_governor_exit(void)
 {
 	disable_delayed_work_sync(&sg_ctx.work);
 	cpuhp_remove_state_nocalls(sg_ctx.hp_state);
-	guard(cpus_read_lock)();
-	guard(mutex)(&cpu_preferred_mutex);
-
-	reset_preferred_cpumask();
+	release_preferred_cpumask(&sg_ctx);
 	pr_info("disabled\n");
 }
 

@@ -48,7 +48,7 @@ Notes:
    makes decisions should enable it. For example, steal_governor driver
    (``CONFIG_STEAL_GOVERNOR``). On enabling the driver, CPU preferred state
    can change based on steal time. Without the driver, preferred CPUs is
-   same as active CPUs.
+   same as active CPUs. Only one governor may be enabled at a time.
 
 2. This feature works for the FAIR class only.
 
