@@ -1585,6 +1585,9 @@ int __ref free_area_init_core_hotplug(struct pglist_data *pgdat)
 	pgdat->node_start_pfn = 0;
 	pgdat->node_present_pages = 0;
 
+	/* memory is common unless marked private */
+	pgdat->memory_features = NODE_MEMORY_FEAT_ALL;
+
 	/*
 	 * Hot-unplug can leave per-cpu vmstat deltas unfolded (folders skip
 	 * offline nodes) - reconcile this at online. Foreign access to counters
@@ -1743,6 +1746,8 @@ static void __init free_area_init_node(int nid)
 
 	pgdat->node_id = nid;
 	pgdat->node_start_pfn = start_pfn;
+	/* memory is common unless marked private */
+	pgdat->memory_features = NODE_MEMORY_FEAT_ALL;
 
 	if (start_pfn != end_pfn) {
 		pr_info("Initmem setup node %d [mem %#018Lx-%#018Lx]\n", nid,

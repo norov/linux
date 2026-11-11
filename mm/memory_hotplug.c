@@ -1196,8 +1196,14 @@ int online_pages(unsigned long pfn, unsigned long nr_pages,
 	online_pages_range(pfn, nr_pages);
 	adjust_present_page_count(pfn_to_page(pfn), group, nr_pages);
 
-	if (node_arg.nid >= 0)
-		node_set_state(nid, N_MEMORY);
+	if (node_arg.nid >= 0) {
+		unsigned long features = NODE_DATA(nid)->memory_features;
+
+		if (features & NODE_MEMORY_FEAT_ALLOC)
+			node_set_state(nid, N_MEMORY);
+		else
+			node_set_state(nid, N_MEMORY_NOALLOC);
+	}
 	/*
 	 * Check whether we are adding normal memory to the node for the first
 	 * time.

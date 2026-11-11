@@ -549,6 +549,18 @@ static __always_inline int node_random(const nodemask_t *maskp)
 #define for_each_online_node(node) for_each_node_state(node, N_ONLINE)
 #define for_each_node_with_cpus(node)	for_each_node_state(node, N_CPU)
 
+/* Private nodes omit NODE_MEMORY_FEAT_ALLOC. */
+#define NODE_MEMORY_FEAT_ALLOC		BIT(0) /* add to fallback zonelist */
+#define NODE_MEMORY_FEAT_ALL		NODE_MEMORY_FEAT_ALLOC
+
+/* Private memory needs NUMA: node 0 holds all memory without it. */
+static inline bool node_memory_features_valid(unsigned long features)
+{
+	if (features & ~NODE_MEMORY_FEAT_ALL)
+		return false;
+	return IS_ENABLED(CONFIG_NUMA) || (features & NODE_MEMORY_FEAT_ALLOC);
+}
+
 /*
  * For nodemask scratch area.
  * NODEMASK_ALLOC(type, name) allocates an object with a specified type and
