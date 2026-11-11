@@ -14,6 +14,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/cleanup.h>
+#include <linux/cpuhotplug.h>
 #include <linux/cpuhplock.h>
 #include <linux/cpumask.h>
 #include <linux/init.h>
@@ -42,6 +43,8 @@ struct steal_governor {
 	unsigned long		delay;
 	unsigned int		high_threshold;
 	unsigned int		low_threshold;
+	int			hp_state;
+	bool			sample_invalidated;
 	struct delayed_work	work;
 };
 
@@ -217,6 +220,13 @@ static bool preferred_cpus_valid(void)
 	return true;
 }
 
+static int hotplug_callback(unsigned int cpu)
+{
+	sg_ctx.sample_invalidated = true;
+	mod_delayed_work(system_percpu_wq, &sg_ctx.work, 0);
+	return 0;
+}
+
 static void steal_governor_loop(struct work_struct *work)
 {
 	u64 curr_steal, delta_steal, delta_ns, steal_ratio;
@@ -232,6 +242,11 @@ static void steal_governor_loop(struct work_struct *work)
 	delta_steal = curr_steal > sg_ctx.steal ? curr_steal - sg_ctx.steal : 0;
 	sg_ctx.steal = curr_steal;
 	sg_ctx.time = now;
+
+	if (sg_ctx.sample_invalidated) {
+		sg_ctx.sample_invalidated = false;
+		goto requeue_work;
+	}
 
 	/*
 	 * steal_ratio = (delta_steal * 100*100)/(delta_ns * num_cpus())
@@ -254,11 +269,14 @@ static void steal_governor_loop(struct work_struct *work)
 		return;
 	}
 
-	schedule_delayed_work(&sg_ctx.work, sg_ctx.delay);
+requeue_work:
+	mod_delayed_work(system_percpu_wq, &sg_ctx.work, sg_ctx.delay);
 }
 
 static int __init steal_governor_init(void)
 {
+	int ret;
+
 #ifdef CONFIG_XEN
 	if (xen_initial_domain()) {
 		pr_err("Cannot load in Xen Dom0 (Host OS). Driver is for guests only.\n");
@@ -273,8 +291,20 @@ static int __init steal_governor_init(void)
 	}
 
 	INIT_DELAYED_WORK(&sg_ctx.work, steal_governor_loop);
-	sg_ctx.steal = get_system_steal_time();
-	sg_ctx.time = ktime_get();
+	/* Lock to prevent unobserved hotplug event during setup. */
+	scoped_guard(cpus_read_lock) {
+		sg_ctx.steal = get_system_steal_time();
+		sg_ctx.time = ktime_get();
+		sg_ctx.sample_invalidated = false;
+		ret = cpuhp_setup_state_nocalls_cpuslocked(CPUHP_AP_ONLINE_DYN,
+							 "virt/steal_governor:online",
+							 hotplug_callback,
+							 hotplug_callback);
+	}
+	if (ret < 0)
+		return ret;
+	sg_ctx.hp_state = ret;
+
 	schedule_delayed_work(&sg_ctx.work, sg_ctx.delay);
 	pr_info("enabled. interval: %ums, high_threshold: %u, low_threshold: %u\n",
 		jiffies_to_msecs(sg_ctx.delay), sg_ctx.high_threshold, sg_ctx.low_threshold);
@@ -285,6 +315,7 @@ static int __init steal_governor_init(void)
 static void __exit steal_governor_exit(void)
 {
 	disable_delayed_work_sync(&sg_ctx.work);
+	cpuhp_remove_state_nocalls(sg_ctx.hp_state);
 	guard(cpus_read_lock)();
 	guard(mutex)(&cpu_preferred_mutex);
 
