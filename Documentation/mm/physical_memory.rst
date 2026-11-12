@@ -181,6 +181,12 @@ nodes with particular properties as defined by ``enum node_states``:
 ``N_GENERIC_INITIATOR``
   The node has one or more Generic Initiators
 
+The following states are internal and not exported through sysfs:
+
+``N_MEMORY_COMPACTION``
+  The kernel compacts the node on its own initiative (kcompactd, proactive
+  and explicit compaction).
+
 For each node that has a property described above, the bit corresponding to the
 node ID in the ``node_states[<property>]`` bitmask is set.
 
@@ -192,6 +198,7 @@ For example, for node 2 with normal memory and CPUs, bit 2 will be set in ::
   node_states[N_HIGH_MEMORY]
   node_states[N_MEMORY]
   node_states[N_CPU]
+  node_states[N_MEMORY_COMPACTION]
 
 For various operations possible with nodemasks please refer to
 ``include/linux/nodemask.h``.

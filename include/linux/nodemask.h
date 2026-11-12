@@ -403,6 +403,8 @@ enum node_states {
 	N_MEMORY_NOALLOC,	/* memory requiring an explicit private request */
 	N_CPU,		/* The node has one or more cpus */
 	N_GENERIC_INITIATOR,	/* The node has one or more Generic Initiators */
+	/* Internal states, not exported through sysfs */
+	N_MEMORY_COMPACTION,	/* mm compaction may operate on the node */
 	NR_NODE_STATES
 };
 
@@ -549,16 +551,26 @@ static __always_inline int node_random(const nodemask_t *maskp)
 #define for_each_online_node(node) for_each_node_state(node, N_ONLINE)
 #define for_each_node_with_cpus(node)	for_each_node_state(node, N_CPU)
 
-/* Private nodes omit NODE_MEMORY_FEAT_ALLOC. */
+/*
+ * Private nodes omit NODE_MEMORY_FEAT_ALLOC. Their providers opt into
+ * individual MM services with the remaining bits.
+ */
 #define NODE_MEMORY_FEAT_ALLOC		BIT(0) /* add to fallback zonelist */
-#define NODE_MEMORY_FEAT_ALL		NODE_MEMORY_FEAT_ALLOC
+#define NODE_MEMORY_FEAT_COMPACTION	BIT(1) /* mm compaction */
+#define NODE_MEMORY_FEAT_ALL		(NODE_MEMORY_FEAT_ALLOC | \
+					 NODE_MEMORY_FEAT_COMPACTION)
 
-/* Private memory needs NUMA: node 0 holds all memory without it. */
+/*
+ * Common memory carries every feature. Private memory needs NUMA: node 0
+ * holds all memory without it.
+ */
 static inline bool node_memory_features_valid(unsigned long features)
 {
 	if (features & ~NODE_MEMORY_FEAT_ALL)
 		return false;
-	return IS_ENABLED(CONFIG_NUMA) || (features & NODE_MEMORY_FEAT_ALLOC);
+	if (features & NODE_MEMORY_FEAT_ALLOC)
+		return features == NODE_MEMORY_FEAT_ALL;
+	return IS_ENABLED(CONFIG_NUMA);
 }
 
 /*

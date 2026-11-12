@@ -998,8 +998,9 @@ void __init node_dev_init(void)
 {
 	int ret, i;
 
- 	BUILD_BUG_ON(ARRAY_SIZE(node_state_attr) != NR_NODE_STATES);
- 	BUILD_BUG_ON(ARRAY_SIZE(node_state_attrs)-1 != NR_NODE_STATES);
+	/* Node states after N_GENERIC_INITIATOR have no sysfs file. */
+	BUILD_BUG_ON(ARRAY_SIZE(node_state_attr) != N_GENERIC_INITIATOR + 1);
+	BUILD_BUG_ON(ARRAY_SIZE(node_state_attrs)-1 != N_GENERIC_INITIATOR + 1);
 
 	ret = subsys_system_register(&node_subsys, cpu_root_attr_groups);
 	if (ret)
