@@ -1958,6 +1958,8 @@ static int kernel_migrate_pages(pid_t pid, unsigned long maxnode,
 	}
 
 	task_nodes = cpuset_mems_allowed(current);
+	/* Private memory is not a migration destination. */
+	nodes_andnot(task_nodes, task_nodes, node_states[N_MEMORY_NOALLOC]);
 	if (!nodes_and(*new, *new, task_nodes))
 		goto out_put;
 
