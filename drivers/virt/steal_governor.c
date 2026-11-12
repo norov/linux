@@ -216,11 +216,6 @@ static void steal_governor_loop(struct work_struct *work)
 	now = ktime_get();
 	delta_ns = ktime_to_ns(ktime_sub(now, sg_ctx.time));
 
-	if (unlikely(delta_ns < NSEC_PER_MSEC)) {
-		pr_err_ratelimited("work scheduled too soon delta_ns: %llu\n", delta_ns);
-		goto requeue_work;
-	}
-
 	curr_steal = get_system_steal_time();
 	delta_steal = curr_steal > sg_ctx.steal ? curr_steal - sg_ctx.steal : 0;
 	sg_ctx.steal = curr_steal;
@@ -249,7 +244,6 @@ static void steal_governor_loop(struct work_struct *work)
 		return;
 	}
 
-requeue_work:
 	schedule_delayed_work(&sg_ctx.work, sg_ctx.delay);
 }
 
