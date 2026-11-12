@@ -317,7 +317,12 @@ static unsigned long global_dirtyable_memory(void)
 {
 	unsigned long x;
 
-	x = nr_free_pages();
+	/*
+	 * Free private memory serves only private bindings and migration.
+	 * File pages that reach private memory are counted with the file
+	 * LRU below.
+	 */
+	x = common_free_pages();
 	/*
 	 * Pages reserved for the kernel should not be considered
 	 * dirtyable, to prevent a situation where reclaim has to

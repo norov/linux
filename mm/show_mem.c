@@ -46,17 +46,18 @@ long si_mem_available(void)
 
 	/*
 	 * Estimate the amount of memory available for userspace allocations,
-	 * without causing swapping or OOM.
+	 * without causing swapping or OOM. Only free common memory serves
+	 * ordinary allocations.
 	 */
-	available = nr_free_pages() - totalreserve_pages;
+	available = common_free_pages() - totalreserve_pages;
 
 	/*
 	 * Not all the page cache can be freed, otherwise the system will
 	 * start swapping or thrashing. Assume at least half of the page
 	 * cache, or the low watermark worth of cache, needs to stay.
 	 */
-	pagecache = global_node_page_state(NR_ACTIVE_FILE) +
-		global_node_page_state(NR_INACTIVE_FILE);
+	/* Reclaiming file pages on private nodes frees only private memory. */
+	pagecache = common_file_pages();
 	pagecache -= min(pagecache / 2, wmark_low);
 	available += pagecache;
 
@@ -88,6 +89,21 @@ unsigned long nr_free_pages(void)
 	for_each_node_state(nid, N_MEMORY_NOALLOC) {
 		if (!node_memory_is_general_purpose(nid))
 			nr -= min(nr, sum_zone_node_page_state(nid, NR_FREE_PAGES));
+	}
+	return nr;
+}
+
+/* Free pages on common nodes, the free memory ordinary allocations can use. */
+unsigned long common_free_pages(void)
+{
+	unsigned long nr = global_zone_page_state(NR_FREE_PAGES);
+	int nid;
+
+	if (!IS_ENABLED(CONFIG_NUMA))
+		return nr;
+
+	for_each_node_state(nid, N_MEMORY_NOALLOC) {
+		nr -= min(nr, sum_zone_node_page_state(nid, NR_FREE_PAGES));
 	}
 	return nr;
 }
