@@ -840,7 +840,8 @@ static void __init kho_reserve_bootmem(void)
 	bootmem_size_update();
 
 	/* FIXME: deal with node hot-plug/remove */
-	max_nr_bootmem = nodes_weight(node_states[N_MEMORY]) + 2;
+	max_nr_bootmem = num_node_state(N_MEMORY) +
+			 num_node_state(N_MEMORY_NOALLOC) + 2;
 	size = max_nr_bootmem * sizeof(*kho_bootmem);
 	kho_bootmem = memblock_alloc(size, PAGE_SIZE);
 	if (!kho_bootmem) {
@@ -880,7 +881,7 @@ static void __init kho_reserve_bootmem(void)
 	 * Loop over nodes that have both memory and are online. Skip
 	 * memoryless nodes, as we can not allocate bootmem areas there.
 	 */
-	for_each_node_state(nid, N_MEMORY) {
+	for_each_memory_node(nid) {
 		size = bootmem_size_node(nid);
 		if (!size)
 			continue;

@@ -398,7 +398,9 @@ enum node_states {
 #else
 	N_HIGH_MEMORY = N_NORMAL_MEMORY,
 #endif
-	N_MEMORY,		/* The node has memory(regular, high, movable) */
+	/* Ordinary allocations use N_MEMORY; private nodes use N_MEMORY_NOALLOC. */
+	N_MEMORY,		/* memory on the fallback zonelists */
+	N_MEMORY_NOALLOC,	/* memory requiring an explicit private request */
 	N_CPU,		/* The node has one or more cpus */
 	N_GENERIC_INITIATOR,	/* The node has one or more Generic Initiators */
 	NR_NODE_STATES
@@ -471,9 +473,10 @@ static __always_inline void node_set_offline(int nid)
 
 #else
 
+/* Node 0 holds all memory, and none of it is private. */
 static __always_inline int node_state(int node, enum node_states state)
 {
-	return node == 0;
+	return node == 0 && state != N_MEMORY_NOALLOC;
 }
 
 static __always_inline void node_set_state(int node, enum node_states state)
@@ -486,13 +489,13 @@ static __always_inline void node_clear_state(int node, enum node_states state)
 
 static __always_inline int num_node_state(enum node_states state)
 {
-	return 1;
+	return state != N_MEMORY_NOALLOC;
 }
 
 #define for_each_node_state(node, __state) \
-	for ( (node) = 0; (node) == 0; (node) = 1)
+	for ((node) = 0; (node) == 0 && (__state) != N_MEMORY_NOALLOC; (node) = 1)
 
-#define first_node_state(state)	0
+#define first_node_state(state)	((state) == N_MEMORY_NOALLOC ? MAX_NUMNODES : 0)
 static __always_inline unsigned int next_node_state(int nid, enum node_states state)
 {
 	return MAX_NUMNODES;
@@ -507,6 +510,21 @@ static __always_inline unsigned int next_node_state(int nid, enum node_states st
 #define node_set_offline(node)	   node_clear_state((node), N_ONLINE)
 
 #endif
+
+/* Include private memory when inspecting topology or per-node accounting. */
+static inline bool node_has_memory(int nid)
+{
+	return node_state(nid, N_MEMORY) || node_state(nid, N_MEMORY_NOALLOC);
+}
+
+static inline void nodes_memory(nodemask_t *mask)
+{
+	nodes_or(*mask, node_states[N_MEMORY], node_states[N_MEMORY_NOALLOC]);
+}
+
+#define for_each_memory_node(nid) \
+	for_each_or_bit(nid, nodes_addr(node_states[N_MEMORY]), \
+			nodes_addr(node_states[N_MEMORY_NOALLOC]), MAX_NUMNODES)
 
 static __always_inline int node_random(const nodemask_t *maskp)
 {

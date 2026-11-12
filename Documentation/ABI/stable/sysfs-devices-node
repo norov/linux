@@ -15,7 +15,8 @@ Date:		December 2012
 Contact:	Linux Memory Management list <linux-mm@kvack.org>
 Description:
 		Nodes whose online memory is available to ordinary allocations
-		and kernel memory management services.
+		and kernel memory management services. Private memory nodes
+		are listed separately in has_memory_noalloc.
 
 What:		/sys/devices/system/node/has_normal_memory
 Date:		October 2002
@@ -35,6 +36,16 @@ Contact:	Linux Memory Management list <linux-mm@kvack.org>
 Description:
 		Nodes that have regular or high memory.
 		Depends on CONFIG_HIGHMEM.
+
+What:		/sys/devices/system/node/has_memory_noalloc
+Date:		November 2026
+Contact:	Linux Memory Management list <linux-mm@kvack.org>
+Description:
+		Nodes with online private memory. These are absent from has_memory.
+		Together with has_memory, this lists all nodes with online memory.
+
+		Ordinary allocations do not use memory on a node listed here.
+		See Documentation/mm/numa_private_nodes.rst.
 
 What:		/sys/devices/system/node/nodeX
 Date:		October 2002

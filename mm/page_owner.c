@@ -947,7 +947,7 @@ static ssize_t page_owner_write(struct file *file,
 	int ret;
 	struct page_owner_filter_state *state = file->private_data;
 	enum page_owner_print_mode new_print_mode;
-	nodemask_t new_nid_filter;
+	nodemask_t new_nid_filter, memory_nodes;
 	bool new_nid_filter_enabled;
 
 	/*
@@ -994,7 +994,8 @@ static ssize_t page_owner_write(struct file *file,
 			 * We want to filter memory allocations by numa nodes, so make sure
 			 * that the specified nodes have memory.
 			 */
-			if (!nodes_subset(new_nid_filter, node_states[N_MEMORY])) {
+			nodes_memory(&memory_nodes);
+			if (!nodes_subset(new_nid_filter, memory_nodes)) {
 				ret = -EINVAL;
 				goto out_free;
 			}

@@ -227,7 +227,8 @@ static inline nodemask_t cpuset_mems_allowed(struct task_struct *p)
 	return node_possible_map;
 }
 
-#define cpuset_current_mems_allowed (node_states[N_MEMORY])
+/* Without cpusets, node states and memory policies decide eligibility. */
+#define cpuset_current_mems_allowed node_possible_map
 static inline void cpuset_init_current_mems_allowed(void) {}
 
 static inline int cpuset_nodemask_valid_mems_allowed(const nodemask_t *nodemask)
@@ -308,7 +309,7 @@ static inline bool read_mems_allowed_retry(unsigned int seq)
 
 static inline void cpuset_nodes_allowed(struct cgroup *cgroup, nodemask_t *mask)
 {
-	nodes_copy(*mask, node_states[N_MEMORY]);
+	nodes_memory(mask);
 }
 #endif /* !CONFIG_CPUSETS */
 

@@ -4054,7 +4054,7 @@ unlock:
  *
  * This function is called after either CPU or memory configuration has
  * changed and updates cpuset accordingly.  The top_cpuset is always
- * synchronized to cpu_active_mask and N_MEMORY, which is necessary in
+ * synchronized to cpu_active_mask and all memory nodes, which is necessary in
  * order to make cpusets transparent (of no affect) on systems that are
  * actively using CPU hotplug but making no active use of cpusets.
  *
@@ -4085,7 +4085,7 @@ static void cpuset_handle_hotplug(void)
 
 	/* fetch the available cpus/mems and find out which changed how */
 	cpumask_copy(&new_cpus, cpu_active_mask);
-	new_mems = node_states[N_MEMORY];
+	nodes_memory(&new_mems);
 
 	/*
 	 * If subpartitions_cpus is populated, it is likely that the check
@@ -4121,7 +4121,7 @@ static void cpuset_handle_hotplug(void)
 		/* we don't mess with cpumasks of tasks in top_cpuset */
 	}
 
-	/* synchronize mems_allowed to N_MEMORY */
+	/* synchronize mems_allowed to all memory nodes */
 	if (mems_updated) {
 		spin_lock_irq(&callback_lock);
 		if (!on_dfl)
@@ -4186,8 +4186,8 @@ void cpuset_update_active_cpus(void)
 }
 
 /*
- * Keep top_cpuset.mems_allowed tracking node_states[N_MEMORY].
- * Call this routine anytime after node_states[N_MEMORY] changes.
+ * Keep top_cpuset.mems_allowed tracking ordinary and private memory nodes.
+ * Call this routine anytime after either memory node state changes.
  * See cpuset_update_active_cpus() for CPU hotplug handling.
  */
 static int cpuset_track_online_nodes(struct notifier_block *self,
@@ -4212,7 +4212,7 @@ void __init cpuset_init_smp(void)
 	top_cpuset.old_mems_allowed = top_cpuset.mems_allowed;
 
 	cpumask_copy(top_cpuset.effective_cpus, cpu_active_mask);
-	top_cpuset.effective_mems = node_states[N_MEMORY];
+	nodes_memory(&top_cpuset.effective_mems);
 
 	hotplug_node_notifier(cpuset_track_online_nodes, CPUSET_CALLBACK_PRI);
 
@@ -4363,7 +4363,7 @@ void __init cpuset_init_current_mems_allowed(void)
  *
  * Description: Returns the nodemask_t mems_allowed of the cpuset
  * attached to the specified @tsk.  Guaranteed to return some non-empty
- * subset of node_states[N_MEMORY], even if this means going outside the
+ * subset of the online memory nodes, even if this means going outside the
  * tasks cpuset.
  **/
 
@@ -4494,7 +4494,7 @@ bool cpuset_current_node_allowed(int node, gfp_t gfp_mask)
  * @mask: pointer to struct nodemask_t to be returned.
  *
  * Returns effective_mems mask from a cgroup cpuset if it is cgroup v2 and
- * has cpuset subsys. Otherwise, returns node_states[N_MEMORY].
+ * has cpuset subsys. Otherwise, returns all online memory nodes.
  *
  * This function intentionally avoids taking the cpuset_mutex or callback_lock
  * when accessing effective_mems. This is because the obtained effective_mems
@@ -4517,13 +4517,13 @@ void cpuset_nodes_allowed(struct cgroup *cgroup, nodemask_t *mask)
 	 * so return directly to avoid taking a global lock on the empty check.
 	 */
 	if (!cgroup || !cpuset_v2()) {
-		nodes_copy(*mask, node_states[N_MEMORY]);
+		nodes_memory(mask);
 		return;
 	}
 
 	css = cgroup_get_e_css(cgroup, &cpuset_cgrp_subsys);
 	if (!css) {
-		nodes_copy(*mask, node_states[N_MEMORY]);
+		nodes_memory(mask);
 		return;
 	}
 

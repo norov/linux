@@ -1161,7 +1161,7 @@ int online_pages(unsigned long pfn, unsigned long nr_pages,
 	move_pfn_range_to_zone(zone, pfn, nr_pages, NULL, MIGRATE_MOVABLE,
 			       true);
 
-	if (!node_state(nid, N_MEMORY)) {
+	if (!node_has_memory(nid)) {
 		/* Adding memory to the node for the first time */
 		node_arg.nid = nid;
 		ret = node_notify(NODE_ADDING_FIRST_MEMORY, &node_arg);
@@ -2062,7 +2062,7 @@ int offline_pages(unsigned long start_pfn, unsigned long nr_pages,
 	/*
 	 * Check whether the node will have no present pages after we offline
 	 * 'nr_pages' more. If so, we know that the node will become empty, and
-	 * so we will clear N_MEMORY for it.
+	 * so we will clear its memory states.
 	 */
 	if (nr_pages >= pgdat->node_present_pages) {
 		node_arg.nid = node;
@@ -2153,8 +2153,8 @@ int offline_pages(unsigned long start_pfn, unsigned long nr_pages,
 
 	/*
 	 * Check whether this operation removes the last normal memory from
-	 * the node. We do this before clearing N_MEMORY to avoid the possible
-	 * transient "!N_MEMORY && N_NORMAL_MEMORY" state.
+	 * the node. Clear this before the ordinary/private memory state so
+	 * normal memory is never reported on a memoryless node.
 	 */
 	if (zone_idx(zone) <= ZONE_NORMAL) {
 		for (zt = 0; zt <= ZONE_NORMAL; zt++)
@@ -2166,8 +2166,10 @@ int offline_pages(unsigned long start_pfn, unsigned long nr_pages,
 	 * Make sure to mark the node as memory-less before rebuilding the zone
 	 * list. Otherwise this node would still appear in the fallback lists.
 	 */
-	if (node_arg.nid >= 0)
+	if (node_arg.nid >= 0) {
+		node_clear_state(node, N_MEMORY_NOALLOC);
 		node_clear_state(node, N_MEMORY);
+	}
 	if (!populated_zone(zone)) {
 		zone_pcp_reset(zone);
 		build_all_zonelists(NULL);

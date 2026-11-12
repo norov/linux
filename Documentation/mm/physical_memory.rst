@@ -170,6 +170,12 @@ nodes with particular properties as defined by ``enum node_states``:
 ``N_MEMORY``
   The node has online memory (regular, high, movable) available to ordinary
   allocations and kernel memory management services.
+``N_MEMORY_NOALLOC``
+  The node has online private memory that ordinary allocations cannot use.
+  It is absent from the fallback zonelists. Drivers can enable individual
+  memory management services and explicit userspace placement on these nodes.
+  This set is disjoint from ``N_MEMORY``; their union contains all nodes
+  with online memory.
 ``N_CPU``
   The node has one or more CPUs
 ``N_GENERIC_INITIATOR``

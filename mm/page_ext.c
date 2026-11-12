@@ -452,7 +452,7 @@ void __init page_ext_init(void)
 	if (!invoke_need_callbacks())
 		return;
 
-	for_each_node_state(nid, N_MEMORY) {
+	for_each_memory_node(nid) {
 		unsigned long start_pfn, end_pfn;
 
 		start_pfn = node_start_pfn(nid);
