@@ -84,6 +84,13 @@ static inline bool folio_allows_reclaim(struct folio *folio)
 	       node_state(folio_nid(folio), N_MEMORY_RECLAIM);
 }
 
+/* May userspace NUMA operations act on this folio's memory? */
+static inline bool folio_allows_mempolicy(struct folio *folio)
+{
+	return !folio_is_zone_device(folio) &&
+	       node_state(folio_nid(folio), N_MEMORY_MEMPOLICY);
+}
+
 /* mm/vmscan.c */
 unsigned long zone_reclaimable_pages(struct zone *zone);
 unsigned long try_to_free_pages(struct zonelist *zonelist, int order,

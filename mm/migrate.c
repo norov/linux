@@ -2287,7 +2287,7 @@ static int __add_folio_for_migration(struct folio *folio, int node,
 	if (is_zero_folio(folio) || is_huge_zero_folio(folio))
 		return -EFAULT;
 
-	if (!folio_is_common_memory(folio))
+	if (!folio_allows_mempolicy(folio))
 		return -ENOENT;
 
 	if (folio_nid(folio) == node)

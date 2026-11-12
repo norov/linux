@@ -2687,8 +2687,14 @@ static void cpuset_migrate_mm_workfn(struct work_struct *work)
 {
 	struct cpuset_migrate_mm_work *mwork =
 		container_of(work, struct cpuset_migrate_mm_work, work);
+	nodemask_t retained;
 
-	/* Private nodes are never migration destinations. */
+	/*
+	 * Private nodes are never migration destinations. Evacuate private
+	 * memory only from nodes the cpuset no longer allows.
+	 */
+	nodes_and(retained, mwork->to, node_states[N_MEMORY_NOALLOC]);
+	nodes_andnot(mwork->from, mwork->from, retained);
 	nodes_andnot(mwork->to, mwork->to, node_states[N_MEMORY_NOALLOC]);
 	/* on a wq worker, no need to worry about %current's mems_allowed */
 	do_migrate_pages(mwork->mm, &mwork->from, &mwork->to, MPOL_MF_MOVE_ALL);
