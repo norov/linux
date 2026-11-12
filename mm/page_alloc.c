@@ -2947,6 +2947,7 @@ static bool free_frozen_page_commit(struct zone *zone,
 		 * kswapd work again by resetting kswapd_failures.
 		 */
 		if (kswapd_test_hopeless(pgdat) &&
+		    node_state(pgdat->node_id, N_MEMORY) &&
 		    num_node_state(N_MEMORY) > 1)
 			kswapd_clear_hopeless(pgdat, KSWAPD_CLEAR_HOPELESS_PCP);
 	}
@@ -6796,8 +6797,8 @@ static void __setup_per_zone_wmarks(void)
 		u64 tmp;
 
 		spin_lock_irqsave(&zone->lock, flags);
-		/* No kswapd runs for a private node to restore watermarks. */
-		if (node_state(zone_to_nid(zone), N_MEMORY_NOALLOC)) {
+		/* Nodes that reclaim does not serve carry no watermarks. */
+		if (!node_state(zone_to_nid(zone), N_MEMORY_RECLAIM)) {
 			zone->_watermark[WMARK_MIN] = 0;
 			zone->_watermark[WMARK_LOW] = 0;
 			zone->_watermark[WMARK_HIGH] = 0;
@@ -6808,11 +6809,13 @@ static void __setup_per_zone_wmarks(void)
 		}
 		tmp = (u64)pages_min * zone_managed_pages(zone);
 		tmp = div64_ul(tmp, lowmem_pages);
-		if (is_highmem(zone) || zone_idx(zone) == ZONE_MOVABLE) {
+		if (is_highmem(zone) || zone_idx(zone) == ZONE_MOVABLE ||
+		    node_state(zone_to_nid(zone), N_MEMORY_NOALLOC)) {
 			/*
 			 * __GFP_HIGH and PF_MEMALLOC allocations usually don't
 			 * need highmem and movable zones pages, so cap pages_min
-			 * to a small  value here.
+			 * to a small  value here. Private memory holds no system
+			 * reserve, only this small minimum.
 			 *
 			 * The WMARK_HIGH-WMARK_LOW and (WMARK_LOW-WMARK_MIN)
 			 * deltas control async page reclaim, and so should

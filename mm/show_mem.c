@@ -38,8 +38,11 @@ long si_mem_available(void)
 	unsigned long reclaimable;
 	struct zone *zone;
 
-	for_each_zone(zone)
-		wmark_low += low_wmark_pages(zone);
+	/* Only common zones bound the page cache and slab that must stay. */
+	for_each_zone(zone) {
+		if (!node_state(zone_to_nid(zone), N_MEMORY_NOALLOC))
+			wmark_low += low_wmark_pages(zone);
+	}
 
 	/*
 	 * Estimate the amount of memory available for userspace allocations,
