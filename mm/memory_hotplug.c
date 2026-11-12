@@ -1215,6 +1215,8 @@ int online_pages(unsigned long pfn, unsigned long nr_pages,
 			node_set_state(nid, N_MEMORY_COMPACTION);
 		if (features & NODE_MEMORY_FEAT_RECLAIM)
 			node_set_state(nid, N_MEMORY_RECLAIM);
+		if (features & NODE_MEMORY_FEAT_MEMPOLICY)
+			node_set_state(nid, N_MEMORY_MEMPOLICY);
 	}
 	/*
 	 * Check whether we are adding normal memory to the node for the first
@@ -2185,6 +2187,7 @@ int offline_pages(unsigned long start_pfn, unsigned long nr_pages,
 	 * list. Otherwise this node would still appear in the fallback lists.
 	 */
 	if (node_arg.nid >= 0) {
+		node_clear_state(node, N_MEMORY_MEMPOLICY);
 		node_clear_state(node, N_MEMORY_RECLAIM);
 		node_clear_state(node, N_MEMORY_COMPACTION);
 		node_clear_state(node, N_MEMORY_NOALLOC);
