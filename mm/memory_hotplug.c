@@ -1240,7 +1240,7 @@ int online_pages(unsigned long pfn, unsigned long nr_pages,
 
 	if (node_state(nid, N_MEMORY))
 		kswapd_run(nid);
-	if (node_state(nid, N_MEMORY))
+	if (node_state(nid, N_MEMORY_COMPACTION))
 		kcompactd_run(nid);
 
 	if (node_arg.nid >= 0)
