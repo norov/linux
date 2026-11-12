@@ -3038,6 +3038,9 @@ static ssize_t compact_store(struct device *dev,
 	int nid = dev->id;
 
 	if (nid >= 0 && nid < nr_node_ids && node_online(nid)) {
+		if (node_state(nid, N_MEMORY_NOALLOC))
+			return -EOPNOTSUPP;
+
 		/* Flush pending updates to the LRU lists */
 		lru_add_drain_all();
 

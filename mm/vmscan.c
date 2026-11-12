@@ -8268,6 +8268,9 @@ static ssize_t reclaim_store(struct device *dev,
 {
 	int ret, nid = dev->id;
 
+	if (node_state(nid, N_MEMORY_NOALLOC))
+		return -EOPNOTSUPP;
+
 	ret = user_proactive_reclaim((char *)buf, NULL, NODE_DATA(nid));
 	return ret ? ret : count;
 }
