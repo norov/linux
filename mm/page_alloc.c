@@ -7359,7 +7359,8 @@ static void __free_contig_frozen_range(unsigned long pfn, unsigned long nr_pages
  * free_frozen_pages() also could be used to free compound frozen pages
  * directly.
  *
- * Return: zero on success or negative error code.
+ * Return: zero on success or negative error code
+ *         -EPERM if the range is on a private memory node.
  */
 int alloc_contig_frozen_range_noprof(unsigned long start, unsigned long end,
 		acr_flags_t alloc_flags, gfp_t gfp_mask)
@@ -7389,6 +7390,9 @@ int alloc_contig_frozen_range_noprof(unsigned long start, unsigned long end,
 	 */
 	if (WARN_ON_ONCE((gfp_mask & __GFP_COMP) && order > MAX_FOLIO_ORDER))
 		return -EINVAL;
+
+	if (node_state(zone_to_nid(cc.zone), N_MEMORY_NOALLOC))
+		return -EPERM;
 
 	gfp_mask = current_gfp_context(gfp_mask);
 	if (__alloc_contig_verify_gfp_mask(gfp_mask, (gfp_t *)&cc.gfp_mask))
