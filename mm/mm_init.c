@@ -1933,6 +1933,7 @@ static void __init free_area_init(void)
 		if (pgdat->node_present_pages) {
 			node_set_state(nid, N_MEMORY);
 			node_set_state(nid, N_MEMORY_COMPACTION);
+			node_set_state(nid, N_MEMORY_RECLAIM);
 			check_for_memory(pgdat);
 		}
 	}

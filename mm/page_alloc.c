@@ -204,6 +204,7 @@ nodemask_t node_states[NR_NODE_STATES] __read_mostly = {
 #endif
 	[N_MEMORY] = { { [0] = 1UL } },
 	[N_MEMORY_COMPACTION] = { { [0] = 1UL } },
+	[N_MEMORY_RECLAIM] = { { [0] = 1UL } },
 	[N_CPU] = { { [0] = 1UL } },
 #endif	/* NUMA */
 };

@@ -186,6 +186,9 @@ The following states are internal and not exported through sysfs:
 ``N_MEMORY_COMPACTION``
   The kernel compacts the node on its own initiative (kcompactd, proactive
   and explicit compaction).
+``N_MEMORY_RECLAIM``
+  The kernel reclaims the node on its own initiative (kswapd, memcg and
+  explicit reclaim).
 
 For each node that has a property described above, the bit corresponding to the
 node ID in the ``node_states[<property>]`` bitmask is set.
@@ -199,6 +202,7 @@ For example, for node 2 with normal memory and CPUs, bit 2 will be set in ::
   node_states[N_MEMORY]
   node_states[N_CPU]
   node_states[N_MEMORY_COMPACTION]
+  node_states[N_MEMORY_RECLAIM]
 
 For various operations possible with nodemasks please refer to
 ``include/linux/nodemask.h``.
