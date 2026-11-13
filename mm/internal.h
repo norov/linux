@@ -62,6 +62,15 @@ void lru_add_drain_cpu_zone(struct zone *zone);
 void folio_deactivate(struct folio *folio);
 void folio_mark_lazyfree(struct folio *folio);
 
+#ifdef CONFIG_MEMORY_HOTPLUG
+bool can_claim_node_memory(int nid, unsigned long features);
+#else
+static inline bool can_claim_node_memory(int nid, unsigned long features)
+{
+	return false;
+}
+#endif
+
 /*
  * Common memory is available to generic MM services. ZONE_DEVICE folios do
  * not qualify even when their NUMA node is common.

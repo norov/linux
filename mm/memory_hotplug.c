@@ -1506,6 +1506,43 @@ out:
 	return ret;
 }
 
+static int check_no_memblock_for_node_cb(struct memory_block *mem, void *arg)
+{
+	int nid = *(int *)arg;
+
+	/*
+	 * If a memory block belongs to multiple nodes, the stored nid is not
+	 * reliable. However, such blocks are always online (e.g., cannot get
+	 * offlined) and, therefore, are still spanned by the node.
+	 */
+	return mem->nid == nid ? -EEXIST : 0;
+}
+
+/* Caller must hold the memory hotplug lock for these checks. */
+static bool node_has_memory_blocks(int nid)
+{
+	return for_each_memory_block(&nid, check_no_memblock_for_node_cb);
+}
+
+static bool node_has_system_ram(int nid)
+{
+	/* Mixed-node memory blocks are always online and covered by N_MEMORY. */
+	return node_has_memory(nid) || node_has_memory_blocks(nid);
+}
+
+/*
+ * Whether memory with @features may join @nid. Offline System RAM blocks keep
+ * the node's features until the last block is removed.
+ */
+bool can_claim_node_memory(int nid, unsigned long features)
+{
+	pg_data_t *pgdat = NODE_DATA(nid);
+
+	if (pgdat->memory_features == features)
+		return true;
+	return !node_has_system_ram(nid);
+}
+
 /*
  * NOTE: The caller must call lock_device_hotplug() to serialize hotplug
  * and online/offline operations (triggered e.g. by sysfs).
@@ -1513,11 +1550,12 @@ out:
  * we are OK calling __meminit stuff here - we have CONFIG_MEMORY_HOTPLUG
  */
 static int __add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags,
-				 enum mmop online_type)
+				 enum mmop online_type, unsigned long features)
 {
 	struct mhp_params params = { .pgprot = pgprot_mhp(PAGE_KERNEL) };
 	enum memblock_flags memblock_flags = MEMBLOCK_NONE;
 	struct memory_group *group = NULL;
+	unsigned long old_features;
 	u64 start, size;
 	bool new_node = false;
 	int ret;
@@ -1540,6 +1578,8 @@ static int __add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags,
 		WARN(1, "node %d was absent from the node_possible_map\n", nid);
 		return -EINVAL;
 	}
+	if (!node_memory_features_valid(features))
+		return -EINVAL;
 
 	mem_hotplug_begin();
 
@@ -1563,6 +1603,14 @@ static int __add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags,
 		}
 		new_node = true;
 	}
+
+	old_features = NODE_DATA(nid)->memory_features;
+	if (!can_claim_node_memory(nid, features)) {
+		ret = -EBUSY;
+		goto error;
+	}
+	/* Set the node's features before onlining its memory. */
+	WRITE_ONCE(NODE_DATA(nid)->memory_features, features);
 
 	/*
 	 * Self hosted memmap array
@@ -1609,6 +1657,8 @@ static int __add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags,
 
 	return ret;
 error:
+	/* Restore the previous features while holding the lock. */
+	WRITE_ONCE(NODE_DATA(nid)->memory_features, old_features);
 	if (new_node) {
 		node_set_offline(nid);
 		unregister_node(nid);
@@ -1624,7 +1674,8 @@ error_mem_hotplug_end:
 int add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags)
 {
 	return __add_memory_resource(nid, res, mhp_flags,
-				     mhp_get_default_online_type());
+				     mhp_get_default_online_type(),
+				     NODE_MEMORY_FEAT_ALL);
 }
 
 /* requires device_hotplug_lock, see __add_memory_resource() */
@@ -1663,6 +1714,9 @@ EXPORT_SYMBOL_GPL(add_memory);
  * @resource_name: Resource name in format "System RAM ($DRIVER)"
  * @mhp_flags: Memory hotplug flags
  * @online_type: Auto-Online behavior (offline, online, kernel, movable)
+ * @features: NODE_MEMORY_FEAT_* services the memory opts into;
+ *            %NODE_MEMORY_FEAT_ALL adds it as ordinary common system RAM,
+ *            and a mask without %NODE_MEMORY_FEAT_ALLOC as private memory.
  *
  * Add special, driver-managed memory to the system as system RAM. Such
  * memory is not exposed via the raw firmware-provided memmap as system
@@ -1689,7 +1743,7 @@ EXPORT_SYMBOL_GPL(add_memory);
  */
 int __add_memory_driver_managed(int nid, u64 start, u64 size,
 		const char *resource_name, mhp_t mhp_flags,
-		enum mmop online_type)
+		enum mmop online_type, unsigned long features)
 {
 	struct resource *res;
 	int rc;
@@ -1710,7 +1764,7 @@ int __add_memory_driver_managed(int nid, u64 start, u64 size,
 		goto out_unlock;
 	}
 
-	rc = __add_memory_resource(nid, res, mhp_flags, online_type);
+	rc = __add_memory_resource(nid, res, mhp_flags, online_type, features);
 	if (rc < 0)
 		release_memory_resource(res);
 
@@ -1739,8 +1793,8 @@ int add_memory_driver_managed(int nid, u64 start, u64 size,
 			      const char *resource_name, mhp_t mhp_flags)
 {
 	return __add_memory_driver_managed(nid, start, size, resource_name,
-			mhp_flags,
-			mhp_get_default_online_type());
+			mhp_flags, mhp_get_default_online_type(),
+			NODE_MEMORY_FEAT_ALL);
 }
 EXPORT_SYMBOL_GPL(add_memory_driver_managed);
 
@@ -1801,18 +1855,6 @@ bool mhp_range_allowed(u64 start, u64 size, bool need_mapping)
 
 #ifdef CONFIG_MEMORY_HOTREMOVE
 
-static int check_no_memblock_for_node_cb(struct memory_block *mem, void *arg)
-{
-	int nid = *(int *)arg;
-
-	/*
-	 * If a memory block belongs to multiple nodes, the stored nid is not
-	 * reliable. However, such blocks are always online (e.g., cannot get
-	 * offlined) and, therefore, are still spanned by the node.
-	 */
-	return mem->nid == nid ? -EEXIST : 0;
-}
-
 /* Caller must hold the memory hotplug lock for this check. */
 static bool node_is_memoryless(int nid)
 {
@@ -1823,12 +1865,13 @@ static bool node_is_memoryless(int nid)
 	 */
 	if (node_spanned_pages(nid))
 		return false;
+
 	/*
 	 * Offline memory blocks may not be spanned by the node yet, but they
 	 * link to it in sysfs and can be onlined later, so the node is not
 	 * memoryless while any remain.
 	 */
-	return !for_each_memory_block(&nid, check_no_memblock_for_node_cb);
+	return !node_has_memory_blocks(nid);
 }
 
 /*
@@ -2364,8 +2407,13 @@ static int try_remove_memory(u64 start, u64 size)
 
 	release_mem_region_adjustable(start, size);
 
-	if (nid != NUMA_NO_NODE)
+	if (nid != NUMA_NO_NODE) {
+		/* No System RAM left: reset the node's features. */
+		if (!node_has_system_ram(nid))
+			WRITE_ONCE(NODE_DATA(nid)->memory_features,
+				   NODE_MEMORY_FEAT_ALL);
 		try_offline_node(nid);
+	}
 
 	mem_hotplug_done();
 	return 0;
