@@ -653,6 +653,13 @@ the cpuset is preserved during these migration operations if possible.
 For example if the page was on the second valid node of the prior cpuset
 then the page will be placed on the second valid node of the new cpuset.
 
+Private memory nodes (see Documentation/mm/numa_private_nodes.rst) are
+never a migration destination. With 'cpuset.memory_migrate' set, pages
+on a private node migrate only when the cpuset no longer allows that
+node. Listing a private node in 'cpuset.mems' permits explicit private
+bindings to it, but tasks do not otherwise allocate from it. Writing a
+'cpuset.mems' that names only private nodes fails with -ENOSPC.
+
 Also if 'cpuset.memory_migrate' is set true, then if that cpuset's
 'cpuset.mems' file is modified, pages allocated to tasks in that
 cpuset, that were on nodes in the previous setting of 'cpuset.mems',

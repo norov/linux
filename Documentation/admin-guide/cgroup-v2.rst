@@ -2626,6 +2626,12 @@ Cpuset Interface Files
 	tasks within the cgroup to be migrated to the designated nodes if
 	they are currently using memory outside of the designated nodes.
 
+	Private memory nodes (see Documentation/mm/numa_private_nodes.rst)
+	are never a migration destination.  Pages on a private node are
+	migrated only when the node is removed from "cpuset.mems.effective".
+	Listing a private node in "cpuset.mems" permits explicit private
+	bindings to it, but tasks do not otherwise allocate from it.
+
 	There is a cost for this memory migration.  The migration
 	may not be complete and some memory pages may be left behind.
 	So it is recommended that "cpuset.mems" should be set properly
@@ -2652,7 +2658,12 @@ Cpuset Interface Files
 	parent cgroup that will be available to be used by this cgroup.
 	Otherwise, it should be a subset of "cpuset.mems" unless none of
 	the memory nodes listed in "cpuset.mems" can be granted.  In this
-	case, it will be treated just like an empty "cpuset.mems".
+	case, it will be treated just like an empty "cpuset.mems", except
+	that the parent's private memory nodes are left out.
+
+	If the granted nodes are all private memory nodes, the parent's
+	other memory nodes are added, so that tasks always have memory for
+	ordinary allocations.
 
 	Its value will be affected by memory nodes hotplug events.
 
