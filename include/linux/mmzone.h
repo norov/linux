@@ -1402,10 +1402,11 @@ enum {
 	ZONELIST_FALLBACK,	/* zonelist with fallback */
 #ifdef CONFIG_NUMA
 	/*
-	 * The NUMA zonelists are doubled because we need zonelists that
-	 * restrict the allocations to a single node for __GFP_THISNODE.
+	 * NUMA nodes also have local-only zonelists that restrict allocations
+	 * to a single node, for __GFP_THISNODE and for private-node access.
 	 */
 	ZONELIST_NOFALLBACK,	/* zonelist without fallback (__GFP_THISNODE) */
+	ZONELIST_PRIVATE,	/* local private-node access, no fallback */
 #endif
 	MAX_ZONELISTS
 };

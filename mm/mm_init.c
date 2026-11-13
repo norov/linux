@@ -99,7 +99,8 @@ void __init mminit_verify_zonelist(void)
 
 			/* Print information about the zonelist */
 			printk(KERN_DEBUG "mminit::zonelist %s %d:%s = ",
-				listid > 0 ? "thisnode" : "general", nid,
+				listid == 0 ? "general" :
+				listid == 1 ? "thisnode" : "private", nid,
 				zone->name);
 
 			/* Iterate the zonelist */
@@ -2706,7 +2707,7 @@ void __init mm_core_init(void)
 	init_zero_page_pfn();
 
 	/* Initializations relying on SMP setup */
-	BUILD_BUG_ON(MAX_ZONELISTS > 2);
+	BUILD_BUG_ON(MAX_ZONELISTS > 3);
 	build_all_zonelists(NULL);
 	page_alloc_init_cpuhp();
 	alloc_tag_sec_init();

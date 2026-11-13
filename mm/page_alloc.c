@@ -5990,6 +5990,8 @@ static void build_zonelists(pg_data_t *pgdat)
 	build_node_zonelist(pgdat, &node_states[N_MEMORY], ZONELIST_FALLBACK);
 	build_local_zonelist(pgdat, ZONELIST_NOFALLBACK,
 			     node_state(nid, N_MEMORY));
+	build_local_zonelist(pgdat, ZONELIST_PRIVATE,
+			     node_state(nid, N_MEMORY_NOALLOC));
 }
 
 #ifdef CONFIG_HAVE_MEMORYLESS_NODES
