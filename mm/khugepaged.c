@@ -3151,6 +3151,9 @@ void set_recommended_min_free_kbytes(void)
 	}
 
 	for_each_populated_zone(zone) {
+		if (!node_state(zone_to_nid(zone), N_MEMORY))
+			continue;
+
 		/*
 		 * We don't need to worry about fragmentation of
 		 * ZONE_MOVABLE since it only has movable pages.
