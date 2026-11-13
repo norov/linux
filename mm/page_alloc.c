@@ -6493,7 +6493,8 @@ static void setup_per_zone_lowmem_reserve(void);
 void adjust_managed_page_count(struct page *page, long count)
 {
 	atomic_long_add(count, &page_zone(page)->managed_pages);
-	totalram_pages_add(count);
+	if (node_memory_is_general_purpose(page_to_nid(page)))
+		totalram_pages_add(count);
 	setup_per_zone_lowmem_reserve();
 }
 EXPORT_SYMBOL(adjust_managed_page_count);

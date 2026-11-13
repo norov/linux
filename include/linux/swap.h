@@ -308,8 +308,8 @@ static inline swp_entry_t folio_page_swap_entry(const struct folio *folio,
 /* linux/mm/page_alloc.c */
 extern unsigned long totalreserve_pages;
 
-/* Definition of global_zone_page_state not available yet */
-#define nr_free_pages() global_zone_page_state(NR_FREE_PAGES)
+/* linux/mm/show_mem.c */
+unsigned long nr_free_pages(void);
 
 /* linux/mm/folio.c */
 void folio_add_lru(struct folio *folio);

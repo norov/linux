@@ -10,6 +10,7 @@
 #include <linux/kthread.h>
 #include <linux/memcontrol.h>
 #include <linux/mm.h>
+#include <linux/swap.h>
 #include <linux/pid.h>
 #include <linux/psi.h>
 #include <linux/sched.h>
@@ -3229,7 +3230,7 @@ static unsigned int damos_hugepage_mem_bp(void)
 	unsigned long thp, total_pages, free_pages;
 
 	total_pages = totalram_pages();
-	free_pages = global_zone_page_state(NR_FREE_PAGES);
+	free_pages = nr_free_pages();
 
 	if (total_pages <= free_pages)
 		return 10000;
@@ -3867,7 +3868,7 @@ static int damos_get_wmark_metric_value(enum damos_wmark_metric metric,
 {
 	switch (metric) {
 	case DAMOS_WMARK_FREE_MEM_RATE:
-		*metric_value = global_zone_page_state(NR_FREE_PAGES) * 1000 /
+		*metric_value = nr_free_pages() * 1000 /
 		       totalram_pages();
 		return 0;
 	default:

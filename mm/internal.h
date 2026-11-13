@@ -776,6 +776,13 @@ void set_recommended_min_free_kbytes(void);
 
 extern char * const zone_names[MAX_NR_ZONES];
 
+/* true if the node is capable of servicing general system allocations */
+static inline bool node_memory_is_general_purpose(int nid)
+{
+	return READ_ONCE(NODE_DATA(nid)->memory_features) &
+	       NODE_MEMORY_FEAT_ALLOC;
+}
+
 extern int min_free_kbytes;
 extern int defrag_mode;
 
