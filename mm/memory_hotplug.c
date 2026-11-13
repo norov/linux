@@ -782,6 +782,10 @@ struct auto_movable_stats {
 static void auto_movable_stats_account_zone(struct auto_movable_stats *stats,
 					    struct zone *zone)
 {
+	/* Private memory is outside the movable:kernel balance. */
+	if (node_state(zone_to_nid(zone), N_MEMORY_NOALLOC))
+		return;
+
 	if (zone_idx(zone) == ZONE_MOVABLE) {
 		stats->movable_pages += zone->present_pages;
 	} else {
@@ -807,6 +811,10 @@ static int auto_movable_stats_account_group(struct memory_group *group,
 	const int ratio = READ_ONCE(auto_movable_ratio);
 	struct auto_movable_group_stats *stats = arg;
 	long pages;
+
+	/* private memory is outside the movable:kernel balance. */
+	if (node_state(group->nid, N_MEMORY_NOALLOC))
+		return 0;
 
 	/*
 	 * We don't support modifying the config while the auto-movable online
