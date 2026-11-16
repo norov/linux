@@ -197,7 +197,7 @@ config SCHED_CLASS_EXT
 
 config PREFERRED_CPU
 	bool "Preferred CPU scheduling"
-	depends on SMP && HAVE_CPUTIME_STEAL
+	depends on SMP
 	help
 	  Hint the fair scheduler to favor a subset of active CPUs.
 	  Non-preferred CPUs remain online and can still run tasks
